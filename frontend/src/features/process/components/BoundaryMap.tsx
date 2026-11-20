@@ -1,0 +1,922 @@
+/**
+ * BoundaryMap — Leaflet + Geoman polygon editor for plot boundaries.
+ *
+ * Renders an OSM/Esri basemap (toggle in the top-right layers control),
+ * an optional orthomosaic XYZ overlay served by TiTiler, and lets the
+ * user draw polygons via the Geoman toolbar. Imported boundaries (from
+ * a saved version or grid generation) are rendered into the editable
+ * layer.
+ */
+
+import L, { type FeatureGroup } from "leaflet"
+import { useEffect, useRef, useState } from "react"
+import "leaflet/dist/leaflet.css"
+import { tilesDownMessage, watchTileLayer } from "@/lib/tileHealth"
+// View rotation (bearing) and its compass. Pinned to 0.2.8 (2023): newer
+// releases appeared in a burst after years without one.
+import "leaflet-rotate"
+import "@geoman-io/leaflet-geoman-free"
+import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css"
+import "./boundaryMap.css"
+import { cellTooltipHtml } from "@/features/process/lib/cellTooltip"
+
+// leaflet-rotate gives every Leaflet map in the app a compass by default;
+// only this editor asks for one (rotateControl in its options).
+L.Map.mergeOptions({ rotateControl: false })
+
+const DEFAULT_CENTER: L.LatLngTuple = [38.5, -121.7]
+const DEFAULT_ZOOM = 6
+
+const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+const ESRI_URL =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+
+export type BoundaryMapProps = {
+  features: GeoJSON.Feature[]
+  /** Changed when boundaries are loaded or imported: the map zooms to them. */
+  fitSignal?: number
+  onFeaturesChange: (features: GeoJSON.Feature[]) => void
+  /** Optional starting view; falls back to bounds of features or a default. */
+  center?: L.LatLngTuple
+  zoom?: number
+  className?: string
+  /** TiTiler XYZ template, e.g. `/titiler/cog/tiles/{z}/{x}/{y}.png?url=...` */
+  orthoTileUrl?: string
+  /** WGS84 bounds [[south, west], [north, east]] for auto-fit. */
+  orthoBounds?: [[number, number], [number, number]]
+  /** 0-1 overlay opacity (default 0.85). */
+  orthoOpacity?: number
+  /**
+   * Currently-selected blockId. The matching outer polygon renders with
+   * a highlight stroke; its grid cells render in the block's accent color
+   * at higher opacity.
+   */
+  selectedBlockId?: string | null
+  /**
+   * Fires when the user clicks an outer-boundary polygon. Pass through to
+   * lift the selected block into the parent component.
+   */
+  onSelectBlock?: (blockId: string) => void
+  /**
+   * Currently-selected cell ids. Cells in this set draw with a yellow
+   * highlight stroke so the user can see what bulk action will apply.
+   */
+  selectedCellIds?: ReadonlyArray<string>
+  /**
+   * Fires when the user clicks a grid cell. `mode` reflects the
+   * keyboard modifiers used during the click: replace (no modifier),
+   * add (shift), or toggle (cmd/ctrl).
+   */
+  onCellSelect?: (cellId: string, mode: "replace" | "toggle" | "add") => void
+  /** Fires when the user clicks the map background — used to clear cell selection. */
+  onSelectionClear?: () => void
+  /**
+   * Read-only outlines drawn over the map (e.g. stitched ground plots as the
+   * GPS places them). Not editable; clicking one reports its group.
+   */
+  overlays?: MapOverlay[]
+  onOverlayClick?: (group: string) => void
+  /**
+   * Several orthomosaics at once (e.g. one flight per treatment), each shown
+   * only inside its region (where it is nearer than any other's centre).
+   * Used instead of orthoTileUrl.
+   */
+  orthoLayers?: OrthoLayer[]
+  /** Plots (not outer boundaries) shown at all, and how strongly (0-1). */
+  showPlots?: boolean
+  plotOpacity?: number
+  /** Border positions (cells marked `border`) hidden; they stay in the data. */
+  hideBorders?: boolean
+  /** Drag a box on the map to select the plots inside it (shift: add to the selection). */
+  boxSelect?: boolean
+  onBoxSelect?: (cellIds: string[], add: boolean) => void
+  /** View rotation, degrees clockwise (north up = 0); the compass resets it. */
+  bearing?: number
+  onBearingChange?: (deg: number) => void
+}
+
+export interface OrthoLayer {
+  id: string
+  url: string
+  /** [lon, lat] polygon this layer is shown in. */
+  region: [number, number][]
+}
+
+export interface MapOverlay {
+  id: string
+  /** [lon, lat] ring. */
+  ring: [number, number][]
+  label?: string
+  /** Outlines in the same group are styled and picked together (a bed). */
+  group: string
+  highlighted?: boolean
+}
+
+/**
+ * Deterministic HSL colour from a blockId. Same id → same hue every
+ * render, so a block keeps its accent across re-renders and reloads.
+ */
+function colorForBlockId(blockId: string): string {
+  let h = 0
+  for (let i = 0; i < blockId.length; i += 1) {
+    h = (h * 31 + blockId.charCodeAt(i)) >>> 0
+  }
+  const hue = h % 360
+  return `hsl(${hue}, 75%, 45%)`
+}
+
+export function BoundaryMap({
+  features,
+  onFeaturesChange,
+  center,
+  zoom,
+  className,
+  orthoTileUrl,
+  orthoBounds,
+  orthoOpacity,
+  selectedBlockId,
+  onSelectBlock,
+  selectedCellIds,
+  onCellSelect,
+  onSelectionClear,
+  overlays,
+  onOverlayClick,
+  orthoLayers,
+  fitSignal,
+  showPlots = true,
+  plotOpacity = 1,
+  hideBorders = false,
+  boxSelect = false,
+  onBoxSelect,
+  bearing,
+  onBearingChange,
+}: BoundaryMapProps) {
+  const mapEl = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<L.Map | null>(null)
+  const resizeRef = useRef<ResizeObserver | null>(null)
+  const layerRef = useRef<FeatureGroup | null>(null)
+  const orthoLayerRef = useRef<L.TileLayer | null>(null)
+  const overlayLayerRef = useRef<L.LayerGroup | null>(null)
+  const onOverlayClickRef = useRef(onOverlayClick)
+  onOverlayClickRef.current = onOverlayClick
+  const [tilesDown, setTilesDown] = useState(false)
+  const didFitOrthoRef = useRef(false)
+  const onChangeRef = useRef(onFeaturesChange)
+  const onSelectBlockRef = useRef(onSelectBlock)
+  const onCellSelectRef = useRef(onCellSelect)
+  const onSelectionClearRef = useRef(onSelectionClear)
+  const onBoxSelectRef = useRef(onBoxSelect)
+  onBoxSelectRef.current = onBoxSelect
+  const boxSelectRef = useRef(boxSelect)
+  boxSelectRef.current = boxSelect
+  const bearingRef = useRef(bearing)
+  bearingRef.current = bearing
+  const onBearingChangeRef = useRef(onBearingChange)
+  onBearingChangeRef.current = onBearingChange
+  const featuresRef = useRef(features)
+  featuresRef.current = features
+  const hiddenRef = useRef({ showPlots, hideBorders })
+  hiddenRef.current = { showPlots, hideBorders }
+  // Mirror selectedCellIds into a ref so the Geoman drag handler can
+  // read the latest set without re-binding the listeners.
+  const selectedCellIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    selectedCellIdsRef.current = new Set(selectedCellIds ?? [])
+  }, [selectedCellIds])
+  // Timestamp of the last layer (cell/outer) click. The map's
+  // background click handler uses this to tell whether a click bubbled
+  // up from a layer it should have ignored.
+  const lastLayerClickRef = useRef<number>(0)
+  // Timestamp of the last Geoman drag-end. Some browsers fire a synthetic
+  // click event after the mouseup that ends a drag — if we let that
+  // click fire selection (and therefore a re-render), the layer rebuild
+  // would snap the just-dragged polygon back to its pre-drag coords
+  // before React has committed the drag's geometry change.
+  const lastDragEndRef = useRef<number>(0)
+  // Latest orthoTileUrl available at map-init time. Refs let the one-time
+  // init effect read the current prop without depending on it.
+  useEffect(() => {
+    onChangeRef.current = onFeaturesChange
+  }, [onFeaturesChange])
+  useEffect(() => {
+    onSelectBlockRef.current = onSelectBlock
+  }, [onSelectBlock])
+  useEffect(() => {
+    onCellSelectRef.current = onCellSelect
+  }, [onCellSelect])
+  useEffect(() => {
+    onSelectionClearRef.current = onSelectionClear
+  }, [onSelectionClear])
+  // Track the feature-count signature so we can refit the map only when
+  // polygons are added/removed — not on every pm:edit. Without this
+  // guard, dragging a vertex causes a refit that yanks the view.
+  const lastFitSignatureRef = useRef<string>("")
+  const lastFitSignalRef = useRef<number | undefined>(undefined)
+
+  // One-time map init.
+  useEffect(() => {
+    if (!mapEl.current || mapRef.current) return
+    const map = L.map(mapEl.current, {
+      center: center ?? DEFAULT_CENTER,
+      zoom: zoom ?? DEFAULT_ZOOM,
+      // The view can be turned (Shift + drag, two fingers, or the bearing
+      // controls of the editor); the compass shows north and resets it.
+      rotate: true,
+      bearing: bearingRef.current ?? 0,
+      touchRotate: true,
+      shiftKeyRotate: true,
+      rotateControl: { closeOnZeroBearing: false, position: "topright" },
+    } as L.MapOptions)
+    map.on("rotate", () => {
+      const b =
+        (map as L.Map & { getBearing?: () => number }).getBearing?.() ?? 0
+      onBearingChangeRef.current?.(Math.round(b * 10) / 10)
+    })
+
+    // Custom pane for the ortho overlay. Default tilePane has z-index 200;
+    // putting the ortho at 250 keeps it above any basemap regardless of
+    // insertion order, so toggling Esri ↔ OSM via the layers control
+    // doesn't push the ortho underneath the new basemap.
+    // Inside the rotate plugin's pane, so the ortho turns with the view and
+    // its tiles land where they belong (a pane outside it is misplaced).
+    map.createPane(
+      "orthoPane",
+      (map as L.Map & { _rotatePane?: HTMLElement })._rotatePane,
+    )
+    const orthoPaneEl = map.getPane("orthoPane")
+    if (orthoPaneEl) orthoPaneEl.style.zIndex = "250"
+
+    // OSM serves up to z19; Esri up to z19 reliably and z22 in some areas.
+    // Cap each provider at its native limit and let Leaflet upscale via
+    // maxZoom on the map itself when the user zooms further into the ortho.
+    const osm = L.tileLayer(OSM_URL, {
+      attribution: "© OpenStreetMap contributors",
+      maxNativeZoom: 19,
+      maxZoom: 24,
+    })
+    const sat = L.tileLayer(ESRI_URL, {
+      attribution: "Tiles © Esri",
+      maxNativeZoom: 19,
+      maxZoom: 24,
+    })
+    // Default to Esri satellite. The ortho query hasn't resolved at
+    // map-init time so we can't condition on its presence, and Esri is
+    // the more useful basemap regardless — when an ortho is loaded it
+    // sits on top, and when there isn't one yet the satellite imagery
+    // gives the user real geographic context to draw against. OSM is
+    // one click away via the layers control.
+    sat.addTo(map)
+    L.control
+      .layers(
+        { "Satellite (Esri)": sat, "Streets (OSM)": osm },
+        {},
+        { position: "topright", collapsed: true },
+      )
+      .addTo(map)
+
+    const editable = L.featureGroup().addTo(map)
+    layerRef.current = editable
+    mapRef.current = map
+    // Keep the map filling its box when the box changes size (the side
+    // panel opening or closing), or the new area stays grey.
+    const resize = new ResizeObserver(() => map.invalidateSize())
+    resize.observe(mapEl.current)
+    resizeRef.current = resize
+    // Expose for e2e: the field-design spec needs to inject a polygon
+    // programmatically rather than driving the Geoman toolbar over a
+    // non-deterministic ortho. The map and L are otherwise unreachable
+    // from the test runner.
+    ;(window as unknown as { __leafletMap__?: L.Map }).__leafletMap__ = map
+    ;(window as unknown as { L?: typeof L }).L = L
+
+    map.pm.addControls({
+      position: "topleft",
+      drawCircle: false,
+      drawMarker: false,
+      drawCircleMarker: false,
+      drawPolyline: false,
+      drawText: false,
+      cutPolygon: false,
+      rotateMode: false,
+    })
+    map.pm.setGlobalOptions({ layerGroup: editable })
+
+    // Rename Geoman's tool tooltips from "Layer(s)" to "Block(s)" so the
+    // UI matches the rest of the boundary-prep tool's terminology. The
+    // strings here come from Geoman's default English translation table
+    // (buttonTitles + tooltips); only the keys we want to override need
+    // to appear, but setLang requires the full object shape so we set
+    // the rest verbatim from the source. fallback = "en" keeps Geoman's
+    // built-in strings for anything we haven't named.
+    const customLang = {
+      tooltips: {
+        placeMarker: "Click to place marker",
+        firstVertex: "Click to place first vertex",
+        continueLine: "Click to continue drawing",
+        finishLine: "Click any existing marker to finish",
+        finishPoly: "Click first marker to finish",
+        finishRect: "Click to finish",
+        startCircle: "Click to place circle center",
+        finishCircle: "Click to finish circle",
+        placeCircleMarker: "Click to place circle marker",
+        placeText: "Click to place text",
+      },
+      actions: {
+        finish: "Finish",
+        cancel: "Cancel",
+        removeLastVertex: "Remove Last Vertex",
+      },
+      buttonTitles: {
+        drawMarkerButton: "Draw Marker",
+        drawPolyButton: "Draw Polygons",
+        drawLineButton: "Draw Polyline",
+        drawCircleButton: "Draw Circle",
+        drawRectButton: "Draw Rectangle",
+        editButton: "Edit Blocks",
+        dragButton: "Drag Blocks",
+        cutButton: "Cut Blocks",
+        deleteButton: "Remove Blocks",
+        drawCircleMarkerButton: "Draw Circle Marker",
+        snappingButton: "Snap dragged marker to other layers and vertices",
+        pinningButton: "Pin shared vertices together",
+        rotateButton: "Rotate Blocks",
+        drawTextButton: "Draw Text",
+        scaleButton: "Scale Blocks",
+      },
+    } as unknown as Parameters<typeof map.pm.setLang>[1]
+    map.pm.setLang("en", customLang, "en")
+
+    function emit() {
+      const out: GeoJSON.Feature[] = []
+      editable.eachLayer((layer) => {
+        const gj = (
+          layer as L.Layer & { toGeoJSON?: () => GeoJSON.Feature }
+        ).toGeoJSON?.()
+        if (gj && gj.type === "Feature") out.push(gj as GeoJSON.Feature)
+      })
+      onChangeRef.current(out)
+    }
+
+    map.on("pm:create", (e) => {
+      // pm:create fires before the new layer is in editable; add manually so
+      // the next emit() picks it up.
+      const layer = (e as { layer: L.Layer }).layer
+      if (layer && !editable.hasLayer(layer)) editable.addLayer(layer)
+      emit()
+    })
+    map.on("pm:remove", emit)
+    map.on("pm:edit", emit)
+    editable.on("pm:edit", emit)
+
+    // Drag-time highlight + group-drag. When Geoman's drag tool grabs a
+    // polygon: always paint it yellow so the user can see what they're
+    // holding. If the dragged cell is part of a multi-cell selection,
+    // also snapshot every other selected cell's coords and translate
+    // them in lockstep on pm:drag — that's how the "move the whole
+    // grid" UX works without needing a separate translate-mode toggle.
+    //
+    // After dragend, Geoman fires pm:edit, which calls emit() and
+    // rebuilds layers from React state — so the temporary in-flight
+    // setLatLngs writes are picked up naturally as one history entry.
+    let dragGroup: {
+      others: Array<{
+        layer: L.Polygon
+        baseRings: Array<Array<[number, number]>>
+      }>
+      startLatLng: { lat: number; lng: number }
+    } | null = null
+
+    function getCellId(l: L.Layer): string | null {
+      const gj = (
+        l as L.Layer & { toGeoJSON?: () => GeoJSON.Feature }
+      ).toGeoJSON?.()
+      const id = (gj?.properties as Record<string, unknown> | undefined)?.cellId
+      return typeof id === "string" ? id : null
+    }
+
+    function getRings(l: L.Polygon): Array<Array<[number, number]>> {
+      const gj = l.toGeoJSON() as GeoJSON.Feature<GeoJSON.Polygon>
+      return gj.geometry.coordinates.map((ring) =>
+        (ring as Array<[number, number]>).map(([x, y]) => [x, y]),
+      )
+    }
+
+    editable.on("pm:dragstart", (e) => {
+      lastDragEndRef.current = Date.now()
+      const layer = (e as { layer: L.Layer }).layer as L.Path
+      layer.setStyle?.({ color: "#facc15", weight: 3, fillOpacity: 0.5 })
+      const draggedId = getCellId(layer as L.Layer)
+      const sel = selectedCellIdsRef.current
+      if (!draggedId || !sel.has(draggedId) || sel.size < 2) {
+        dragGroup = null
+        return
+      }
+      const others: NonNullable<typeof dragGroup>["others"] = []
+      editable.eachLayer((other) => {
+        if (other === layer) return
+        const oid = getCellId(other)
+        if (oid && sel.has(oid)) {
+          others.push({
+            layer: other as L.Polygon,
+            baseRings: getRings(other as L.Polygon),
+          })
+        }
+      })
+      const c = (layer as L.Polygon).getBounds().getCenter()
+      dragGroup = { others, startLatLng: { lat: c.lat, lng: c.lng } }
+    })
+
+    editable.on("pm:drag", (e) => {
+      // Geoman reports the end of a drag 10 ms after the mouseup, and the
+      // browser's click on the plot comes in between: a click that close to
+      // drag movement is part of the drag, not a selection. (Taken as one, it
+      // selected the plot under the cursor and redrew every plot where it was
+      // before the drag: "they jump back and one plot is selected".)
+      lastDragEndRef.current = Date.now()
+      if (!dragGroup) return
+      const layer = (e as { layer: L.Layer }).layer as L.Polygon
+      const c = layer.getBounds().getCenter()
+      const dLat = c.lat - dragGroup.startLatLng.lat
+      const dLng = c.lng - dragGroup.startLatLng.lng
+      for (const o of dragGroup.others) {
+        const moved: L.LatLngTuple[][] = o.baseRings.map((ring) =>
+          ring.map(([x, y]) => [y + dLat, x + dLng] as L.LatLngTuple),
+        )
+        // Leaflet polygons accept LatLngs in [[ring1], [ring2], ...] shape
+        // for polygons with holes; single-ring polygons just use [ring].
+        o.layer.setLatLngs(moved.length === 1 ? moved[0] : moved)
+      }
+    })
+
+    editable.on("pm:dragend", () => {
+      dragGroup = null
+      lastDragEndRef.current = Date.now()
+      // Force-emit on dragend: Geoman's pm:edit timing varies by version
+      // and event source (map vs layer vs editable group) — calling
+      // emit() here guarantees the dragged layer's new lat/lngs land in
+      // React state before the next render cycle re-creates layers from
+      // (stale) features and snaps them back to the old position.
+      emit()
+    })
+
+    // Clicking the map background (not a polygon) clears cell selection.
+    // Cell and outer click handlers stamp this ref AND we sniff the DOM
+    // event target — Leaflet dispatches map "click" regardless of what
+    // the click originally hit, so we need both checks. The target check
+    // catches the case where the polygon click hasn't fired yet (some
+    // Leaflet versions dispatch map clicks first); the timestamp guards
+    // against synthetic clicks fired after a drag.
+    map.on("click", (ev) => {
+      const lastLayerClick = lastLayerClickRef.current
+      if (lastLayerClick && Date.now() - lastLayerClick < 300) return
+      if (Date.now() - lastDragEndRef.current < 300) return
+      const oe = (ev as L.LeafletMouseEvent).originalEvent
+      const target = oe?.target as Element | null
+      // Polygon SVG paths live inside the overlay pane. Background
+      // clicks land on the map container itself or on tile/leaflet-pane
+      // elements. If the click target is anywhere under an svg <path>
+      // that we drew, ignore it.
+      if (target?.closest?.("path")) return
+      onSelectionClearRef.current?.()
+    })
+
+    return () => {
+      // Unmounting mid-zoom leaves Leaflet's zoom-transition callback to
+      // fire against a map whose panes are already gone, throwing
+      // "Cannot read properties of undefined (reading '_leaflet_pos')"
+      // from _onZoomTransitionEnd. It's harmless to the user but it's a
+      // real uncaught pageerror — it fails the E2E console guard when a
+      // spec navigates away while the map is still animating. Stop the
+      // animation and drop the handler before tearing the map down.
+      map.off("zoomanim")
+      // `_animatingZoom` is Leaflet-internal, hence the local widening.
+      const animating = map as L.Map & { _animatingZoom?: boolean }
+      if (animating._animatingZoom) animating._animatingZoom = false
+      map.stop()
+      map.remove()
+      mapRef.current = null
+      overlayLayerRef.current = null
+      resizeRef.current?.disconnect()
+      resizeRef.current = null
+      layerRef.current = null
+      orthoLayerRef.current = null
+      didFitOrthoRef.current = false
+      const w = window as unknown as { __leafletMap__?: L.Map }
+      if (w.__leafletMap__ === map) w.__leafletMap__ = undefined
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [center, zoom])
+
+  // Manage the ortho tile layer. Re-runs on URL or opacity change.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (orthoLayerRef.current) {
+      map.removeLayer(orthoLayerRef.current)
+      orthoLayerRef.current = null
+    }
+    setTilesDown(false)
+    if (!orthoTileUrl) return
+    const opts: L.TileLayerOptions = {
+      opacity: orthoOpacity ?? 0.85,
+      // Render in the dedicated orthoPane so basemap-toggle reordering
+      // can't push the ortho beneath the new basemap.
+      pane: "orthoPane",
+      // TiTiler's tilejson reports the ortho's native max zoom; the geo
+      // worker writes overviews so reasonable values around z21-22 are
+      // typical for drone orthos. Cap at z22 and let Leaflet upscale.
+      maxNativeZoom: 22,
+      maxZoom: 24,
+    }
+    // Note: out-of-footprint tile requests are inevitable — drone orthos
+    // are non-rectangular within their bounding box, and Leaflet's
+    // animated zoom transitions also request buffer tiles around the
+    // viewport. The /titiler proxy in vite.config.ts rewrites TiTiler's
+    // 404s to a 200 transparent PNG so the browser's network log stays
+    // quiet and the e2e console-error guard isn't tripped.
+    const layer = L.tileLayer(orthoTileUrl, opts)
+    layer.addTo(map)
+    orthoLayerRef.current = layer
+    return watchTileLayer(layer, setTilesDown)
+  }, [orthoTileUrl, orthoOpacity])
+
+  // Several orthomosaics: one pane each, clipped to its region. Clip paths
+  // are in layer coordinates, which only change when the zoom does.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !orthoLayers?.length) return
+    const made: { layer: L.TileLayer; pane: HTMLElement }[] = []
+    // Each one in full underneath, so where the one nearest a spot has no
+    // image (a flight stopping short of the field's end) another shows.
+    const under =
+      map.getPane("orthoUnder") ??
+      map.createPane(
+        "orthoUnder",
+        (map as L.Map & { _rotatePane?: HTMLElement })._rotatePane,
+      )
+    under.style.zIndex = "245"
+    const base = orthoLayers.map((o) =>
+      L.tileLayer(o.url, {
+        opacity: orthoOpacity ?? 0.9,
+        pane: "orthoUnder",
+        maxNativeZoom: 22,
+        maxZoom: 24,
+      }).addTo(map),
+    )
+    orthoLayers.forEach((o, i) => {
+      const name = `orthoPane${i}`
+      const pane =
+        map.getPane(name) ??
+        map.createPane(
+          name,
+          (map as L.Map & { _rotatePane?: HTMLElement })._rotatePane,
+        )
+      pane.style.zIndex = String(250 + i)
+      const layer = L.tileLayer(o.url, {
+        opacity: orthoOpacity ?? 0.9,
+        pane: name,
+        maxNativeZoom: 22,
+        maxZoom: 24,
+      })
+      layer.addTo(map)
+      made.push({ layer, pane })
+    })
+    const clip = () => {
+      orthoLayers.forEach((o, i) => {
+        const pane = made[i]?.pane
+        if (!pane) return
+        const pts = o.region.map(([lon, lat]) =>
+          map.latLngToLayerPoint([lat, lon]),
+        )
+        pane.style.clipPath = pts.length
+          ? `polygon(${pts.map((p) => `${p.x}px ${p.y}px`).join(", ")})`
+          : "none"
+      })
+    }
+    clip()
+    map.on("zoomend viewreset", clip)
+    return () => {
+      map.off("zoomend viewreset", clip)
+      for (const { layer, pane } of made) {
+        map.removeLayer(layer)
+        pane.style.clipPath = "none"
+      }
+      for (const layer of base) map.removeLayer(layer)
+    }
+  }, [orthoLayers, orthoOpacity])
+
+  // Read-only overlays (stitched plot outlines), above the ortho, below the
+  // editable boundaries.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (!overlayLayerRef.current)
+      overlayLayerRef.current = L.layerGroup().addTo(map)
+    const group = overlayLayerRef.current
+    group.clearLayers()
+    for (const o of overlays ?? []) {
+      const poly = L.polygon(
+        o.ring.map(([lon, lat]) => [lat, lon] as [number, number]),
+        {
+          color: o.highlighted ? "#f59e0b" : "#38bdf8",
+          weight: o.highlighted ? 2.5 : 1.5,
+          fillOpacity: o.highlighted ? 0.18 : 0.06,
+          interactive: true,
+          bubblingMouseEvents: false,
+        },
+      )
+      if (o.label)
+        poly.bindTooltip(o.label, {
+          permanent: false,
+          direction: "center",
+          className: "text-[10px]",
+        })
+      poly.on("click", () => onOverlayClickRef.current?.(o.group))
+      poly.addTo(group)
+    }
+  }, [overlays])
+
+  // First-load fit-to-ortho when no features are drawn yet. The
+  // fit-to-features effect below wins whenever the user has features.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (!orthoBounds) return
+    if (features.length > 0) return
+    if (didFitOrthoRef.current) return
+    const [[s, w], [n, e]] = orthoBounds
+    map.fitBounds(
+      [
+        [s, w],
+        [n, e],
+      ],
+      { padding: [20, 20] },
+    )
+    didFitOrthoRef.current = true
+  }, [orthoBounds, features.length])
+
+  // Keep editable layer in sync with `features` prop.
+  useEffect(() => {
+    const map = mapRef.current
+    const layer = layerRef.current
+    if (!map || !layer) return
+
+    const selectedCellSet = new Set(selectedCellIds ?? [])
+    layer.clearLayers()
+    for (const f of features) {
+      const props = (f.properties ?? {}) as Record<string, unknown>
+      const blockId =
+        typeof props.blockId === "string" ? (props.blockId as string) : null
+      const cellId =
+        typeof props.cellId === "string" ? (props.cellId as string) : null
+      const isOuter = props.role === "outer"
+      const isBorder = !isOuter && props.border === true
+      // Hidden plots stay in the data (and in every edit's result), only not drawn or clickable.
+      const hidden = !isOuter && (!showPlots || (isBorder && hideBorders))
+      const isSelected = blockId != null && blockId === selectedBlockId
+      const isCellSelected = cellId != null && selectedCellSet.has(cellId)
+      const accent = blockId ? colorForBlockId(blockId) : "#2563eb"
+      // Outer boundaries draw with a thicker stroke and minimal fill so
+      // the user can see what's inside; grid cells draw with the block's
+      // accent at a higher fill so they read as one cohesive group.
+      // A selected cell overrides the block accent with a yellow stroke
+      // so the user can see exactly which cells the next bulk action
+      // will affect.
+      const baseStyle: L.PathOptions = isOuter
+        ? {
+            color: isSelected ? "#facc15" : accent,
+            weight: isSelected ? 4 : 2,
+            fillOpacity: 0.05,
+            dashArray: isSelected ? undefined : "4 4",
+          }
+        : hidden
+          ? { opacity: 0, fillOpacity: 0 }
+          : isBorder
+            ? {
+                // A border position: where a plot of the field is, but not one of the design's.
+                color: isCellSelected ? "#facc15" : "#9ca3af",
+                weight: isCellSelected ? 3 : 1,
+                dashArray: "3 3",
+                opacity: plotOpacity,
+                fillOpacity: (isCellSelected ? 0.4 : 0.08) * plotOpacity,
+              }
+            : {
+                color: isCellSelected ? "#facc15" : accent,
+                weight: isCellSelected ? 3 : 1,
+                opacity: plotOpacity,
+                fillOpacity:
+                  (isCellSelected ? 0.55 : isSelected ? 0.35 : 0.2) *
+                  plotOpacity,
+              }
+      L.geoJSON(
+        f as GeoJSON.GeoJsonObject,
+        {
+          style: baseStyle,
+          interactive: !hidden,
+          // Hidden plots are not editable on the map either.
+          ...(hidden ? { pmIgnore: true } : {}),
+        } as L.GeoJSONOptions,
+      ).eachLayer((l) => {
+        // Clicking an outer polygon selects that block. Use a flag on
+        // the layer so pm-edit clicks don't double-fire selection.
+        if (isOuter && blockId) {
+          ;(l as L.Path).on?.("click", (ev: L.LeafletMouseEvent) => {
+            // Stop the click from propagating to the map background so
+            // it doesn't deselect or interfere with Geoman tooling.
+            L.DomEvent.stopPropagation(ev.originalEvent)
+            if (Date.now() - lastDragEndRef.current < 300) return
+            lastLayerClickRef.current = Date.now()
+            onSelectBlockRef.current?.(blockId)
+          })
+          // Tooltip with the block label so the user can identify
+          // which polygon is which at a glance.
+          const label =
+            typeof props.label === "string" ? (props.label as string) : null
+          if (label) {
+            ;(l as L.Path).bindTooltip?.(label, {
+              permanent: true,
+              direction: "center",
+              className: "boundary-block-label",
+            })
+          }
+        } else if (!isOuter && cellId && !hidden) {
+          // Hover: what the field design put on this plot, to check the
+          // design sits on the field the right way round.
+          const tip = cellTooltipHtml(props as Record<string, unknown>)
+          if (tip)
+            (l as L.Path).bindTooltip?.(tip, {
+              sticky: true,
+              direction: "top",
+              offset: [0, -8],
+              opacity: 0.95,
+              className: "boundary-cell-tip",
+            })
+            // Clicking a grid cell selects it. Shift = add to selection,
+            // Cmd/Ctrl = toggle, otherwise = replace.
+          ;(l as L.Path).on?.("click", (ev: L.LeafletMouseEvent) => {
+            L.DomEvent.stopPropagation(ev.originalEvent)
+            // Suppress synthetic clicks generated by the mouseup that
+            // ends a Geoman drag.
+            if (Date.now() - lastDragEndRef.current < 300) return
+            lastLayerClickRef.current = Date.now()
+            const oe = ev.originalEvent
+            const mode = oe.shiftKey
+              ? "add"
+              : oe.metaKey || oe.ctrlKey
+                ? "toggle"
+                : "replace"
+            onCellSelectRef.current?.(cellId, mode)
+          })
+        }
+        layer.addLayer(l)
+        // Selected plots can be dragged at once (the whole selection moves
+        // with the one held, see pm:dragstart), without first choosing the
+        // drag tool; elsewhere a drag still pans the map.
+        if (isCellSelected && !hidden && !boxSelectRef.current)
+          (
+            l as L.Layer & { pm?: { enableLayerDrag?: () => void } }
+          ).pm?.enableLayerDrag?.()
+      })
+    }
+    // Refit only on empty <-> non-empty transitions so undo back to an
+    // empty state doesn't yank the user's view.
+    const signature = features.length === 0 ? "empty" : "nonempty"
+    // Also on a new fitSignal: boundaries loaded or imported into the editor.
+    const asked = fitSignal !== lastFitSignalRef.current
+    lastFitSignalRef.current = fitSignal
+    if (
+      features.length > 0 &&
+      (asked ||
+        (signature !== lastFitSignatureRef.current &&
+          lastFitSignatureRef.current !== "nonempty"))
+    ) {
+      lastFitSignatureRef.current = signature
+      try {
+        const bounds = layer.getBounds()
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [20, 20] })
+      } catch {
+        // ignore
+      }
+    } else {
+      lastFitSignatureRef.current = signature
+    }
+  }, [
+    features,
+    selectedBlockId,
+    selectedCellIds,
+    fitSignal,
+    showPlots,
+    plotOpacity,
+    hideBorders,
+    boxSelect,
+  ])
+
+  // The bearing set from outside (the editor's view controls).
+  useEffect(() => {
+    const map = mapRef.current as
+      | (L.Map & {
+          getBearing?: () => number
+          setBearing?: (deg: number) => void
+        })
+      | null
+    if (!map?.setBearing || bearing === undefined) return
+    if (Math.abs((map.getBearing?.() ?? 0) - bearing) > 0.05)
+      map.setBearing(bearing)
+  }, [bearing])
+
+  // Box select: drag a box on the screen; the plots whose centre falls inside
+  // it are selected (shift: added to the selection). In screen space, so a
+  // rotated view selects what the box covers. The map does not pan meanwhile.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !boxSelect) return
+    map.dragging.disable()
+    const container = map.getContainer()
+    container.style.cursor = "crosshair"
+    let start: L.Point | null = null
+    let add = false
+    const box = document.createElement("div")
+    box.style.cssText =
+      "position:absolute;z-index:1000;pointer-events:none;border:1px dashed #facc15;background:rgba(250,204,21,0.1);display:none"
+    container.appendChild(box)
+    const draw = (a: L.Point, b: L.Point) => {
+      box.style.display = "block"
+      box.style.left = `${Math.min(a.x, b.x)}px`
+      box.style.top = `${Math.min(a.y, b.y)}px`
+      box.style.width = `${Math.abs(a.x - b.x)}px`
+      box.style.height = `${Math.abs(a.y - b.y)}px`
+    }
+    const down = (e: L.LeafletMouseEvent) => {
+      const t = e.originalEvent?.target as Element | null
+      if (t?.closest?.(".leaflet-control")) return
+      start = map.mouseEventToContainerPoint(e.originalEvent)
+      add = Boolean(e.originalEvent?.shiftKey)
+      draw(start, start)
+    }
+    const move = (e: L.LeafletMouseEvent) => {
+      if (start) draw(start, map.mouseEventToContainerPoint(e.originalEvent))
+    }
+    const up = (e: L.LeafletMouseEvent) => {
+      if (!start) return
+      const end = map.mouseEventToContainerPoint(e.originalEvent)
+      const [x0, x1] = [Math.min(start.x, end.x), Math.max(start.x, end.x)]
+      const [y0, y1] = [Math.min(start.y, end.y), Math.max(start.y, end.y)]
+      start = null
+      box.style.display = "none"
+      lastDragEndRef.current = Date.now() // not a background click: keep the selection
+      const { showPlots: shown, hideBorders: noBorders } = hiddenRef.current
+      const ids: string[] = []
+      for (const f of featuresRef.current) {
+        const p = (f.properties ?? {}) as Record<string, unknown>
+        if (p.role === "outer" || typeof p.cellId !== "string") continue
+        if (!shown || (noBorders && p.border === true)) continue
+        if (f.geometry?.type !== "Polygon") continue
+        const ring = (f.geometry as GeoJSON.Polygon).coordinates[0]
+        let x = 0
+        let y = 0
+        const n = Math.max(1, ring.length - 1)
+        for (let i = 0; i < n; i += 1) {
+          x += ring[i][0]
+          y += ring[i][1]
+        }
+        const pt = map.latLngToContainerPoint([y / n, x / n])
+        if (pt.x >= x0 && pt.x <= x1 && pt.y >= y0 && pt.y <= y1)
+          ids.push(p.cellId as string)
+      }
+      onBoxSelectRef.current?.(ids, add)
+    }
+    map.on("mousedown", down)
+    map.on("mousemove", move)
+    map.on("mouseup", up)
+    return () => {
+      map.off("mousedown", down)
+      map.off("mousemove", move)
+      map.off("mouseup", up)
+      box.remove()
+      map.dragging.enable()
+      container.style.cursor = ""
+    }
+  }, [boxSelect])
+
+  return (
+    <div className="relative h-full w-full">
+      <div
+        ref={mapEl}
+        // `isolate` creates a new stacking context so Leaflet's pane
+        // z-indexes (200-800) stay scoped to inside the map. Without it,
+        // panes participate in the root stacking context and render *above*
+        // body-portaled dialogs/overlays (z-50), which makes the
+        // FieldDesignUploadDialog appear cut off or hidden behind tiles.
+        className={`gemi-map ${className ?? "h-[500px] w-full rounded-md border isolate"}`}
+      />
+      {tilesDown && (
+        <div
+          className="pointer-events-none absolute inset-x-2 top-2 z-[1000] rounded-md border border-amber-300 bg-amber-50/95 p-2 text-xs text-amber-900"
+          data-testid="tiles-down"
+        >
+          {tilesDownMessage()}
+        </div>
+      )}
+    </div>
+  )
+}

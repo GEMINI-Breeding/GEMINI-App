@@ -40,7 +40,7 @@ const UserInformation = () => {
     criteriaMode: "all",
     defaultValues: {
       full_name: currentUser?.full_name ?? undefined,
-      email: currentUser?.email,
+      email: currentUser?.email ?? "",
     },
   })
 
@@ -50,7 +50,7 @@ const UserInformation = () => {
 
   const mutation = useMutation({
     mutationFn: (data: UserUpdateMe) =>
-      UsersService.updateUserMe({ requestBody: data }),
+      UsersService.apiUsersMeUpdateMe({ requestBody: data }),
     onSuccess: () => {
       showSuccessToast("User updated successfully")
       toggleEditMode()

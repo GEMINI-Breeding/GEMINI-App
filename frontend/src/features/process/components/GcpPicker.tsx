@@ -1,1308 +1,2382 @@
 /**
- * GcpPicker — interactive tool for aerial pipeline Step 1.
+ * GcpPicker — interactive tool for marking ground control points.
  *
- * Flow:
- *  1. If gcp_locations.csv is missing, show an inline upload panel.
- *  2. GCP dropdown at top — select GCP from list; shows image count per GCP.
- *  3. Image slider below the viewer — scrub through all images.
- *     Colored diamond markers on the slider track show ALL marked images from ALL GCPs.
- *     A number label below each diamond shows which GCP it belongs to.
- *  4. Click anywhere on the image to set the pixel coordinate for the active GCP.
- *     Multiple images can be marked per GCP.
- *  5. Save when all GCPs have at least one image marked.
+ * CSV-driven workflow ported from `main`. The user uploads a
+ * `gcp_locations.csv` (Label,Lat_dec,Lon_dec,Altitude) which is stored
+ * at the scope root `Raw/{scope}/gcp_locations.csv` so it is shared
+ * across runs *and* across datasets at the same scope. The picker
+ * reads each image's EXIF GPS in the browser (via `exifr`) so it can
+ * filter the image list by proximity to each GCP and emit a `geo.txt`
+ * companion that NodeODM consumes alongside `gcp_list.txt`. Marks
+ * are kept in the run's `gcp_selection` step state.
+ *
+ * On save we upload two files to `Raw/{scope}/`:
+ *  - `gcp_list.txt` — ODM GCP file (EPSG:4326 header + per-mark rows)
+ *  - `geo.txt`      — image GPS sidecar (EPSG:4326 header + per-image rows)
+ *
+ * The GEMINIbase ODM worker is patched to read both files from the
+ * scope root via `_download_gcp_files`.
  */
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertCircle,
-  Check,
   ChevronLeft,
   ChevronRight,
-  Filter,
+  Loader2,
   MapPin,
-  Minus,
-  Plus,
+  RefreshCw,
+  SkipForward,
+  Trash2,
   Upload,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+} from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
-function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? "";
-  return base ? `${base}${path}` : path;
-}
-
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { FilesService } from "@/client"
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { useConfirm } from "@/components/ui/confirm-dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { ProcessingService } from "@/client";
-import useCustomToast from "@/hooks/useCustomToast";
+} from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { ImageDotMap } from "@/features/process/components/ImageDotMap"
+import { useActiveDatasetShortId } from "@/features/process/hooks/useActiveDatasetShortId"
+import { useImageGps } from "@/features/process/hooks/useImageGps"
+import { parseImageFilter } from "@/features/process/lib/imageFilter"
+import {
+  fetchObjectAsBlob,
+  fetchObjectAsText,
+  type ImageGps,
+} from "@/features/process/lib/imageGps"
+import type { AerialScope } from "@/features/process/lib/paths"
+import { rawScopePrefix } from "@/features/process/lib/paths"
+import {
+  type Run,
+  setStepState,
+  type Workspace,
+} from "@/features/process/lib/runStore"
+import useCustomToast from "@/hooks/useCustomToast"
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+const DEFAULT_BUCKET = "gemini"
+const GCP_FILENAME = "gcp_list.txt"
+const GEO_FILENAME = "geo.txt"
+const CSV_FILENAME = "gcp_locations.csv"
+const IMAGE_FILTER_FILENAME = "image_filter.txt"
+const GROUPS_FILENAME = "gcp_image_groups.json"
+// Default proximity radius. Drone EXIF GPS is the *drone's* position
+// (usually 30–100 m AGL), and a single GCP is typically visible across
+// every image whose camera centre falls within the ground footprint —
+// roughly 0.9 × altitude for a 24 mm-equivalent nadir lens, so tens of
+// metres in practice. Keep the default generous; users can tighten it
+// for RTK-precise flights via the radius input.
+const DEFAULT_RADIUS_M = 5
 
-interface GcpEntry {
-  label: string;
-  lat: number;
-  lon: number;
-  alt: number;
-}
+/** Sentinel value for the "+ Add new GCP" item inside the active-GCP
+ *  Select. Picking it switches the inline Lat / Lon / Elevation editor
+ *  next to the dropdown into "adding new" mode (boxes blanked out) instead
+ *  of changing the active label. The `__` prefix avoids collision with
+ *  real labels. */
+const ADD_GCP_SENTINEL = "__add_gcp__"
 
-interface ImageEntry {
-  name: string;
-  lat: number | null;
-  lon: number | null;
-  alt: number | null;
-}
+/** Stable no-op for ImageDotMap.onSelectionChange when lasso edits should
+ *  be ignored (active GCP is in radius mode, or no active GCP). Keeping
+ *  a single reference avoids re-attaching map handlers each render. */
+const NOOP_SELECTION_CHANGE: (next: Set<string>) => void = () => {}
 
-interface ExistingSelection {
-  label: string;
-  image: string;
-  pixel_x: number;
-  pixel_y: number;
-  lat: number;
-  lon: number;
-  alt: number;
-}
-
-interface GcpCandidatesResponse {
-  has_gcp_locations: boolean;
-  gcps: GcpEntry[];
-  images: ImageEntry[];
-  count: number;
-  total_images: number;
-  filtered: boolean;
-  radius_m: number;
-  no_gps_count: number;
-  has_msgs_synced: boolean;
-  raw_dir: string;
-  existing_selections: ExistingSelection[];
-}
-
-/** A single pixel marking for one GCP on one image. */
-interface GcpMarkEntry {
-  image: string;
-  pixel_x: number;
-  pixel_y: number;
-}
-
-interface GcpPickerProps {
-  runId: string;
-  onSaved: () => void;
-  onCancel: () => void;
-  onSkip?: () => void;
-}
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-/** One color per GCP (cycles if more GCPs than colors). */
 const GCP_COLORS = [
-  "#ef4444", // red
-  "#3b82f6", // blue
-  "#22c55e", // green
-  "#f59e0b", // amber
-  "#8b5cf6", // violet
-  "#ec4899", // pink
-  "#06b6d4", // cyan
-  "#f97316", // orange
-];
+  "#ef4444",
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#f97316",
+] as const
 
 function gcpColor(idx: number): string {
-  return GCP_COLORS[idx % GCP_COLORS.length];
+  return GCP_COLORS[idx % GCP_COLORS.length]
 }
 
 function gcpShortLabel(label: string): string {
-  // Strip leading non-numeric prefix (e.g. "gcp13" → "13", "GCP_13" → "13", "13" → "13")
-  const match = label.match(/(\d+)$/);
-  return match ? match[1] : label;
+  const m = label.match(/(\d+)$/)
+  return m ? m[1] : label
 }
 
-// ── Inline CSV upload panel ───────────────────────────────────────────────────
+// ── Types ───────────────────────────────────────────────────────────────────
 
-interface CsvUploadPanelProps {
-  runId: string;
-  onLoaded: () => void;
-  hasExisting?: boolean;
-  onCancel?: () => void;
-  onSkip?: () => void;
+/**
+ * GCP catalog entry — the merged view of `gcp_locations.csv` (coordinates)
+ * and `gcp_image_groups.json` (per-GCP explicit image lists). Coordinates
+ * are optional because Map-discovery lets a user commit an image group
+ * before they have survey lat/lon.
+ */
+export interface GcpCatalogEntry {
+  label: string
+  lat?: number | null
+  lon?: number | null
+  alt?: number | null
+  /** Explicit per-GCP image group; overrides radius-based candidate filter. */
+  images?: string[]
 }
 
-function CsvUploadPanel({ runId, onLoaded, hasExisting, onCancel, onSkip }: CsvUploadPanelProps) {
-  const { showErrorToast } = useCustomToast();
-  const [csvText, setCsvText] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const saveMutation = useMutation({
-    mutationFn: (text: string) =>
-      ProcessingService.saveGcpLocations({
-        id: runId,
-        requestBody: { csv_text: text },
-      }),
-    onSuccess: onLoaded,
-    onError: () => showErrorToast("Failed to save GCP locations"),
-  });
-
-  const skipMutation = useMutation({
-    mutationFn: () =>
-      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/gcp-selection/skip`), {
-        method: "POST",
-        credentials: "include",
-      }).then((r) => {
-        if (!r.ok) throw new Error("Skip failed");
-        return r.json();
-      }),
-    onSuccess: () => onSkip?.(),
-    onError: () => showErrorToast("Failed to skip GCP selection"),
-  });
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev: ProgressEvent<FileReader>) =>
-      setCsvText((ev.target?.result as string) ?? "");
-    reader.readAsText(file);
-  };
-
-  return (
-    <div className="mx-auto max-w-xl space-y-4 py-8">
-      {hasExisting && (
-        <div className="rounded-md border border-yellow-400 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-600 dark:bg-yellow-950 dark:text-yellow-200">
-          <strong>Warning:</strong> Uploading a new file will replace the existing{" "}
-          <code>gcp_locations.csv</code> shared across all dates in this pipeline.
-        </div>
-      )}
-      <div className="flex flex-col items-center gap-2 text-center">
-        <MapPin className="text-muted-foreground h-10 w-10" />
-        <h3 className="font-medium">
-          {hasExisting ? "Replace GCP Locations" : "GCP Locations Required"}
-        </h3>
-        <p className="text-muted-foreground text-sm">
-          {hasExisting
-            ? "Paste or pick a new CSV to replace the existing file."
-            : "No gcp_locations.csv found. Paste the CSV content below or pick the file."}{" "}
-          Format:{" "}
-          <code className="text-xs">Label, Lat_dec, Lon_dec, Altitude</code>
-        </p>
-      </div>
-      <div className="space-y-2">
-        <Label>CSV content</Label>
-        <Textarea
-          rows={8}
-          placeholder={
-            "Label,Lat_dec,Lon_dec,Altitude\n1,33.4512,-111.9876,380.5\n2,33.4498,-111.9845,381.0"
-          }
-          value={csvText}
-          onChange={(e) => setCsvText(e.target.value)}
-          className="font-mono text-xs"
-        />
-      </div>
-      <div className="flex items-center gap-3">
-        <Button variant="outline" onClick={() => fileRef.current?.click()}>
-          <Upload className="mr-2 h-4 w-4" />
-          Pick File
-        </Button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={handleFile}
-        />
-        {onCancel && (
-          <Button variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-        )}
-        <Button
-          className="flex-1"
-          disabled={!csvText.trim() || saveMutation.isPending}
-          onClick={() => saveMutation.mutate(csvText)}
-        >
-          {saveMutation.isPending ? "Saving…" : hasExisting ? "Replace GCP Locations" : "Load GCP Locations"}
-        </Button>
-      </div>
-      {onSkip && (
-        <div className="border-t pt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={skipMutation.isPending}
-            onClick={() => skipMutation.mutate()}
-          >
-            {skipMutation.isPending ? "Skipping…" : "Skip GCP Selection"}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
+/** Persisted shape of `gcp_image_groups.json`. */
+export interface GcpImageGroupsFile {
+  version: 1
+  groups: Record<string, { images: string[] }>
 }
 
-// ── Letterbox helper ──────────────────────────────────────────────────────────
+/** A single pixel mark for one GCP on one image. */
+export interface GcpMark {
+  /** Catalog entry's `label` — matches main's row identity. */
+  label: string
+  /** Image filename (basename, no path). */
+  image: string
+  /** Pixel coordinate, top-left origin. */
+  pixel_x: number
+  pixel_y: number
+}
 
-/** Compute the rendered image rect inside an object-contain container. */
-function getLetterbox(
-  naturalW: number,
-  naturalH: number,
-  cw: number,
-  ch: number
-) {
-  const imgAspect = naturalW / naturalH;
-  const containerAspect = cw / ch;
-  if (imgAspect > containerAspect) {
-    const h = cw / imgAspect;
-    return { x: 0, y: (ch - h) / 2, w: cw, h };
+interface GcpPickerProps {
+  workspace: Workspace
+  run: Run
+  scope: AerialScope
+  onSaved?: () => void
+  onCancel?: () => void
+}
+
+// ── CSV parse / serialize ───────────────────────────────────────────────────
+
+/**
+ * Parse a `gcp_locations.csv`. Expected header: `Label,Lat_dec,Lon_dec[,Altitude]`
+ * (case-insensitive, header optional). Altitude column is optional and
+ * defaults to 0 when missing. Throws on malformed rows.
+ */
+export function parseGcpLocationsCsv(text: string): GcpCatalogEntry[] {
+  const rows = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"))
+  if (rows.length === 0) return []
+
+  // Detect header by checking whether the second column on the first row
+  // parses as a number. Works for both 3- and 4-column CSVs.
+  const headerCandidate = rows[0].split(",").map((c) => c.trim())
+  const looksLikeHeader =
+    headerCandidate.length >= 3 && Number.isNaN(Number(headerCandidate[1]))
+  const dataRows = looksLikeHeader ? rows.slice(1) : rows
+
+  const out: GcpCatalogEntry[] = []
+  for (const [i, raw] of dataRows.entries()) {
+    const parts = raw.split(",").map((c) => c.trim())
+    if (parts.length < 3) {
+      throw new Error(
+        `Row ${i + 1}: expected 3+ columns (Label,Lat,Lon[,Alt]), got ${parts.length}`,
+      )
+    }
+    const [label, latS, lonS, altS] = parts
+    const lat = Number(latS)
+    const lon = Number(lonS)
+    const alt = altS === undefined || altS === "" ? 0 : Number(altS)
+    if (!label || Number.isNaN(lat) || Number.isNaN(lon) || Number.isNaN(alt)) {
+      throw new Error(`Row ${i + 1}: bad numeric values (${raw})`)
+    }
+    // Range-check lat/lon. The most common cause of a working CSV that
+    // produces "no images near any GCP" is column-order swap (Lon,Lat
+    // instead of Lat,Lon — the OpenDroneMap gcp_list.txt convention).
+    // We fail loudly instead of silently placing GCPs in the wrong
+    // hemisphere.
+    if (Math.abs(lat) > 90) {
+      throw new Error(
+        `Row ${i + 1}: latitude ${lat} is outside [-90, 90]. ` +
+          `Expected column order is Label,Lat,Lon[,Alt] — if your CSV is ` +
+          `Label,Lon,Lat[,Alt] you'll need to swap columns 2 and 3.`,
+      )
+    }
+    if (Math.abs(lon) > 180) {
+      throw new Error(`Row ${i + 1}: longitude ${lon} is outside [-180, 180].`)
+    }
+    out.push({ label, lat, lon, alt })
   }
-  const w = ch * imgAspect;
-  return { x: (cw - w) / 2, y: 0, w, h: ch };
+  return out
 }
+
+/** Default cull radius around the image GPS bbox. Drone image footprints
+ *  typically span tens of metres, so a GCP more than ~100 m beyond the
+ *  outermost image position can't physically appear in any image — almost
+ *  certainly a typo (decimal place, swapped lat/lon, copy-pasted from a
+ *  different field). 100 m is generous enough to keep edge GCPs that sit
+ *  just past the flight envelope. */
+export const GCP_BBOX_CULL_BUFFER_M = 100
+
+/** Lat/lon bounding box of every image with parseable EXIF GPS. Returns
+ *  null when no images have GPS yet. Used to sanity-check user-entered
+ *  GCP coordinates before they're sent to ODM. */
+export function imageBboxFromGpsMap(gpsMap: Record<string, ImageGps>): {
+  minLat: number
+  maxLat: number
+  minLon: number
+  maxLon: number
+} | null {
+  let minLat = Infinity
+  let maxLat = -Infinity
+  let minLon = Infinity
+  let maxLon = -Infinity
+  let any = false
+  for (const g of Object.values(gpsMap)) {
+    if (!g) continue
+    any = true
+    if (g.lat < minLat) minLat = g.lat
+    if (g.lat > maxLat) maxLat = g.lat
+    if (g.lon < minLon) minLon = g.lon
+    if (g.lon > maxLon) maxLon = g.lon
+  }
+  return any ? { minLat, maxLat, minLon, maxLon } : null
+}
+
+/** Split a catalog into entries that fall inside the image bbox + buffer
+ *  vs. ones too far outside to be real. Coord-less entries are kept (they
+ *  haven't claimed a position yet, so there's nothing to cull against).
+ *  When no image GPS is available, every entry is kept (we can't decide).
+ */
+export function cullDistantGcps(
+  catalog: GcpCatalogEntry[],
+  gpsMap: Record<string, ImageGps>,
+  bufferM: number = GCP_BBOX_CULL_BUFFER_M,
+): { kept: GcpCatalogEntry[]; culled: GcpCatalogEntry[] } {
+  const bbox = imageBboxFromGpsMap(gpsMap)
+  if (!bbox) return { kept: [...catalog], culled: [] }
+  const midLat = (bbox.minLat + bbox.maxLat) / 2
+  // Convert metres to degrees. Lon scales with cos(lat); guard against the
+  // pole edge case where cos(lat) → 0 (no GEMINI flights there, but cheap).
+  const dLatBuf = bufferM / 111_000
+  const cosMid = Math.max(0.0001, Math.cos((midLat * Math.PI) / 180))
+  const dLonBuf = bufferM / (111_000 * cosMid)
+  const kept: GcpCatalogEntry[] = []
+  const culled: GcpCatalogEntry[] = []
+  for (const g of catalog) {
+    if (g.lat == null || g.lon == null) {
+      kept.push(g)
+      continue
+    }
+    const inside =
+      g.lat >= bbox.minLat - dLatBuf &&
+      g.lat <= bbox.maxLat + dLatBuf &&
+      g.lon >= bbox.minLon - dLonBuf &&
+      g.lon <= bbox.maxLon + dLonBuf
+    if (inside) kept.push(g)
+    else culled.push(g)
+  }
+  return { kept, culled }
+}
+
+/**
+ * OpenDroneMap GCP file format. Header is the EPSG code; rows follow.
+ * Marks for catalog entries that lack coordinates are silently dropped —
+ * a coord-less GCP cannot contribute to ODM's bundle adjustment.
+ */
+export function serializeGcpList(
+  catalog: GcpCatalogEntry[],
+  marks: GcpMark[],
+): string {
+  const lines: string[] = ["EPSG:4326"]
+  const byLabel = new Map(catalog.map((g) => [g.label, g]))
+  for (const m of marks) {
+    const g = byLabel.get(m.label)
+    if (!g) continue
+    if (g.lat == null || g.lon == null) continue
+    const alt = g.alt ?? 0
+    lines.push(
+      `${g.lon} ${g.lat} ${alt} ${Math.round(m.pixel_x)} ${Math.round(
+        m.pixel_y,
+      )} ${m.image} ${g.label}`,
+    )
+  }
+  return `${lines.join("\n")}\n`
+}
+
+/**
+ * Round-trip writer for `gcp_locations.csv`. Only entries with full
+ * coordinates are emitted — coord-less entries live in
+ * `gcp_image_groups.json` until the user supplies survey data.
+ */
+export function serializeGcpLocationsCsv(catalog: GcpCatalogEntry[]): string {
+  const header = "Label,Lat_dec,Lon_dec,Altitude"
+  const rows: string[] = []
+  for (const g of catalog) {
+    if (g.lat == null || g.lon == null) continue
+    rows.push(`${g.label},${g.lat},${g.lon},${g.alt ?? 0}`)
+  }
+  return `${[header, ...rows].join("\n")}\n`
+}
+
+/** Parse `gcp_image_groups.json` → label → image basenames. */
+export function parseGcpImageGroups(text: string): Record<string, string[]> {
+  if (!text.trim()) return {}
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch (err) {
+    throw new Error(
+      `gcp_image_groups.json is not valid JSON: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    )
+  }
+  if (!json || typeof json !== "object" || Array.isArray(json)) {
+    throw new Error("gcp_image_groups.json must be a JSON object.")
+  }
+  const groups = (json as { groups?: unknown }).groups
+  if (groups == null) return {}
+  if (typeof groups !== "object" || Array.isArray(groups)) {
+    throw new Error("gcp_image_groups.json: `groups` must be an object.")
+  }
+  const out: Record<string, string[]> = {}
+  for (const [label, value] of Object.entries(
+    groups as Record<string, unknown>,
+  )) {
+    const images = (value as { images?: unknown })?.images
+    if (!Array.isArray(images)) continue
+    const basenames: string[] = []
+    for (const n of images) {
+      if (typeof n === "string" && n.length > 0) basenames.push(n)
+    }
+    // Preserve labels with empty image lists — they represent coord-less
+    // GCPs added via the "+ Add new GCP" form before any images are
+    // attached to them. Dropping them here would lose the catalog entry
+    // on the next round-trip.
+    out[label] = basenames
+  }
+  return out
+}
+
+/** Serialize the runtime image-group map to its sidecar JSON shape. */
+export function serializeGcpImageGroups(
+  groups: Record<string, string[]>,
+): string {
+  const out: GcpImageGroupsFile = { version: 1, groups: {} }
+  // Sort labels and basenames for stable output (diff-friendly). Labels
+  // with empty image arrays are preserved — they represent coord-less
+  // catalog entries added via the inline "+ Add new GCP" form.
+  for (const label of Object.keys(groups).sort()) {
+    const images = groups[label] ?? []
+    out.groups[label] = { images: [...images].sort() }
+  }
+  return `${JSON.stringify(out, null, 2)}\n`
+}
+
+/**
+ * Merge CSV rows (coordinate-bearing) and image groups (label → images)
+ * into the unified catalog. Labels that appear in either source become
+ * an entry; coordinates from CSV take precedence; images attach when
+ * the label has a group entry.
+ *
+ * Order: CSV order first, then groups-only labels in alphabetical order.
+ */
+export function mergeCatalog(
+  csvRows: GcpCatalogEntry[],
+  groups: Record<string, string[]>,
+): GcpCatalogEntry[] {
+  const byLabel = new Map<string, GcpCatalogEntry>()
+  const order: string[] = []
+  for (const r of csvRows) {
+    if (!byLabel.has(r.label)) order.push(r.label)
+    byLabel.set(r.label, { ...r })
+  }
+  const groupOnly: string[] = []
+  for (const label of Object.keys(groups)) {
+    const existing = byLabel.get(label)
+    if (existing) {
+      existing.images = groups[label]
+    } else {
+      byLabel.set(label, { label, images: groups[label] })
+      groupOnly.push(label)
+    }
+  }
+  groupOnly.sort()
+  return [...order, ...groupOnly].map((l) => byLabel.get(l)!)
+}
+
+/**
+ * Determine which GCP "owns" each image dot for the always-visible map.
+ *
+ * Two-pass ownership: explicit (map-mode image groups) wins over implicit
+ * (radius-mode haversine). For radius-mode ties, the GCP whose centre is
+ * closer to the dot wins. Coord-less GCPs in radius mode are skipped
+ * (they have no anchor). The returned map only contains entries for
+ * dots that are claimed by some GCP — unclaimed dots stay at the
+ * caller's default color.
+ */
+export function computeDotColors(args: {
+  catalog: GcpCatalogEntry[]
+  gpsMap: Record<string, ImageGps>
+  modes: Record<string, "radius" | "map">
+  radii: Record<string, number>
+  groups: Record<string, string[]>
+  defaultRadius: number
+}): Record<string, string> {
+  const { catalog, gpsMap, modes, radii, groups, defaultRadius } = args
+  const out: Record<string, string> = {}
+
+  // Effective mode for a label: explicit override falls back to the
+  // shape of the entry. A coord-less label can never be in radius mode.
+  const effectiveMode = (g: GcpCatalogEntry): "radius" | "map" => {
+    const m = modes[g.label]
+    if (m === "radius" || m === "map") {
+      if (m === "radius" && (g.lat == null || g.lon == null)) return "map"
+      return m
+    }
+    return g.lat == null || g.lon == null ? "map" : "radius"
+  }
+
+  // Pass 1 — explicit groups (map mode).
+  for (const [i, g] of catalog.entries()) {
+    if (effectiveMode(g) !== "map") continue
+    const grp = groups[g.label]
+    if (!grp || grp.length === 0) continue
+    for (const name of grp) {
+      if (out[name]) continue // earlier-in-catalog wins
+      out[name] = gcpColor(i)
+    }
+  }
+
+  // Pass 2 — radius mode. Pre-build the candidate list once.
+  const radiusEntries: Array<{
+    idx: number
+    lat: number
+    lon: number
+    radius: number
+  }> = []
+  for (const [i, g] of catalog.entries()) {
+    if (effectiveMode(g) !== "radius") continue
+    if (g.lat == null || g.lon == null) continue
+    radiusEntries.push({
+      idx: i,
+      lat: g.lat,
+      lon: g.lon,
+      radius: radii[g.label] ?? defaultRadius,
+    })
+  }
+  if (radiusEntries.length > 0) {
+    for (const [name, dot] of Object.entries(gpsMap)) {
+      if (!dot || out[name]) continue
+      let best = { idx: -1, dist: Number.POSITIVE_INFINITY }
+      for (const e of radiusEntries) {
+        const d = haversineM(e.lat, e.lon, dot.lat, dot.lon)
+        if (d <= e.radius && d < best.dist) {
+          best = { idx: e.idx, dist: d }
+        }
+      }
+      if (best.idx >= 0) out[name] = gcpColor(best.idx)
+    }
+  }
+
+  return out
+}
+
+/**
+ * Validate a manual/discovery GCP entry. Throws on invalid input so
+ * callers can surface the message via toast. `coordsRequired=false`
+ * permits coord-less entries (Map-discovery).
+ */
+export function validateGcpEntry(
+  entry: {
+    label: string
+    lat?: number | null
+    lon?: number | null
+    alt?: number | null
+  },
+  existingLabels: ReadonlyArray<string>,
+  coordsRequired: boolean,
+): void {
+  const label = entry.label.trim()
+  if (!label) throw new Error("Label is required.")
+  if (existingLabels.includes(label)) {
+    throw new Error(`A GCP named "${label}" already exists.`)
+  }
+  const hasLat = entry.lat != null && Number.isFinite(entry.lat)
+  const hasLon = entry.lon != null && Number.isFinite(entry.lon)
+  if (coordsRequired && (!hasLat || !hasLon)) {
+    throw new Error("Lat and Lon are required (decimal degrees).")
+  }
+  if (hasLat && Math.abs(entry.lat as number) > 90) {
+    throw new Error(`Latitude ${entry.lat} is outside [-90, 90].`)
+  }
+  if (hasLon && Math.abs(entry.lon as number) > 180) {
+    throw new Error(`Longitude ${entry.lon} is outside [-180, 180].`)
+  }
+  if (entry.alt != null && !Number.isFinite(entry.alt)) {
+    throw new Error("Altitude must be numeric.")
+  }
+  // If only one of lat/lon is set, force the user to provide both or neither.
+  if (hasLat !== hasLon) {
+    throw new Error("Provide both Lat and Lon, or leave both empty.")
+  }
+}
+
+/**
+ * NodeODM image-GPS sidecar. Header is the EPSG code; rows are
+ * `image lon lat alt`. Images without GPS are skipped.
+ */
+export function serializeGeoTxt(
+  images: string[],
+  gpsMap: Record<string, ImageGps>,
+): string {
+  const lines: string[] = ["EPSG:4326"]
+  for (const name of images) {
+    const g = gpsMap[name]
+    if (!g) continue
+    lines.push(`${name} ${g.lon} ${g.lat} ${g.alt}`)
+  }
+  return `${lines.join("\n")}\n`
+}
+
+// ── Geo helper ──────────────────────────────────────────────────────────────
 
 /** Great-circle distance in metres between two WGS-84 points. */
-function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
+function haversineM(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
   const R = 6_371_000
   const toRad = (d: number) => (d * Math.PI) / 180
   const dLat = toRad(lat2 - lat1)
   const dLon = toRad(lon2 - lon1)
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
   return 2 * R * Math.asin(Math.sqrt(a))
 }
 
-/** Browser range-input thumb width in px — used to correct marker alignment. */
-const THUMB_PX = 16;
+// ── CSV upload panel ────────────────────────────────────────────────────────
 
-/** Compute left CSS value that lines up a centered marker with a slider thumb at `pct` %. */
-function sliderLeft(pct: number): string {
-  const offset = (0.5 - pct / 100) * THUMB_PX;
-  return `calc(${pct}% + ${offset}px)`;
+interface CsvUploadPanelProps {
+  /**
+   * Scope-root prefix (`Raw/.../{sensor}/`) — sibling of every dataset
+   * subdir. The CSV is scope-wide because GCP locations describe the
+   * field, not any one upload.
+   */
+  scopePrefix: string
+  onLoaded: () => void
+  onCancel?: () => void
+  onSkip?: () => void
+  hasExisting?: boolean
 }
 
-// ── Main picker ───────────────────────────────────────────────────────────────
-
-export function GcpPicker({
-  runId,
-  onSaved,
-  onCancel: _onCancel,
+function CsvUploadPanel({
+  scopePrefix,
+  onLoaded,
+  onCancel,
   onSkip,
-}: GcpPickerProps) {
-  const { showErrorToast, showSuccessToast } = useCustomToast();
-  const queryClient = useQueryClient();
-
-  const [filterByGcp, setFilterByGcp] = useState(true)
-  const [confirmClear, setConfirmClear] = useState(false);
-
-  const { data, isLoading, refetch } = useQuery<GcpCandidatesResponse>({
-    queryKey: ["gcp-candidates", runId, filterByGcp],
-    queryFn: () => {
-      const params = new URLSearchParams({
-        filter_by_gcp: String(filterByGcp),
-      });
-      return fetch(
-        apiUrl(`/api/v1/pipeline-runs/${runId}/gcp-candidates?${params}`),
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-          },
-        }
-      ).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<GcpCandidatesResponse>;
-      });
-    },
-  });
-
-  // Multiple marks per GCP: label → list of {image, pixel_x, pixel_y}
-  const [markings, setMarkings] = useState<Record<string, GcpMarkEntry[]>>({});
-  const [activeGcpLabel, setActiveGcpLabel] = useState<string | null>(null);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [replaceMode, setReplaceMode] = useState(false);
-
-  // Zoom / pan state
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [isPanning, setIsPanning] = useState(false);
-  const [editingIdx, setEditingIdx] = useState(false);
-  const [editIdxValue, setEditIdxValue] = useState("");
-  // Incremented on each image load so getCrosshairPos re-runs with correct naturalWidth/Height
-  const [imgLoadCount, setImgLoadCount] = useState(0);
-  const zoomRef = useRef(1);
-  const offsetRef = useRef({ x: 0, y: 0 });
-  zoomRef.current = zoom;
-  offsetRef.current = offset;
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const dragMovedRef = useRef(false);
-  const dragStartRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
-
-  const gcps = data?.gcps ?? [];
-  const allImages = data?.images ?? [];
-  const rawDir = data?.raw_dir ?? "";
-
-  const activeGcp =
-    gcps.find((g) => g.label === activeGcpLabel) ?? gcps[0] ?? null;
-  const activeLabel = activeGcp?.label ?? null;
-  const activeGcpIdx = gcps.findIndex((g) => g.label === activeLabel);
-  const activeColor = activeGcpIdx >= 0 ? gcpColor(activeGcpIdx) : "#ef4444";
-
-  // Marks for the active GCP
-  const activeGcpMarks: GcpMarkEntry[] = activeLabel
-    ? (markings[activeLabel] ?? [])
-    : [];
-  // Mark on the currently-displayed image (if any) for the active GCP
-  const activeMark =
-    activeGcpMarks.find((m) => m.image === selectedImage) ?? null;
-
-  // All marks from all GCPs flattened (for slider display)
-  const allMarks = Object.entries(markings).flatMap(([label, marks]) =>
-    marks.map((m) => ({
-      ...m,
-      label,
-      gcpIdx: gcps.findIndex((g) => g.label === label),
-    }))
-  );
-
-  // Slider uses allImages order — no resorting, so index is stable across GCP switches
-  const selectedIdx = allImages.findIndex((img) => img.name === selectedImage);
-  const sliderMax = Math.max(0, allImages.length - 1);
-
-  // Nearest GCP to the currently displayed image (requires valid GPS on the image)
-  const selectedImageData = allImages.find((img) => img.name === selectedImage) ?? null
-  const nearestGcp: (GcpEntry & { dist_m: number }) | null = (() => {
-    if (!selectedImageData?.lat || !selectedImageData?.lon || gcps.length === 0) return null
-    let best: (GcpEntry & { dist_m: number }) | null = null
-    for (const gcp of gcps) {
-      const d = haversineM(selectedImageData.lat, selectedImageData.lon, gcp.lat, gcp.lon)
-      if (best === null || d < best.dist_m) best = { ...gcp, dist_m: d }
-    }
-    return best
-  })()
-
-  // ── Auto-select nearest GCP when image changes ───────────────────────────
-  // When the user scrubs to a new image, automatically switch the active GCP
-  // to the nearest one so the dropdown always reflects the closest GCP.
-  useEffect(() => {
-    if (nearestGcp && nearestGcp.label !== activeGcpLabel) {
-      setActiveGcpLabel(nearestGcp.label);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedImage]);
-
-  // ── View reset helper ─────────────────────────────────────────────────────
-
-  function resetView() {
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
-  }
-
-  // ── Pan clamping ──────────────────────────────────────────────────────────
-
-  function clamp(ox: number, oy: number, z: number) {
-    const el = containerRef.current;
-    if (!el) return { x: ox, y: oy };
-    const cw = el.clientWidth;
-    const ch = el.clientHeight;
-    return {
-      x: Math.min(0, Math.max(ox, cw * (1 - z))),
-      y: Math.min(0, Math.max(oy, ch * (1 - z))),
-    };
-  }
-
-  // ── Zoom helpers ──────────────────────────────────────────────────────────
-
-  function applyZoom(dz: number) {
-    const el = containerRef.current;
-    if (!el) return;
-    applyZoomAt(dz, el.clientWidth / 2, el.clientHeight / 2);
-  }
-
-  // Zoom centered on a specific point in container-local coordinates
-  function applyZoomAt(dz: number, cx: number, cy: number) {
-    const el = containerRef.current;
-    if (!el) return;
-    const prevZoom = zoomRef.current;
-    const newZoom = Math.min(Math.max(prevZoom * dz, 1), 10);
-    if (newZoom <= 1) {
-      setZoom(1);
-      setOffset({ x: 0, y: 0 });
-      return;
-    }
-    const ratio = newZoom / prevZoom;
-    const prev = offsetRef.current;
-    const raw = {
-      x: cx * (1 - ratio) + prev.x * ratio,
-      y: cy * (1 - ratio) + prev.y * ratio,
-    };
-    const clamped = {
-      x: Math.min(0, Math.max(raw.x, el.clientWidth * (1 - newZoom))),
-      y: Math.min(0, Math.max(raw.y, el.clientHeight * (1 - newZoom))),
-    };
-    setZoom(newZoom);
-    setOffset(clamped);
-  }
-
-  // Stable ref so the wheel listener (registered once) always calls the latest version
-  const applyZoomAtRef = useRef(applyZoomAt);
-  applyZoomAtRef.current = applyZoomAt;
-
-  // Scroll wheel zoom — registered as non-passive so preventDefault works
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      applyZoomAtRef.current(
-        e.deltaY < 0 ? 1.15 : 1 / 1.15,
-        e.clientX - rect.left,
-        e.clientY - rect.top,
-      );
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
-  // ── Keyboard navigation ───────────────────────────────────────────────────
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        setSelectedImage((cur) => {
-          const idx = allImages.findIndex((c) => c.name === cur);
-          return idx > 0 ? allImages[idx - 1].name : cur;
-        });
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        setSelectedImage((cur) => {
-          const idx = allImages.findIndex((c) => c.name === cur);
-          return idx < allImages.length - 1 ? allImages[idx + 1].name : cur;
-        });
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [allImages]);
-
-  // ── Restore previously saved markings ────────────────────────────────────
-  // Use `data` (object reference) so this re-runs when a background refetch
-  // delivers fresh data (e.g. data now has existing_selections but cached
-  // version didn't).
-
-  useEffect(() => {
-    if (!data) return;
-    const saved = data.existing_selections ?? [];
-    const restored: Record<string, GcpMarkEntry[]> = {};
-    for (const sel of saved) {
-      if (!restored[sel.label]) restored[sel.label] = [];
-      restored[sel.label].push({
-        image: sel.image,
-        pixel_x: sel.pixel_x,
-        pixel_y: sel.pixel_y,
-      });
-    }
-    setMarkings(restored);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
-
-  // ── Initial image selection ───────────────────────────────────────────────
-
-  useEffect(() => {
-    if (allImages.length > 0 && selectedImage === null) {
-      setSelectedImage(allImages[0].name);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!data]);
-
-  // ── Navigation helpers ────────────────────────────────────────────────────
-
-  function goToPrevImage() {
-    const idx = allImages.findIndex((img) => img.name === selectedImage);
-    if (idx > 0) setSelectedImage(allImages[idx - 1].name);
-  }
-
-  function goToNextImage() {
-    const idx = allImages.findIndex((img) => img.name === selectedImage);
-    if (idx < allImages.length - 1) setSelectedImage(allImages[idx + 1].name);
-  }
-
-  // ── GCP switch handler — keep current image position ─────────────────────
-
-  function handleGcpChange(newLabel: string) {
-    setActiveGcpLabel(newLabel);
-    // Don't change selectedImage — user stays at the same image position
-  }
-
-  // ── Navigate through marked images for the active GCP ────────────────────
-
-  // Marked images for active GCP sorted by their index in allImages
-  const activeMarksSorted = activeLabel
-    ? [...(markings[activeLabel] ?? [])].sort(
-        (a, b) =>
-          allImages.findIndex((i) => i.name === a.image) -
-          allImages.findIndex((i) => i.name === b.image)
-      )
-    : [];
-
-  const currentMarkPos = activeMarksSorted.findIndex(
-    (m) => m.image === selectedImage
-  );
-
-  function goToPrevMark() {
-    if (activeMarksSorted.length === 0) return;
-    if (currentMarkPos <= 0) {
-      // Wrap to last mark
-      setSelectedImage(activeMarksSorted[activeMarksSorted.length - 1].image);
-    } else {
-      setSelectedImage(activeMarksSorted[currentMarkPos - 1].image);
-    }
-  }
-
-  function goToNextMark() {
-    if (activeMarksSorted.length === 0) return;
-    if (currentMarkPos < 0 || currentMarkPos >= activeMarksSorted.length - 1) {
-      setSelectedImage(activeMarksSorted[0].image);
-    } else {
-      setSelectedImage(activeMarksSorted[currentMarkPos + 1].image);
-    }
-  }
-
-  // ── GCP marking ───────────────────────────────────────────────────────────
-
-  function markAtClient(clientX: number, clientY: number) {
-    if (
-      !activeLabel ||
-      !selectedImage ||
-      !containerRef.current ||
-      !imgRef.current
-    )
-      return;
-    const naturalW = imgRef.current.naturalWidth;
-    const naturalH = imgRef.current.naturalHeight;
-    if (!naturalW || !naturalH) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const cw = containerRef.current.clientWidth;
-    const ch = containerRef.current.clientHeight;
-    const cx = clientX - rect.left;
-    const cy = clientY - rect.top;
-    const dx = (cx - offsetRef.current.x) / zoomRef.current;
-    const dy = (cy - offsetRef.current.y) / zoomRef.current;
-    const lb = getLetterbox(naturalW, naturalH, cw, ch);
-    const imgX = dx - lb.x;
-    const imgY = dy - lb.y;
-    if (imgX < 0 || imgX > lb.w || imgY < 0 || imgY > lb.h) return;
-    const px = Math.round((imgX / lb.w) * naturalW);
-    const py = Math.round((imgY / lb.h) * naturalH);
-    setMarkings((prev) => {
-      const existing = prev[activeLabel] ?? [];
-      // Replace mark for same image, or add new
-      const filtered = existing.filter((m) => m.image !== selectedImage);
-      return {
-        ...prev,
-        [activeLabel]: [
-          ...filtered,
-          { image: selectedImage, pixel_x: px, pixel_y: py },
-        ],
-      };
-    });
-  }
-
-  // ── Drag / pan + click ────────────────────────────────────────────────────
-
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    dragMovedRef.current = false;
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      ox: offsetRef.current.x,
-      oy: offsetRef.current.y,
-    };
-    setIsPanning(true);
-
-    const onMove = (me: MouseEvent) => {
-      const dx = me.clientX - dragStartRef.current.x;
-      const dy = me.clientY - dragStartRef.current.y;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMovedRef.current = true;
-      if (dragMovedRef.current) {
-        const c = clamp(
-          dragStartRef.current.ox + dx,
-          dragStartRef.current.oy + dy,
-          zoomRef.current
-        );
-        setOffset(c);
-      }
-    };
-    const onUp = (me: MouseEvent) => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      setIsPanning(false);
-      if (!dragMovedRef.current) markAtClient(me.clientX, me.clientY);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-
-  // Right-click removes the active GCP mark on the current image
-  const handleContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    if (!activeLabel || !selectedImage) return;
-    setMarkings((prev) => {
-      const existing = prev[activeLabel] ?? [];
-      const filtered = existing.filter((m) => m.image !== selectedImage);
-      if (filtered.length === 0) {
-        const next = { ...prev };
-        delete next[activeLabel];
-        return next;
-      }
-      return { ...prev, [activeLabel]: filtered };
-    });
-  };
-
-  // ── Crosshair positions (all marks on current image) ─────────────────────
-
-  function getCrosshairPos(
-    mark: GcpMarkEntry
-  ): { left: number; top: number } | null {
-    void imgLoadCount; // re-run after each image load so naturalWidth/Height are valid
-    if (!imgRef.current || !containerRef.current) return null;
-    const naturalW = imgRef.current.naturalWidth;
-    const naturalH = imgRef.current.naturalHeight;
-    if (!naturalW || !naturalH) return null;
-    const cw = containerRef.current.clientWidth;
-    const ch = containerRef.current.clientHeight;
-    const lb = getLetterbox(naturalW, naturalH, cw, ch);
-    return {
-      left: lb.x + (mark.pixel_x / naturalW) * lb.w,
-      top: lb.y + (mark.pixel_y / naturalH) * lb.h,
-    };
-  }
-
-  // All marks on the current image (from all GCPs)
-  const currentImageMarks = Object.entries(markings).flatMap(([label, marks]) =>
-    marks
-      .filter((m) => m.image === selectedImage)
-      .map((m) => ({
-        ...m,
-        label,
-        gcpIdx: gcps.findIndex((g) => g.label === label),
-      }))
-  );
-
-  // ── Save mutation ─────────────────────────────────────────────────────────
-
-  const unmarked = gcps.filter(
-    (g) => !markings[g.label] || markings[g.label].length === 0
-  );
-  const totalMarked = gcps.length - unmarked.length;
-  const canSave = totalMarked > 0;
+  hasExisting,
+}: CsvUploadPanelProps) {
+  const { showErrorToast } = useCustomToast()
+  const [csvText, setCsvText] = useState("")
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const saveMutation = useMutation({
-    mutationFn: () => {
-      // Flatten all marks into a list of {label, image, pixel_x, pixel_y, lat, lon, alt}
-      const selections = Object.entries(markings).flatMap(([label, marks]) => {
-        const gcp = gcps.find((g) => g.label === label)!;
-        return marks.map((m) => ({
-          label,
-          image: m.image,
-          pixel_x: m.pixel_x,
-          pixel_y: m.pixel_y,
-          lat: gcp.lat,
-          lon: gcp.lon,
-          alt: gcp.alt,
-        }));
-      });
-      const imageGps = allImages.map((img) => ({
-        image: img.name,
-        lat: img.lat ?? 0,
-        lon: img.lon ?? 0,
-        alt: img.alt ?? 0,
-      }));
-      return ProcessingService.saveGcpSelection({
-        id: runId,
-        requestBody: {
-          gcp_selections: selections as unknown as { [key: string]: unknown }[],
-          image_gps: imageGps as unknown as { [key: string]: unknown }[],
+    mutationFn: async (text: string) => {
+      // Validate before upload — surfaces parse errors immediately.
+      parseGcpLocationsCsv(text)
+      const blob = new Blob([text], { type: "text/csv" })
+      const file = new File([blob], CSV_FILENAME, { type: "text/csv" })
+      await FilesService.apiFilesUploadUploadFile({
+        formData: {
+          file,
+          bucket_name: DEFAULT_BUCKET,
+          object_name: `${scopePrefix}${CSV_FILENAME}`,
         },
-      });
+      })
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
-      showSuccessToast("GCPs saved successfully");
-    },
-    onError: () => showErrorToast("Failed to save GCP selection"),
-  });
+    onSuccess: onLoaded,
+    onError: (err) =>
+      showErrorToast(
+        err instanceof Error ? err.message : "Failed to save GCP locations",
+      ),
+  })
 
-  const skipMutation = useMutation({
-    mutationFn: () =>
-      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/gcp-selection/skip`), {
-        method: "POST",
-        credentials: "include",
-      }).then((r) => {
-        if (!r.ok) throw new Error("Skip failed");
-        return r.json();
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
-      onSkip?.();
-    },
-    onError: () => showErrorToast("Failed to skip GCP selection"),
-  });
-
-  // ── Early returns ─────────────────────────────────────────────────────────
-
-  if (isLoading) {
-    return (
-      <div className="text-muted-foreground flex h-64 items-center justify-center text-sm">
-        Loading…
-      </div>
-    );
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const reader = new FileReader()
+    reader.onload = (ev) => setCsvText((ev.target?.result as string) ?? "")
+    reader.readAsText(f)
   }
-
-  if (!data?.has_gcp_locations || replaceMode) {
-    return (
-      <CsvUploadPanel
-        runId={runId}
-        hasExisting={data?.has_gcp_locations && replaceMode}
-        onLoaded={() => { setReplaceMode(false); refetch(); }}
-        onCancel={replaceMode ? () => setReplaceMode(false) : undefined}
-        onSkip={!replaceMode ? onSkip : undefined}
-      />
-    );
-  }
-
-  if (gcps.length === 0) {
-    return (
-      <div className="text-muted-foreground flex h-48 flex-col items-center justify-center gap-2">
-        <AlertCircle className="h-8 w-8" />
-        <p className="text-sm">
-          GCP locations file is empty or could not be parsed.
-        </p>
-      </div>
-    );
-  }
-
-  if (allImages.length === 0) {
-    return (
-      <div className="text-muted-foreground flex h-48 flex-col items-center justify-center gap-3">
-        <AlertCircle className="h-8 w-8" />
-        <div className="space-y-1 text-center">
-          <p className="text-sm font-medium">No images found</p>
-          <p className="text-xs">
-            Expected images in:{" "}
-            <code className="bg-muted rounded px-1 py-0.5 text-xs break-all">
-              {rawDir}
-            </code>
-          </p>
-          <p className="text-xs">
-            Make sure the data sync step completed successfully.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const imgSrc = selectedImage
-    ? apiUrl(
-        `/api/v1/files/serve?path=${encodeURIComponent(rawDir + "/" + selectedImage)}`
-      )
-    : null;
 
   return (
-    <div className="space-y-3">
-      {/* ── Top bar ── */}
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          data-onboarding="gcp-save"
-          disabled={!canSave || saveMutation.isPending}
-          onClick={() => saveMutation.mutate()}
-        >
-          {saveMutation.isPending ? "Saving…" : "Save GCPs"}
-        </Button>
-        <Button variant="outline" size="sm" data-onboarding="gcp-done" onClick={onSaved}>
-          Done
-        </Button>
-        <Button variant="ghost" size="sm" data-onboarding="gcp-replace-file" onClick={() => setReplaceMode(true)}>
-          Replace GCP file
-        </Button>
-
-        <div className="bg-border mx-1 h-5 w-px" />
-
-        <span className="text-muted-foreground text-sm whitespace-nowrap">
-          GCP:
-        </span>
-        <Select value={activeLabel ?? ""} onValueChange={handleGcpChange}>
-          <SelectTrigger className="w-44" data-onboarding="gcp-select">
-            <SelectValue placeholder="Select…" />
-          </SelectTrigger>
-          <SelectContent>
-            {gcps.map((gcp, idx) => {
-              const marks = markings[gcp.label] ?? [];
-              const color = gcpColor(idx);
-              return (
-                <SelectItem key={gcp.label} value={gcp.label}>
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 shrink-0 rounded-full"
-                      style={
-                        marks.length > 0
-                          ? { backgroundColor: color }
-                          : { border: "2px solid #9ca3af" }
-                      }
-                    />
-                    {gcp.label}
-                    {marks.length > 0 && (
-                      <span className="text-muted-foreground text-xs">
-                        ({marks.length})
-                      </span>
-                    )}
-                  </span>
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-        {/* Navigate between marked images for the active GCP */}
-        <div className="flex items-center gap-1" data-onboarding="gcp-nav-marks">
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={activeMarksSorted.length === 0}
-          onClick={goToPrevMark}
-          title="Previous marked image for this GCP"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {activeMarksSorted.length > 0
-            ? `${currentMarkPos >= 0 ? currentMarkPos + 1 : "–"}/${activeMarksSorted.length} marks`
-            : "no marks"}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={activeMarksSorted.length === 0}
-          onClick={goToNextMark}
-          title="Next marked image for this GCP"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <MapPin className="text-muted-foreground h-5 w-5" />
+          <CardTitle className="text-base">
+            {hasExisting ? "Replace GCP locations" : "GCP locations required"}
+          </CardTitle>
         </div>
-
-        <div className="flex-1" />
-
-        <div className="flex items-center gap-1" data-onboarding="gcp-nav-images">
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={selectedIdx <= 0}
-          onClick={goToPrevImage}
-          title="Previous image (←)"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        {/* Clickable image counter — click to jump to an image by number */}
-        {editingIdx ? (
-          <input
-            type="number"
-            min={1}
-            max={allImages.length}
-            value={editIdxValue}
-            className="w-16 rounded border px-1 py-0.5 text-center text-xs tabular-nums"
-            autoFocus
-            onChange={(e) => setEditIdxValue(e.target.value)}
-            onBlur={() => {
-              const n = parseInt(editIdxValue);
-              if (!isNaN(n) && n >= 1 && n <= allImages.length)
-                setSelectedImage(allImages[n - 1].name);
-              setEditingIdx(false);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const n = parseInt(editIdxValue);
-                if (!isNaN(n) && n >= 1 && n <= allImages.length)
-                  setSelectedImage(allImages[n - 1].name);
-                setEditingIdx(false);
-              } else if (e.key === "Escape") {
-                setEditingIdx(false);
-              }
-            }}
-          />
-        ) : (
-          <span
-            className="text-muted-foreground hover:text-foreground min-w-[4rem] cursor-pointer text-center text-xs tabular-nums hover:underline"
-            title="Click to jump to image number"
-            onClick={() => {
-              setEditIdxValue(String(selectedIdx + 1));
-              setEditingIdx(true);
-            }}
-          >
-            {allImages.length > 0
-              ? `${selectedIdx + 1} / ${allImages.length}`
-              : "—"}
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={selectedIdx >= allImages.length - 1}
-          onClick={goToNextImage}
-          title="Next image (→)"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        </div>
-      </div>
-
-      {/* ── Filter toggle + info banner ── */}
-      {data && (
-        <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300">
-          <MapPin className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1">
-            {data.filtered ? (
-              <>
-                Showing <strong>{data.count}</strong> of{" "}
-                <strong>{data.total_images}</strong> images within{" "}
-                <strong>{data.radius_m} m</strong> of a GCP
-                {data.has_msgs_synced ? " (platform-log GPS)" : " (EXIF GPS)"}.
-                {data.no_gps_count > 0 && (
-                  <>
-                    {" "}
-                    <strong>{data.no_gps_count}</strong> image
-                    {data.no_gps_count > 1 ? "s" : ""} with no GPS excluded.
-                  </>
-                )}
-              </>
-            ) : filterByGcp ? (
-              <span className="text-amber-700 dark:text-amber-400">
-                No images found near GCPs — showing all{" "}
-                <strong>{data.total_images}</strong> images.
-                {data.no_gps_count === data.total_images &&
-                  " All images lack GPS data."}
-              </span>
-            ) : (
-              <>
-                Showing all <strong>{data.total_images}</strong> images (filter
-                off).
-              </>
-            )}
-          </span>
-          <button
-            type="button"
-            data-onboarding="gcp-filter"
-            onClick={() => setFilterByGcp((v) => !v)}
-            className={`flex items-center gap-1 rounded px-2 py-0.5 font-medium transition-colors ${
-              filterByGcp
-                ? "bg-blue-200 text-blue-900 hover:bg-blue-300 dark:bg-blue-800 dark:text-blue-100"
-                : "bg-transparent text-blue-600 hover:bg-blue-100 dark:text-blue-400"
-            }`}
-          >
-            <Filter className="h-3 w-3" />
-            {filterByGcp ? "Filtered" : "Show all"}
-          </button>
-        </div>
-      )}
-
-      {/* ── GCP status line ── */}
-      {activeGcp && (
-        <div className="text-muted-foreground flex items-center gap-3 px-1 text-xs">
-          <span
-            className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: activeColor }}
-          />
-          <span>
-            {activeGcp.lat.toFixed(6)}, {activeGcp.lon.toFixed(6)} ·{" "}
-            {activeGcp.alt}m
-          </span>
-          <span className="text-border">·</span>
-          {activeGcpMarks.length > 0 ? (
-            <span
-              className="flex items-center gap-1"
-              style={{ color: activeColor }}
-            >
-              <Check className="h-3 w-3" />
-              {activeGcpMarks.length} image
-              {activeGcpMarks.length > 1 ? "s" : ""} marked
-              {activeMark && (
-                <span className="text-muted-foreground ml-1">
-                  (right-click to remove this one)
-                </span>
-              )}
-            </span>
-          ) : (
-            <span className="text-amber-600">
-              Not yet marked — click the image to mark this GCP
-            </span>
-          )}
-          {unmarked.length > 0 && (
-            <>
-              <span className="text-border">·</span>
-              <span className="text-muted-foreground ml-auto">
-                {unmarked.length} GCP{unmarked.length > 1 ? "s" : ""} not yet
-                marked
-              </span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── Image viewer ── */}
-      <div
-        ref={containerRef}
-        data-onboarding="gcp-viewer"
-        className="relative w-full overflow-hidden rounded-lg bg-black select-none"
-        style={{
-          aspectRatio: "16/9",
-          cursor: isPanning ? "grabbing" : "crosshair",
-        }}
-        onMouseDown={handleMouseDown}
-        onContextMenu={handleContextMenu}
-        onDoubleClick={resetView}
-      >
-        {imgSrc ? (
-          <>
-            {/* Transformed wrapper — crosshairs live here so they move with the image */}
-            <div
-              className="absolute inset-0"
-              style={{
-                transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
-                transformOrigin: "0 0",
-              }}
-            >
-              <img
-                ref={imgRef}
-                src={imgSrc}
-                alt={selectedImage ?? ""}
-                className="h-full w-full object-contain"
-                draggable={false}
-                onLoad={() => setImgLoadCount((n) => n + 1)}
-              />
-              {/* Crosshairs for all GCP marks on this image */}
-              {currentImageMarks.map((m) => {
-                const pos = getCrosshairPos(m);
-                if (!pos) return null;
-                const color = gcpColor(m.gcpIdx);
-                const isActive = m.label === activeLabel;
-                return (
-                  <div
-                    key={`${m.label}-crosshair`}
-                    className="pointer-events-none absolute"
-                    style={{ left: pos.left, top: pos.top }}
-                  >
-                    <div
-                      className="absolute -translate-x-1/2 -translate-y-1/2"
-                      style={{
-                        width: isActive ? 28 : 22,
-                        height: isActive ? 28 : 22,
-                      }}
-                    >
-                      <div
-                        className="absolute top-0 left-1/2 h-full w-px"
-                        style={{ backgroundColor: color }}
-                      />
-                      <div
-                        className="absolute top-1/2 left-0 h-px w-full"
-                        style={{ backgroundColor: color }}
-                      />
-                      <div
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2"
-                        style={{
-                          width: isActive ? 8 : 6,
-                          height: isActive ? 8 : 6,
-                          borderColor: color,
-                        }}
-                      />
-                    </div>
-                    {/* GCP number badge */}
-                    <div
-                      className="absolute -translate-x-1/2 rounded px-0.5 text-[9px] leading-none font-bold"
-                      style={{
-                        top: isActive ? 16 : 13,
-                        backgroundColor: color,
-                        color: "#fff",
-                      }}
-                    >
-                      {gcpShortLabel(m.label)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Zoom controls — always visible top-right */}
-            <div className="absolute top-2 right-2 z-10 flex items-center gap-1" data-onboarding="gcp-zoom">
-              <button
-                className="flex h-7 w-7 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 disabled:opacity-40"
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={() => applyZoom(1 / 1.5)}
-                disabled={zoom <= 1}
-                title="Zoom out"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-              <span className="min-w-[3.5rem] rounded bg-black/60 px-1.5 py-0.5 text-center text-xs text-white tabular-nums">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                className="flex h-7 w-7 items-center justify-center rounded bg-black/60 text-white hover:bg-black/80 disabled:opacity-40"
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={() => applyZoom(1.5)}
-                disabled={zoom >= 10}
-                title="Zoom in"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-              {zoom > 1 && (
-                <button
-                  className="rounded bg-black/60 px-1.5 py-0.5 text-xs text-white hover:bg-black/80"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={resetView}
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-
-            {/* Hint */}
-            <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-white/30 select-none">
-              Drag to pan · Double-click to reset
-            </div>
-          </>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-white/40">Select a GCP above</p>
+        <CardDescription>
+          {hasExisting
+            ? "Paste or pick a new CSV to replace the existing file."
+            : "Upload a CSV of survey GCPs. Format: "}
+          <code className="text-xs">Label, Lat_dec, Lon_dec, Altitude</code>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {hasExisting && (
+          <div className="rounded-md border border-yellow-400 bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:border-yellow-600 dark:bg-yellow-950 dark:text-yellow-200">
+            Replacing overwrites <code>{CSV_FILENAME}</code> at this scope and
+            invalidates marks taken against the previous catalog.
           </div>
         )}
-      </div>
-
-      {/* ── Image slider ── */}
-      {allImages.length > 0 && (
-        <div className="px-1">
-          {/* Nearest GCP label — shown when the image has GPS data */}
-          {nearestGcp ? (
-            <p className="text-muted-foreground mb-1 text-xs">
-              Closest to GCP{" "}
-              <strong className="text-foreground">{nearestGcp.label}</strong>
-              {" "}—{" "}
-              <span>{nearestGcp.dist_m.toFixed(1)} m away</span>
-            </p>
-          ) : selectedImageData && !selectedImageData.lat ? (
-            <p className="text-muted-foreground mb-1 text-xs italic">No GPS on this image</p>
-          ) : null}
-          {/* Extra bottom padding to make room for GCP number labels */}
-          <div className="relative" style={{ paddingBottom: "1.25rem" }} data-onboarding="gcp-slider">
-            <input
-              type="range"
-              min={0}
-              max={sliderMax}
-              value={selectedIdx >= 0 ? selectedIdx : 0}
-              onChange={(e) =>
-                setSelectedImage(allImages[Number(e.target.value)].name)
-              }
-              className="accent-primary h-2 w-full cursor-pointer"
-            />
-            {/* Colored diamond markers for every mark from every GCP */}
-            {sliderMax > 0 &&
-              allMarks.map((m) => {
-                const imgIdx = allImages.findIndex(
-                  (img) => img.name === m.image
-                );
-                if (imgIdx < 0) return null;
-                const pct = (imgIdx / sliderMax) * 100;
-                const color = gcpColor(m.gcpIdx);
-                const isActive = m.label === activeLabel;
-                return (
-                  <div
-                    key={`${m.label}-${m.image}`}
-                    className="pointer-events-none absolute"
-                    style={{ left: sliderLeft(pct), top: "50%" }}
-                  >
-                    {/* Diamond */}
-                    <div
-                      className="absolute -translate-x-1/2 -translate-y-1/2 rotate-45"
-                      style={{
-                        width: isActive ? 14 : 11,
-                        height: isActive ? 14 : 11,
-                        backgroundColor: color,
-                        border: "1px solid rgba(255,255,255,0.5)",
-                        marginTop: isActive ? 0 : 1,
-                      }}
-                      title={`${m.label}: ${m.image}`}
-                    />
-                    {/* GCP number below the diamond */}
-                    <div
-                      className="absolute -translate-x-1/2 text-[9px] leading-none font-bold"
-                      style={{ top: 12, color }}
-                    >
-                      {gcpShortLabel(m.label)}
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-          <div className="text-muted-foreground mt-0.5 truncate text-xs">
-            {selectedImage}
-          </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">CSV content</Label>
+          <Textarea
+            rows={8}
+            value={csvText}
+            onChange={(e) => setCsvText(e.target.value)}
+            className="font-mono text-xs"
+            placeholder={
+              "Label,Lat_dec,Lon_dec,Altitude\n1,33.4512,-111.9876,380.5\n2,33.4498,-111.9845,381.0"
+            }
+            data-testid="gcp-csv-textarea"
+          />
         </div>
-      )}
-
-      {/* ── Clear all GCPs ── */}
-      {Object.keys(markings).length > 0 && (
-        <div className="flex items-center gap-2 pt-1">
-          {confirmClear ? (
-            <>
-              <span className="text-muted-foreground text-sm">
-                Clear all GCP markings?
-              </span>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => {
-                  setMarkings({})
-                  setConfirmClear(false)
-                }}
-              >
-                Yes, clear all
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConfirmClear(false)}
-              >
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="destructive"
-              size="sm"
-              data-onboarding="gcp-clear"
-              onClick={() => setConfirmClear(true)}
-            >
-              Clear all GCPs
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* ── Skip GCP Selection ── */}
-      {onSkip && (
-        <div className="border-t pt-4">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            disabled={skipMutation.isPending}
-            onClick={() => skipMutation.mutate()}
+            onClick={() => fileRef.current?.click()}
+            data-testid="gcp-csv-pick-file"
           >
-            {skipMutation.isPending ? "Skipping…" : "Skip GCP Selection"}
+            <Upload className="mr-1.5 h-3.5 w-3.5" />
+            Pick file
+          </Button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={handleFile}
+          />
+          {onCancel && (
+            <Button variant="ghost" size="sm" onClick={onCancel}>
+              Cancel
+            </Button>
+          )}
+          <div className="flex-1" />
+          {onSkip && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onSkip}
+              data-testid="gcp-skip"
+            >
+              <SkipForward className="mr-1.5 h-3.5 w-3.5" />
+              Skip GCP selection
+            </Button>
+          )}
+          <Button
+            size="sm"
+            disabled={!csvText.trim() || saveMutation.isPending}
+            onClick={() => saveMutation.mutate(csvText)}
+            data-testid="gcp-csv-save"
+          >
+            {saveMutation.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : null}
+            {hasExisting ? "Replace" : "Load GCP locations"}
           </Button>
         </div>
-      )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ── Main picker ─────────────────────────────────────────────────────────────
+
+export function GcpPicker({
+  workspace: _workspace,
+  run,
+  scope,
+  onSaved,
+  onCancel,
+}: GcpPickerProps) {
+  const queryClient = useQueryClient()
+  const { showErrorToast, showSuccessToast } = useCustomToast()
+
+  // GCP picker is single-dataset: each mark ties a GCP to a pixel in
+  // a specific image, and a GCP set typically belongs to a flight (not
+  // arbitrarily across uploads). When the scope has only one observed
+  // dataset, that one is auto-picked; when multiple are observed the
+  // user must narrow the run's selection.
+  const { activeShortId, observedShortIds } = useActiveDatasetShortId(
+    scope,
+    run,
+  )
+  const datasetShortIds = run.uploadScope?.datasetShortIds ?? []
+
+  // Image listing + EXIF GPS — shared with the image-review step.
+  const {
+    images: allImages,
+    gpsMap,
+    gpsLoading,
+    gpsError,
+    gpsReadyCount,
+    filesQuery,
+    imagesPrefix,
+  } = useImageGps(scope, activeShortId)
+
+  // All scope-wide sidecars (gcp_list.txt, geo.txt, gcp_locations.csv,
+  // gcp_image_groups.json, image_filter.txt) live at the scope root,
+  // sibling of every dataset subdir. The ODM worker reads them from
+  // the same place via `_download_gcp_files` / `_load_image_filter`.
+  const scopePrefix = rawScopePrefix(scope)
+  const csvObjectName = `${scopePrefix}${CSV_FILENAME}`
+  const groupsObjectName = `${scopePrefix}${GROUPS_FILENAME}`
+  // Existence pre-check via a non-recursive listing of the scope root.
+  // Without this the picker's three sidecar queries would each fire a
+  // download on mount, each 404'ing for scopes that don't yet have
+  // sidecars — Chromium logs every 404 as a console.error which then
+  // trips the strict E2E console-error guard.
+  const scopeListingQuery = useQuery<string[], Error>({
+    queryKey: ["files", "list-scope-root", scopePrefix],
+    queryFn: async () => {
+      const res = await FilesService.apiFilesListFilePathListFiles({
+        filePath: `${DEFAULT_BUCKET}/${scopePrefix}`,
+      })
+      const list = (res as { object_name: string }[] | null) ?? []
+      return list.map((f) => f.object_name)
+    },
+    enabled: Boolean(activeShortId),
+  })
+  const scopeListNames = scopeListingQuery.data ?? []
+  const csvOnDisk = scopeListNames.includes(csvObjectName)
+  const groupsOnDisk = scopeListNames.includes(groupsObjectName)
+  const filterOnDisk = scopeListNames.includes(
+    `${scopePrefix}${IMAGE_FILTER_FILENAME}`,
+  )
+
+  // ── Excluded images (image_review step) ───────────────────────────────────
+  // The optional Image Exclusion step writes `image_filter.txt` at
+  // the scope root. Drop those names from the candidate list and the
+  // geo.txt sidecar so the GCP picker and ODM agree on what's in the run.
+  const filterObjectName = `${scopePrefix}${IMAGE_FILTER_FILENAME}`
+  const filterQuery = useQuery<Set<string>, Error>({
+    queryKey: ["gcp-image-filter", filterObjectName],
+    queryFn: async () =>
+      parseImageFilter(await fetchObjectAsText(filterObjectName)),
+    enabled: Boolean(activeShortId) && filterOnDisk,
+  })
+  const excludedNames = filterQuery.data ?? new Set<string>()
+
+  const images = useMemo(
+    () =>
+      allImages.filter(
+        (f) => !excludedNames.has(f.object_name?.split("/").pop() ?? ""),
+      ),
+    [allImages, excludedNames],
+  )
+  // Drop excluded entries from the gps map so map-based UIs (Map
+  // discovery + in-flow Map sub-tab) only render dots for images that
+  // will actually reach ODM. Marks on excluded images are pointless —
+  // ODM never sees them — and a stale dot would invite the user to
+  // commit one.
+  const filteredGpsMap = useMemo(() => {
+    if (excludedNames.size === 0) return gpsMap
+    const out: Record<string, ImageGps> = {}
+    for (const [name, g] of Object.entries(gpsMap)) {
+      if (!excludedNames.has(name)) out[name] = g
+    }
+    return out
+  }, [gpsMap, excludedNames])
+  // GPS-ready count *within the non-excluded set*. The raw imageBbox
+  // count comes from useImageGps before exclusion is applied, so
+  // displaying that against the filtered total gave nonsense ratios
+  // (e.g. "193/74") whenever Image Exclusion had run.
+  const filteredGpsCount = useMemo(
+    () => Object.values(filteredGpsMap).filter((g) => g != null).length,
+    [filteredGpsMap],
+  )
+
+  // ── Fetch + parse the CSV (coordinates) and groups sidecar (per-GCP images)
+  // Gated on the scope-root listing so we don't generate spurious
+  // 404 console errors for scopes that haven't yet saved a sidecar.
+  const csvQuery = useQuery<GcpCatalogEntry[], Error>({
+    queryKey: ["gcp-csv", csvObjectName],
+    queryFn: async () =>
+      parseGcpLocationsCsv(await fetchObjectAsText(csvObjectName)),
+    enabled: Boolean(activeShortId) && csvOnDisk,
+  })
+  const groupsQuery = useQuery<Record<string, string[]>, Error>({
+    queryKey: ["gcp-image-groups", groupsObjectName],
+    queryFn: async () =>
+      parseGcpImageGroups(await fetchObjectAsText(groupsObjectName)),
+    enabled: Boolean(activeShortId) && groupsOnDisk,
+  })
+  const csvRows = csvQuery.data ?? []
+  // Existence flags driven by the scope-root listing (which the
+  // queries themselves gate on).
+  const csvExists = csvOnDisk
+  const filterExists = filterOnDisk
+
+  // Per-GCP image groups (map mode). Initial value comes from step
+  // state; hydrated from the durable JSON sidecar once it loads. Local
+  // state is the source of truth for the catalog merge below — the
+  // query data may lag a refetch by a few ms after a write, and the
+  // catalog needs to reflect the just-added label immediately.
+  const [gcpImageGroups, setGcpImageGroups] = useState<
+    Record<string, string[]>
+  >(() => {
+    const prev = run.steps.gcp_selection?.outputs?.gcpImageGroups
+    if (prev && typeof prev === "object" && !Array.isArray(prev)) {
+      return prev as Record<string, string[]>
+    }
+    return {}
+  })
+  useEffect(() => {
+    if (groupsQuery.data) setGcpImageGroups(groupsQuery.data)
+  }, [groupsQuery.data])
+
+  // Catalog merges CSV rows with the local gcpImageGroups state. Reading
+  // groupsQuery.data here directly would miss a freshly-added coord-less
+  // label until the refetch lands, which would then trip the activeLabel
+  // reconciliation effect into resetting the user's selection.
+  const catalog: GcpCatalogEntry[] = useMemo(
+    () => mergeCatalog(csvRows, gcpImageGroups),
+    [csvRows, gcpImageGroups],
+  )
+  const existingLabels = useMemo(() => catalog.map((g) => g.label), [catalog])
+
+  // ── Marks (per-run state, persisted in runStore) ──────────────────────────
+  const [marks, setMarks] = useState<GcpMark[]>(() => {
+    const prev = run.steps.gcp_selection?.manualMarks
+    return Array.isArray(prev) ? (prev as GcpMark[]) : []
+  })
+  useEffect(() => {
+    const prev = run.steps.gcp_selection?.manualMarks
+    if (JSON.stringify(prev) !== JSON.stringify(marks)) {
+      setStepState(run.id, "gcp_selection", { manualMarks: marks }, "person")
+    }
+  }, [marks, run.id, run.steps.gcp_selection])
+
+  // ── Active GCP + filter state ─────────────────────────────────────────────
+  const [activeLabel, setActiveLabel] = useState<string | null>(null)
+  useEffect(() => {
+    if (!activeLabel && catalog.length > 0) setActiveLabel(catalog[0].label)
+    if (
+      activeLabel &&
+      catalog.length > 0 &&
+      !catalog.some((g) => g.label === activeLabel)
+    ) {
+      setActiveLabel(catalog[0].label)
+    }
+  }, [catalog, activeLabel])
+  const activeIdx = catalog.findIndex((g) => g.label === activeLabel)
+  const activeGcp = activeIdx >= 0 ? catalog[activeIdx] : null
+
+  // Per-GCP filter mode + radius. Each GCP independently picks "radius"
+  // (haversine of its lat/lon ± radius) or "map" (explicit image-group).
+  // Coord-less GCPs are forced to "map" — radius needs an anchor.
+  const [gcpModes, setGcpModes] = useState<Record<string, "radius" | "map">>(
+    () => {
+      const prev = run.steps.gcp_selection?.outputs?.gcpModes
+      if (prev && typeof prev === "object" && !Array.isArray(prev)) {
+        return prev as Record<string, "radius" | "map">
+      }
+      return {}
+    },
+  )
+  const [gcpRadii, setGcpRadii] = useState<Record<string, number>>(() => {
+    const prev = run.steps.gcp_selection?.outputs?.gcpRadii
+    if (prev && typeof prev === "object" && !Array.isArray(prev)) {
+      return prev as Record<string, number>
+    }
+    return {}
+  })
+  // Persist per-GCP UI state on change so reload restores it. Only fire
+  // when the maps' JSON shape actually differs from what's already in
+  // step state — naive deps cause an infinite loop because setStepState
+  // recreates `run.steps.gcp_selection.outputs` on every call.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment
+  useEffect(() => {
+    const stored = run.steps.gcp_selection?.outputs ?? {}
+    const sameModes =
+      JSON.stringify((stored as { gcpModes?: unknown }).gcpModes ?? {}) ===
+      JSON.stringify(gcpModes)
+    const sameRadii =
+      JSON.stringify((stored as { gcpRadii?: unknown }).gcpRadii ?? {}) ===
+      JSON.stringify(gcpRadii)
+    if (sameModes && sameRadii) return
+    setStepState(
+      run.id,
+      "gcp_selection",
+      {
+        outputs: { ...stored, gcpModes, gcpRadii },
+      },
+      "person",
+    )
+  }, [gcpModes, gcpRadii])
+
+  // Effective mode/radius for the active GCP. Coord-less GCPs always
+  // resolve to "map"; new GCPs default to "radius" when they have coords.
+  const activeMode: "radius" | "map" = (() => {
+    if (!activeGcp) return "radius"
+    const stored = gcpModes[activeGcp.label]
+    if (stored === "radius" || stored === "map") {
+      if (
+        stored === "radius" &&
+        (activeGcp.lat == null || activeGcp.lon == null)
+      ) {
+        return "map"
+      }
+      return stored
+    }
+    return activeGcp.lat == null || activeGcp.lon == null ? "map" : "radius"
+  })()
+  const activeRadius = activeGcp
+    ? (gcpRadii[activeGcp.label] ?? DEFAULT_RADIUS_M)
+    : DEFAULT_RADIUS_M
+
+  // Image candidates for the slider, governed by the active GCP's mode.
+  const imageNames = useMemo(
+    () => images.map((f) => f.object_name?.split("/").pop() ?? ""),
+    [images],
+  )
+  const filteredImageNames = useMemo(() => {
+    if (!activeGcp) return imageNames
+    if (activeMode === "map") {
+      const group = gcpImageGroups[activeGcp.label] ?? []
+      if (group.length === 0) return []
+      const namesSet = new Set(imageNames)
+      return group.filter((n) => namesSet.has(n))
+    }
+    // Radius mode requires coords. Without them, fall back to no candidates;
+    // the catalog UI nudges the user to fill coords or switch to map mode.
+    if (activeGcp.lat == null || activeGcp.lon == null) return []
+    const lat = activeGcp.lat
+    const lon = activeGcp.lon
+    return imageNames.filter((name) => {
+      const g = gpsMap[name]
+      if (!g) return false
+      return haversineM(lat, lon, g.lat, g.lon) <= activeRadius
+    })
+  }, [activeGcp, activeMode, activeRadius, imageNames, gpsMap, gcpImageGroups])
+
+  // Distance from the active GCP to its closest image. Surfaced in
+  // the empty-state and the catalog header so the user sees whether
+  // the filter excluded everything for proximity reasons (e.g. 200 m
+  // away → bump radius) or alignment reasons (e.g. 12000 km away →
+  // CSV column-order swap).
+  const closestImageStat = useMemo(() => {
+    if (!activeGcp || activeGcp.lat == null || activeGcp.lon == null)
+      return null
+    let bestName: string | null = null
+    let bestDist = Infinity
+    for (const name of imageNames) {
+      const g = gpsMap[name]
+      if (!g) continue
+      const d = haversineM(
+        activeGcp.lat as number,
+        activeGcp.lon as number,
+        g.lat,
+        g.lon,
+      )
+      if (d < bestDist) {
+        bestDist = d
+        bestName = name
+      }
+    }
+    if (!bestName) return null
+    return { name: bestName, distM: bestDist }
+  }, [activeGcp, imageNames, gpsMap])
+
+  // Per-image-dot color for the always-visible map. Each dot adopts the
+  // color of the GCP that "claims" it (explicit map-mode group beats
+  // implicit radius proximity). Computed against the *filtered* gpsMap
+  // so excluded images don't influence the coloring even transiently.
+  const dotColors = useMemo(
+    () =>
+      computeDotColors({
+        catalog,
+        gpsMap: filteredGpsMap,
+        modes: gcpModes,
+        radii: gcpRadii,
+        groups: gcpImageGroups,
+        defaultRadius: DEFAULT_RADIUS_M,
+      }),
+    [catalog, filteredGpsMap, gcpModes, gcpRadii, gcpImageGroups],
+  )
+
+  const [imageIndex, setImageIndex] = useState(0)
+  useEffect(() => {
+    if (imageIndex >= filteredImageNames.length) setImageIndex(0)
+  }, [filteredImageNames, imageIndex])
+  const activeImageName = filteredImageNames[imageIndex] ?? ""
+
+  // ── Authed image preview blob ─────────────────────────────────────────────
+  // Hold the live URL in a ref so we can revoke the *previous* URL only
+  // after a new one is in state. Revoking on cleanup (the obvious
+  // pattern) caused a render race where the <img> tag still pointed at
+  // the just-revoked URL between renders, which Chrome surfaces as
+  // `Failed to load resource: net::ERR_FILE_NOT_FOUND` console errors.
+  const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null)
+  const blobUrlRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeImageName) {
+      // Don't revoke the URL or clear state here — the <img> may still
+      // be in the DOM for a tick while React commits, and Chrome will
+      // log ERR_FILE_NOT_FOUND if the blob disappears underneath it.
+      // The unmount cleanup further down releases the blob; until then
+      // a stale image is harmless.
+      return
+    }
+    let cancelled = false
+    fetchObjectAsBlob(`${imagesPrefix}${activeImageName}`)
+      .then((b) => {
+        if (cancelled) return
+        const newUrl = URL.createObjectURL(b)
+        const oldUrl = blobUrlRef.current
+        blobUrlRef.current = newUrl
+        setImageBlobUrl(newUrl)
+        if (oldUrl) URL.revokeObjectURL(oldUrl)
+      })
+      .catch(() => {
+        if (!cancelled) setImageBlobUrl(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [imagesPrefix, activeImageName])
+  useEffect(
+    () => () => {
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+    },
+    [],
+  )
+
+  // ── Mark interactions ─────────────────────────────────────────────────────
+  const imgRef = useRef<HTMLImageElement | null>(null)
+
+  function handleImageClick(e: React.MouseEvent<HTMLImageElement>) {
+    if (!activeLabel) {
+      showErrorToast("Pick a GCP from the dropdown first.")
+      return
+    }
+    if (activeGcp && (activeGcp.lat == null || activeGcp.lon == null)) {
+      showErrorToast(
+        `Add survey coordinates for ${activeGcp.label} before marking — coord-less GCPs aren't included in gcp_list.txt.`,
+      )
+      return
+    }
+    if (!activeImageName) return
+    const img = imgRef.current
+    if (!img) return
+    const rect = img.getBoundingClientRect()
+    const scaleX = img.naturalWidth / rect.width
+    const scaleY = img.naturalHeight / rect.height
+    const px = (e.clientX - rect.left) * scaleX
+    const py = (e.clientY - rect.top) * scaleY
+    setMarks((prev) => [
+      ...prev.filter(
+        (m) => !(m.label === activeLabel && m.image === activeImageName),
+      ),
+      {
+        label: activeLabel,
+        image: activeImageName,
+        pixel_x: px,
+        pixel_y: py,
+      },
+    ])
+  }
+
+  function handleImageContextMenu(e: React.MouseEvent<HTMLImageElement>) {
+    e.preventDefault()
+    if (!activeLabel || !activeImageName) return
+    setMarks((prev) =>
+      prev.filter(
+        (m) => !(m.label === activeLabel && m.image === activeImageName),
+      ),
+    )
+  }
+
+  const marksForActiveImage = useMemo(
+    () => marks.filter((m) => m.image === activeImageName),
+    [marks, activeImageName],
+  )
+
+  // For slider diamonds: every mark that touches a filtered image, mapped to
+  // its index in the filtered list.
+  const sliderDiamonds = useMemo(() => {
+    const out: Array<{ idx: number; label: string; color: string }> = []
+    for (const m of marks) {
+      const idx = filteredImageNames.indexOf(m.image)
+      if (idx < 0) continue
+      const i = catalog.findIndex((g) => g.label === m.label)
+      if (i < 0) continue
+      out.push({ idx, label: m.label, color: gcpColor(i) })
+    }
+    return out
+  }, [marks, filteredImageNames, catalog])
+
+  // ── Save flow ─────────────────────────────────────────────────────────────
+  // Match main's gate: save as long as at least one GCP has at least
+  // one mark. A CSV often lists more candidate GCPs than are visible
+  // on a given flight; unmarked rows are silently omitted from
+  // gcp_list.txt rather than blocking save. ODM uses whatever marks
+  // it gets and ignores the rest.
+  const labelsCovered = useMemo(
+    () => new Set(marks.map((m) => m.label)),
+    [marks],
+  )
+  const unmarkedLabels = useMemo(
+    () =>
+      catalog.filter((g) => !labelsCovered.has(g.label)).map((g) => g.label),
+    [catalog, labelsCovered],
+  )
+  const canSave = labelsCovered.size > 0
+
+  // ── Catalog mutations: append a row, write groups sidecar ─────────────────
+  // Each method (Manual/Map-discover/inline coord-add) calls these to
+  // persist immediately so the user's work survives without relying on
+  // the final save click.
+  async function uploadText(
+    text: string,
+    objectName: string,
+    contentType: string,
+  ): Promise<void> {
+    const file = new File([text], objectName.split("/").pop() ?? "file", {
+      type: contentType,
+    })
+    await FilesService.apiFilesUploadUploadFile({
+      formData: {
+        file,
+        bucket_name: DEFAULT_BUCKET,
+        object_name: objectName,
+      },
+    })
+  }
+
+  const deleteCatalogEntry = useMutation({
+    mutationFn: async (label: string) => {
+      // 1. Remove from gcp_locations.csv if present.
+      if (csvExists) {
+        const text = await fetchObjectAsText(csvObjectName)
+        const rows = parseGcpLocationsCsv(text)
+        const next = rows.filter((r) => r.label !== label)
+        if (next.length !== rows.length) {
+          await uploadText(
+            serializeGcpLocationsCsv(next),
+            csvObjectName,
+            "text/csv",
+          )
+        }
+      }
+      // 2. Remove from groups sidecar if present.
+      if (gcpImageGroups[label]) {
+        const next = { ...gcpImageGroups }
+        delete next[label]
+        await uploadText(
+          serializeGcpImageGroups(next),
+          groupsObjectName,
+          "application/json",
+        )
+        setGcpImageGroups(next)
+      }
+      // 3. Drop any marks pointing at this label so the slider/save flow
+      //    don't reference a deleted GCP.
+      setMarks((prev) => prev.filter((m) => m.label !== label))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list", imagesPrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["gcp-csv", csvObjectName],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["gcp-image-groups", groupsObjectName],
+      })
+    },
+    onError: (err) =>
+      showErrorToast(err instanceof Error ? err.message : "Failed to delete"),
+  })
+
+  const confirm = useConfirm()
+  async function handleDeleteActiveGcp() {
+    if (!activeGcp) return
+    const label = activeGcp.label
+    const groupSize = gcpImageGroups[label]?.length ?? 0
+    const markCount = marks.filter((m) => m.label === label).length
+    const lossSummary: string[] = []
+    if (activeGcp.lat != null && activeGcp.lon != null) {
+      lossSummary.push("its row in gcp_locations.csv")
+    }
+    if (groupSize > 0) {
+      lossSummary.push(
+        `its image group (${groupSize} image${groupSize === 1 ? "" : "s"})`,
+      )
+    }
+    if (markCount > 0) {
+      lossSummary.push(`${markCount} pixel mark${markCount === 1 ? "" : "s"}`)
+    }
+    await confirm({
+      title: `Delete ${label}?`,
+      description:
+        lossSummary.length > 0
+          ? `Removes ${lossSummary.join(", ")}. This cannot be undone.`
+          : "Removes the catalog entry. This cannot be undone.",
+      confirmLabel: "Delete GCP",
+      action: () => deleteCatalogEntry.mutateAsync(label),
+    })
+  }
+
+  const writeGroupsSidecar = useMutation({
+    mutationFn: async (next: Record<string, string[]>) => {
+      await uploadText(
+        serializeGcpImageGroups(next),
+        groupsObjectName,
+        "application/json",
+      )
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list", imagesPrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["gcp-image-groups", groupsObjectName],
+      })
+    },
+    onError: (err) =>
+      showErrorToast(err instanceof Error ? err.message : "Failed to save"),
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (catalog.length === 0)
+        throw new Error("Add at least one GCP first (CSV, manual, or map).")
+      if (!canSave) {
+        throw new Error("Mark at least one GCP on at least one image.")
+      }
+      // Drop marks on images that the Image Exclusion step removed —
+      // ODM never sees those images, so any rows in gcp_list.txt that
+      // reference them are dead weight at best and cause "missing image"
+      // warnings at worst.
+      const marksAfterExclusion = excludedNames.size
+        ? marks.filter((m) => !excludedNames.has(m.image))
+        : marks
+      // Cull GCPs whose surveyed coordinates fall well outside the image
+      // GPS bbox — almost always a typo (decimal slip, swapped lat/lon,
+      // wrong field). They'd anchor ODM's bundle adjustment to a phantom
+      // location and warp the reconstruction. The CSV keeps them so the
+      // user can fix the values; only gcp_list.txt is filtered.
+      const { kept: keptCatalog, culled: culledGcps } = cullDistantGcps(
+        catalog,
+        gpsMap,
+      )
+      const culledLabels = new Set(culledGcps.map((g) => g.label))
+      const includedMarks = culledLabels.size
+        ? marksAfterExclusion.filter((m) => !culledLabels.has(m.label))
+        : marksAfterExclusion
+      const gcpText = serializeGcpList(keptCatalog, includedMarks)
+      const geoText = serializeGeoTxt(imageNames, gpsMap)
+      // gcp_list.txt + geo.txt land at the scope root so the worker's
+      // _download_gcp_files picks them up regardless of which datasets
+      // the multi-select feeds in.
+      await uploadText(gcpText, `${scopePrefix}${GCP_FILENAME}`, "text/plain")
+      await uploadText(geoText, `${scopePrefix}${GEO_FILENAME}`, "text/plain")
+      if (culledGcps.length > 0) {
+        showErrorToast(
+          `Excluded ${culledGcps.length} GCP(s) more than ${GCP_BBOX_CULL_BUFFER_M} m outside the image area: ${culledGcps
+            .map((g) => g.label)
+            .join(
+              ", ",
+            )}. Fix their Lat/Lon in the catalog and re-save to include them.`,
+        )
+      }
+      // Always persist groups sidecar — Map-discovery may have already
+      // written it during the session, but in-flow Map-tab edits to
+      // existing GCPs are only mirrored here on save.
+      if (Object.keys(gcpImageGroups).length > 0) {
+        await uploadText(
+          serializeGcpImageGroups(gcpImageGroups),
+          groupsObjectName,
+          "application/json",
+        )
+      }
+    },
+    onSuccess: () => {
+      setStepState(
+        run.id,
+        "gcp_selection",
+        {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          manualMarks: marks,
+          outputs: {
+            ...(run.steps.gcp_selection?.outputs ?? {}),
+            gcpListPath: `${scopePrefix}${GCP_FILENAME}`,
+            geoTxtPath: `${scopePrefix}${GEO_FILENAME}`,
+            gcpLocationsCsvPath: csvObjectName,
+            gcpImageGroupsPath: groupsObjectName,
+            gcpCount: catalog.length,
+            markCount: excludedNames.size
+              ? marks.filter((m) => !excludedNames.has(m.image)).length
+              : marks.length,
+            gcpImageGroups,
+            gcpModes,
+            gcpRadii,
+          },
+        },
+        "person",
+      )
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list", imagesPrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
+      })
+      showSuccessToast(
+        `Uploaded ${GCP_FILENAME} (${marks.length} marks) and ${GEO_FILENAME}`,
+      )
+      onSaved?.()
+    },
+    onError: (err) =>
+      showErrorToast(err instanceof Error ? err.message : "Failed to save"),
+  })
+
+  function handleSkip() {
+    setStepState(
+      run.id,
+      "gcp_selection",
+      {
+        status: "skipped",
+        completedAt: new Date().toISOString(),
+        manualMarks: marks,
+      },
+      "person",
+    )
+    showSuccessToast("Skipped GCP selection")
+    onSaved?.()
+  }
+
+  // ── Replace-CSV mode ──────────────────────────────────────────────────────
+  // Re-uploading the CSV overwrites it in MinIO. Image groups in the
+  // sidecar are preserved unless the user removes them explicitly.
+  const [replaceMode, setReplaceMode] = useState(false)
+  function onCsvLoaded() {
+    setReplaceMode(false)
+    queryClient.invalidateQueries({
+      queryKey: ["files", "list", imagesPrefix],
+    })
+    // The scope-root listing drives the existence flag (csvOnDisk)
+    // that gates the CSV download. Refresh it first so the picker
+    // knows the file now exists.
+    queryClient.invalidateQueries({
+      queryKey: ["files", "list-scope-root", scopePrefix],
+    })
+    queryClient.invalidateQueries({ queryKey: ["gcp-csv", csvObjectName] })
+  }
+
+  // ── Inline coordinate editor (next to the Active GCP dropdown) ────────────
+  // The user types Lat/Lon/Alt for the active GCP directly here. When they
+  // select "+ Add new GCP" from the dropdown the boxes blank out and Save
+  // creates a fresh entry.
+  const [isAddingNew, setIsAddingNew] = useState(false)
+  const [newLabelS, setNewLabelS] = useState("")
+  const [coordsLatS, setCoordsLatS] = useState("")
+  const [coordsLonS, setCoordsLonS] = useState("")
+  const [coordsAltS, setCoordsAltS] = useState("")
+
+  // Reflect the active GCP's coords into the inline inputs whenever it
+  // changes. Skipped while adding a new GCP so the user's typing isn't
+  // wiped by a refetch landing in the middle of the form.
+  useEffect(() => {
+    if (isAddingNew) return
+    if (activeGcp) {
+      setCoordsLatS(activeGcp.lat == null ? "" : String(activeGcp.lat))
+      setCoordsLonS(activeGcp.lon == null ? "" : String(activeGcp.lon))
+      setCoordsAltS(String(activeGcp.alt ?? 0))
+    } else {
+      setCoordsLatS("")
+      setCoordsLonS("")
+      setCoordsAltS("")
+    }
+  }, [
+    activeGcp?.label,
+    activeGcp?.lat,
+    activeGcp?.lon,
+    activeGcp?.alt,
+    isAddingNew,
+  ])
+
+  /** Smallest unused "GCP{n}" so a new entry has a sensible default label. */
+  function nextNewGcpLabel(): string {
+    const used = new Set(existingLabels)
+    let i = 1
+    while (used.has(`GCP${i}`)) i++
+    return `GCP${i}`
+  }
+
+  // Upsert the active (or newly-being-added) GCP's coords into the CSV.
+  // Insert when the label isn't in the CSV yet (new GCP, or coord-less
+  // label transitioning to coord-ful); replace when it already has a row.
+  const upsertCsvRow = useMutation({
+    mutationFn: async (entry: GcpCatalogEntry) => {
+      if (entry.lat == null || entry.lon == null) {
+        throw new Error("Internal: upsertCsvRow requires lat/lon.")
+      }
+      let rows: GcpCatalogEntry[] = []
+      if (csvExists) {
+        const text = await fetchObjectAsText(csvObjectName)
+        rows = parseGcpLocationsCsv(text)
+      }
+      const newRow: GcpCatalogEntry = {
+        label: entry.label,
+        lat: entry.lat,
+        lon: entry.lon,
+        alt: entry.alt ?? 0,
+      }
+      const idx = rows.findIndex((r) => r.label === entry.label)
+      const next = [...rows]
+      if (idx >= 0) next[idx] = newRow
+      else next.push(newRow)
+      await uploadText(
+        serializeGcpLocationsCsv(next),
+        csvObjectName,
+        "text/csv",
+      )
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list", imagesPrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["files", "list-scope-root", scopePrefix],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["gcp-csv", csvObjectName],
+      })
+    },
+    onError: (err) =>
+      showErrorToast(err instanceof Error ? err.message : "Failed to save"),
+  })
+
+  // Save button enables only when the inputs are valid AND differ from
+  // what's already on disk. Numeric (not string) comparison so trailing
+  // zeros in the input don't read as a change.
+  const parsedInputLat = coordsLatS.trim() === "" ? null : Number(coordsLatS)
+  const parsedInputLon = coordsLonS.trim() === "" ? null : Number(coordsLonS)
+  const parsedInputAlt = coordsAltS.trim() === "" ? 0 : Number(coordsAltS)
+  const inputsValid =
+    parsedInputLat != null &&
+    Number.isFinite(parsedInputLat) &&
+    parsedInputLon != null &&
+    Number.isFinite(parsedInputLon) &&
+    Number.isFinite(parsedInputAlt)
+  const newLabelTrimmed = newLabelS.trim()
+  const newLabelIsValid =
+    !isAddingNew ||
+    (newLabelTrimmed.length > 0 && !existingLabels.includes(newLabelTrimmed))
+  const coordsAreDirty = (() => {
+    if (!inputsValid) return false
+    if (isAddingNew) return newLabelIsValid
+    if (!activeGcp) return false
+    return (
+      parsedInputLat !== (activeGcp.lat ?? null) ||
+      parsedInputLon !== (activeGcp.lon ?? null) ||
+      parsedInputAlt !== (activeGcp.alt ?? 0)
+    )
+  })()
+
+  async function handleSaveCoords() {
+    const lat = coordsLatS.trim() === "" ? null : Number(coordsLatS)
+    const lon = coordsLonS.trim() === "" ? null : Number(coordsLonS)
+    const alt = coordsAltS.trim() === "" ? 0 : Number(coordsAltS)
+    const label = isAddingNew
+      ? newLabelTrimmed || nextNewGcpLabel()
+      : (activeGcp?.label ?? "")
+    try {
+      validateGcpEntry(
+        { label, lat, lon, alt },
+        // For an existing entry, exclude its own label from the
+        // duplicate-check so editing-and-saving doesn't trip the rule.
+        isAddingNew
+          ? existingLabels
+          : existingLabels.filter((l) => l !== label),
+        /* coordsRequired */ true,
+      )
+      await upsertCsvRow.mutateAsync({
+        label,
+        lat,
+        lon,
+        alt,
+      } as GcpCatalogEntry)
+      showSuccessToast(
+        isAddingNew
+          ? `Added GCP "${label}".`
+          : `Updated coordinates for ${label}.`,
+      )
+      setActiveLabel(label)
+      setIsAddingNew(false)
+      setNewLabelS("")
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (activeShortId === null) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Pick exactly one dataset for GCP marking
+          </CardTitle>
+          <CardDescription data-testid="gcp-picker-needs-single-dataset">
+            {datasetShortIds.length > 1
+              ? `This run targets ${datasetShortIds.length} datasets. The GCP picker operates on one dataset at a time — narrow the selection on the run page first.`
+              : `This scope has ${observedShortIds.length} datasets and no single one is selected. Open the run page and pick exactly one dataset before opening the GCP tool.`}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+  if (filesQuery.isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
+      </div>
+    )
+  }
+  if (images.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">No images found</CardTitle>
+          <CardDescription>
+            Expected images at <code>{imagesPrefix}</code>. Upload drone images
+            via the Files page first.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+
+  if (replaceMode) {
+    return (
+      <CsvUploadPanel
+        scopePrefix={scopePrefix}
+        hasExisting={csvExists}
+        onLoaded={onCsvLoaded}
+        onCancel={() => setReplaceMode(false)}
+      />
+    )
+  }
+
+  if (csvQuery.isLoading || groupsQuery.isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
+      </div>
+    )
+  }
+  if (csvQuery.error) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <AlertCircle className="text-destructive h-5 w-5" />
+            <CardTitle className="text-base">
+              Couldn't read {CSV_FILENAME}
+            </CardTitle>
+          </div>
+          <CardDescription>{csvQuery.error.message}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setReplaceMode(true)}
+          >
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            Replace CSV
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+  if (groupsQuery.error) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <AlertCircle className="text-destructive h-5 w-5" />
+            <CardTitle className="text-base">
+              Couldn't read {GROUPS_FILENAME}
+            </CardTitle>
+          </div>
+          <CardDescription>{groupsQuery.error.message}</CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Catalog + controls */}
+      <Card data-testid="gcp-catalog">
+        <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
+          <div>
+            <CardTitle className="text-base">GCP catalog</CardTitle>
+            <CardDescription>
+              {catalog.length === 0 ? (
+                "No GCPs yet — load a CSV or add one with the dropdown below."
+              ) : (
+                <>
+                  {catalog.length} GCP{catalog.length === 1 ? "" : "s"}
+                  {csvExists ? (
+                    <>
+                      {" from "}
+                      <code className="text-xs">{CSV_FILENAME}</code>
+                    </>
+                  ) : null}
+                  .
+                </>
+              )}
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReplaceMode(true)}
+              data-testid="gcp-load-csv"
+            >
+              <Upload className="mr-1.5 h-3.5 w-3.5" />
+              Load GCPs from CSV
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSkip}
+              data-testid="gcp-skip-top"
+            >
+              <SkipForward className="mr-1.5 h-3.5 w-3.5" />
+              Skip
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Active GCP</Label>
+              <div className="flex items-center gap-1.5">
+                <Select
+                  value={isAddingNew ? ADD_GCP_SENTINEL : (activeLabel ?? "")}
+                  onValueChange={(v) => {
+                    if (v === ADD_GCP_SENTINEL) {
+                      setIsAddingNew(true)
+                      setNewLabelS(nextNewGcpLabel())
+                      setCoordsLatS("")
+                      setCoordsLonS("")
+                      setCoordsAltS("")
+                      return
+                    }
+                    setIsAddingNew(false)
+                    setActiveLabel(v)
+                    setImageIndex(0)
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-64"
+                    data-testid="gcp-active-select"
+                  >
+                    <SelectValue
+                      placeholder={
+                        catalog.length === 0
+                          ? "No GCPs — open dropdown to add"
+                          : "Select a GCP"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {catalog.map((g, i) => {
+                      const count = marks.filter(
+                        (m) => m.label === g.label,
+                      ).length
+                      const noCoords = g.lat == null || g.lon == null
+                      return (
+                        <SelectItem key={g.label} value={g.label}>
+                          <span className="inline-flex items-center gap-2">
+                            <span
+                              className="inline-block h-2.5 w-2.5 rounded-full"
+                              style={{ background: gcpColor(i) }}
+                            />
+                            {g.label}
+                            {noCoords ? (
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                                no coords
+                              </span>
+                            ) : null}
+                            <span className="text-muted-foreground text-xs">
+                              ({count} mark{count === 1 ? "" : "s"})
+                            </span>
+                          </span>
+                        </SelectItem>
+                      )
+                    })}
+                    <SelectItem
+                      value={ADD_GCP_SENTINEL}
+                      data-testid="gcp-add-new-item"
+                    >
+                      <span className="text-primary font-medium">
+                        + Add new GCP
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0 text-destructive hover:text-destructive"
+                  disabled={
+                    !activeGcp || isAddingNew || deleteCatalogEntry.isPending
+                  }
+                  onClick={handleDeleteActiveGcp}
+                  data-testid="gcp-delete-active"
+                  aria-label={
+                    activeGcp
+                      ? `Delete ${activeGcp.label}`
+                      : "Delete active GCP"
+                  }
+                  title={
+                    activeGcp
+                      ? `Delete ${activeGcp.label}`
+                      : "Select a GCP to delete"
+                  }
+                >
+                  {deleteCatalogEntry.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            {isAddingNew ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs" htmlFor="gcp-new-label">
+                  Label
+                </Label>
+                <Input
+                  id="gcp-new-label"
+                  value={newLabelS}
+                  onChange={(e) => setNewLabelS(e.target.value)}
+                  placeholder="e.g. GCP-NORTH"
+                  className="h-9 w-40"
+                  data-testid="gcp-new-label"
+                  aria-invalid={
+                    newLabelTrimmed.length > 0 &&
+                    existingLabels.includes(newLabelTrimmed)
+                  }
+                />
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label className="text-xs" htmlFor="gcp-coords-lat">
+                Lat (decimal °)
+              </Label>
+              <Input
+                id="gcp-coords-lat"
+                value={coordsLatS}
+                onChange={(e) => setCoordsLatS(e.target.value)}
+                placeholder="e.g. 38.5402"
+                disabled={!isAddingNew && !activeGcp}
+                className="h-9 w-32"
+                data-testid="gcp-coords-lat"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs" htmlFor="gcp-coords-lon">
+                Lon (decimal °)
+              </Label>
+              <Input
+                id="gcp-coords-lon"
+                value={coordsLonS}
+                onChange={(e) => setCoordsLonS(e.target.value)}
+                placeholder="e.g. -121.7501"
+                disabled={!isAddingNew && !activeGcp}
+                className="h-9 w-32"
+                data-testid="gcp-coords-lon"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs" htmlFor="gcp-coords-alt">
+                Elevation (m)
+              </Label>
+              <Input
+                id="gcp-coords-alt"
+                value={coordsAltS}
+                onChange={(e) => setCoordsAltS(e.target.value)}
+                placeholder="0"
+                disabled={!isAddingNew && !activeGcp}
+                className="h-9 w-24"
+                data-testid="gcp-coords-alt"
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={handleSaveCoords}
+              disabled={upsertCsvRow.isPending || !coordsAreDirty}
+              data-testid="gcp-coords-save"
+            >
+              {upsertCsvRow.isPending ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              {isAddingNew ? "Add GCP" : "Save coords"}
+            </Button>
+            {isAddingNew ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setIsAddingNew(false)
+                  setNewLabelS("")
+                  // useEffect will repopulate inputs from the previous
+                  // activeGcp (or clear them if there is none).
+                }}
+                data-testid="gcp-coords-cancel"
+              >
+                Cancel
+              </Button>
+            ) : null}
+            {activeGcp ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Filter mode</Label>
+                <div className="inline-flex rounded-md border bg-muted/40 p-0.5">
+                  <button
+                    type="button"
+                    className={`px-2.5 py-1 text-xs rounded-sm ${
+                      activeMode === "radius"
+                        ? "bg-background shadow-sm font-medium"
+                        : "text-muted-foreground"
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    onClick={() =>
+                      setGcpModes((prev) => ({
+                        ...prev,
+                        [activeGcp.label]: "radius",
+                      }))
+                    }
+                    disabled={activeGcp.lat == null || activeGcp.lon == null}
+                    data-testid="gcp-mode-radius"
+                  >
+                    Radius
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-2.5 py-1 text-xs rounded-sm ${
+                      activeMode === "map"
+                        ? "bg-background shadow-sm font-medium"
+                        : "text-muted-foreground"
+                    }`}
+                    onClick={() =>
+                      setGcpModes((prev) => ({
+                        ...prev,
+                        [activeGcp.label]: "map",
+                      }))
+                    }
+                    data-testid="gcp-mode-map"
+                  >
+                    Map-picker
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {activeGcp && activeMode === "radius" ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Radius (m)</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  min="1"
+                  value={activeRadius}
+                  onChange={(e) => {
+                    const v = Math.max(1, Number(e.target.value) || 0)
+                    setGcpRadii((prev) => ({
+                      ...prev,
+                      [activeGcp.label]: v,
+                    }))
+                  }}
+                  className="h-8 w-24 text-sm"
+                  data-testid="gcp-radius-input"
+                />
+              </div>
+            ) : null}
+            <div
+              className="text-muted-foreground flex flex-col gap-0.5 text-xs"
+              data-testid="gcp-gps-diagnostics"
+            >
+              {gpsError ? (
+                <span className="text-destructive" data-testid="gcp-gps-error">
+                  Failed to read image GPS: {gpsError.message}
+                </span>
+              ) : gpsLoading ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Reading EXIF GPS… ({gpsReadyCount}/{imageNames.length})
+                </span>
+              ) : (
+                <span>
+                  GPS:{" "}
+                  <span
+                    className={filteredGpsCount > 0 ? "" : "text-destructive"}
+                  >
+                    {filteredGpsCount}/{imageNames.length} images
+                  </span>
+                </span>
+              )}
+              {filterExists && excludedNames.size > 0 ? (
+                <span>
+                  {excludedNames.size} image
+                  {excludedNames.size === 1 ? "" : "s"} excluded by Image
+                  Exclusion
+                </span>
+              ) : null}
+              {activeGcp && closestImageStat && activeMode === "radius" && (
+                <span>
+                  closest image to{" "}
+                  <span className="font-medium">{activeGcp.label}</span>:{" "}
+                  <span
+                    className={
+                      closestImageStat.distM > activeRadius
+                        ? "text-amber-600"
+                        : "text-green-600"
+                    }
+                  >
+                    {closestImageStat.distM < 1000
+                      ? `${closestImageStat.distM.toFixed(1)} m`
+                      : `${(closestImageStat.distM / 1000).toFixed(1)} km`}
+                  </span>{" "}
+                  ({closestImageStat.name})
+                </span>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Always-visible map: image dots colored per owning GCP, GCP markers
+          shown as ringed pins. Lasso (shift-drag / shift-click) edits the
+          active GCP's image group when its mode is "map"; in radius mode
+          the map is read-only (the lasso is a no-op). */}
+      <Card data-testid="gcp-map">
+        <CardHeader>
+          <CardTitle className="text-base">Image map</CardTitle>
+          <CardDescription>
+            {activeGcp && activeMode === "map" ? (
+              <>
+                Shift-drag a box (or shift-click a dot) to assign images to{" "}
+                <span
+                  className="font-medium"
+                  style={{ color: gcpColor(activeIdx) }}
+                >
+                  {activeGcp.label}
+                </span>
+                . Click a dot (no shift) for a preview.
+              </>
+            ) : activeGcp && activeMode === "radius" ? (
+              <>
+                Image dots within{" "}
+                <span className="font-medium">{activeRadius} m</span> of{" "}
+                <span
+                  className="font-medium"
+                  style={{ color: gcpColor(activeIdx) }}
+                >
+                  {activeGcp.label}
+                </span>{" "}
+                are highlighted. Switch to <em>Map-picker</em> to edit by lasso
+                instead.
+              </>
+            ) : (
+              <>
+                Add a GCP above to start grouping images. Image dots will be
+                colored by the GCP that claims them.
+              </>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ImageDotMap
+            gpsMap={filteredGpsMap}
+            imagesPrefix={imagesPrefix}
+            selected={
+              activeGcp && activeMode === "map"
+                ? new Set(gcpImageGroups[activeGcp.label] ?? [])
+                : new Set()
+            }
+            onSelectionChange={
+              activeGcp && activeMode === "map"
+                ? (next) => {
+                    const sorted = Array.from(next).sort()
+                    setGcpImageGroups((prev) => {
+                      const updated = { ...prev, [activeGcp.label]: sorted }
+                      // Mirror to sidecar for durable persistence.
+                      void writeGroupsSidecar.mutateAsync(updated)
+                      return updated
+                    })
+                  }
+                : NOOP_SELECTION_CHANGE
+            }
+            mode="group"
+            accentColor={activeGcp ? gcpColor(activeIdx) : undefined}
+            extraMarkers={catalog
+              .map((g, i) => ({ g, i }))
+              .filter(({ g }) => g.lat != null && g.lon != null)
+              .map(({ g, i }) => ({
+                lat: g.lat as number,
+                lon: g.lon as number,
+                label: g.label,
+                color: gcpColor(i),
+              }))}
+            dotColors={dotColors}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Image viewer + slider */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Mark{" "}
+            {activeGcp ? (
+              <span className="text-muted-foreground text-sm font-normal">
+                {activeGcp.label}
+              </span>
+            ) : null}{" "}
+            on image
+          </CardTitle>
+          <CardDescription>
+            Click to set the active GCP's pixel coordinate. Right-click a mark
+            to remove it. One mark per (GCP × image); clicking again replaces
+            the previous mark on the same pair.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {activeGcp && (activeGcp.lat == null || activeGcp.lon == null) ? (
+            <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+              <span className="font-medium">{activeGcp.label}</span> has no
+              survey coordinates yet. Enter Lat / Lon / Elevation in the boxes
+              above and click <em>Save coords</em> before marking — they're
+              required for ODM's bundle adjustment.
+            </div>
+          ) : null}
+          {filteredImageNames.length === 0 ? (
+            <div className="rounded border bg-muted/40 p-4 text-sm space-y-2">
+              {activeGcp && activeMode === "map" ? (
+                <p>
+                  No images assigned to{" "}
+                  <span className="font-medium">{activeGcp.label}</span> yet.
+                  Shift-drag a box on the map above to add images, or switch
+                  back to <em>Radius</em> mode if this GCP has coordinates.
+                </p>
+              ) : (
+                <>
+                  <p>
+                    No images within{" "}
+                    <span className="font-medium">{activeRadius} m</span> of{" "}
+                    <span className="font-medium">
+                      {activeGcp?.label ?? "this GCP"}
+                    </span>
+                    .
+                  </p>
+                  {closestImageStat && (
+                    <p
+                      className={
+                        closestImageStat.distM > 1000
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      Nearest image is{" "}
+                      <span className="font-medium">
+                        {closestImageStat.distM < 1000
+                          ? `${closestImageStat.distM.toFixed(1)} m`
+                          : `${(closestImageStat.distM / 1000).toFixed(1)} km`}
+                      </span>{" "}
+                      away ({closestImageStat.name}).{" "}
+                      {closestImageStat.distM > 1000 &&
+                        "That's huge — your CSV's Lat/Lon may be swapped or in the wrong CRS."}
+                    </p>
+                  )}
+                  {activeGcp &&
+                    closestImageStat &&
+                    closestImageStat.distM < 10000 && (
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="text-primary underline"
+                          onClick={() => {
+                            const next = Math.max(
+                              activeRadius * 2,
+                              Math.ceil(closestImageStat.distM / 5) * 5,
+                            )
+                            setGcpRadii((prev) => ({
+                              ...prev,
+                              [activeGcp.label]: next,
+                            }))
+                          }}
+                          data-testid="gcp-radius-double"
+                        >
+                          Bump radius to{" "}
+                          {Math.max(
+                            activeRadius * 2,
+                            Math.ceil(closestImageStat.distM / 5) * 5,
+                          )}{" "}
+                          m
+                        </button>
+                      </div>
+                    )}
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={imageIndex === 0}
+                  onClick={() => setImageIndex((i) => Math.max(0, i - 1))}
+                  aria-label="Previous image"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="flex-1">
+                  <div className="relative">
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(0, filteredImageNames.length - 1)}
+                      value={imageIndex}
+                      onChange={(e) => setImageIndex(Number(e.target.value))}
+                      className="w-full"
+                      data-testid="gcp-image-slider"
+                      aria-label="Image slider"
+                    />
+                    {/* Diamond markers */}
+                    <div className="pointer-events-none absolute top-full left-0 right-0 h-4">
+                      {sliderDiamonds.map((d, i) => {
+                        const pct =
+                          filteredImageNames.length <= 1
+                            ? 0
+                            : (d.idx / (filteredImageNames.length - 1)) * 100
+                        return (
+                          <div
+                            key={`${d.label}-${d.idx}-${i}`}
+                            className="absolute -translate-x-1/2"
+                            style={{ left: `${pct}%` }}
+                            title={`${d.label} on ${filteredImageNames[d.idx]}`}
+                          >
+                            <div
+                              className="h-2 w-2 rotate-45"
+                              style={{ background: d.color }}
+                            />
+                            <div
+                              className="text-[10px] leading-none"
+                              style={{ color: d.color }}
+                            >
+                              {gcpShortLabel(d.label)}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div className="text-muted-foreground mt-3 text-center text-xs">
+                    {activeImageName} · image {imageIndex + 1} of{" "}
+                    {filteredImageNames.length}
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={imageIndex >= filteredImageNames.length - 1}
+                  onClick={() =>
+                    setImageIndex((i) =>
+                      Math.min(filteredImageNames.length - 1, i + 1),
+                    )
+                  }
+                  aria-label="Next image"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div
+                className="relative bg-muted rounded border overflow-hidden"
+                style={{ minHeight: 320 }}
+                data-testid="gcp-image-viewer"
+              >
+                {imageBlobUrl ? (
+                  <img
+                    ref={imgRef}
+                    src={imageBlobUrl}
+                    alt={activeImageName}
+                    className="block max-h-[60vh] w-full cursor-crosshair object-contain"
+                    onClick={handleImageClick}
+                    onContextMenu={handleImageContextMenu}
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="flex h-[40vh] items-center justify-center">
+                    <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
+                  </div>
+                )}
+                {/* Crosshair marks */}
+                {imgRef.current &&
+                  marksForActiveImage.map((m) => {
+                    const i = catalog.findIndex((g) => g.label === m.label)
+                    if (i < 0 || !imgRef.current) return null
+                    const color = gcpColor(i)
+                    const img = imgRef.current
+                    const rect = img.getBoundingClientRect()
+                    const containerRect =
+                      img.parentElement?.getBoundingClientRect()
+                    if (!containerRect) return null
+                    // While the image is still decoding, naturalWidth/Height
+                    // are 0 and the projection would resolve to NaN/Infinity.
+                    if (!img.naturalWidth || !img.naturalHeight) return null
+                    const sx = rect.width / img.naturalWidth
+                    const sy = rect.height / img.naturalHeight
+                    const x = m.pixel_x * sx + (rect.left - containerRect.left)
+                    const y = m.pixel_y * sy + (rect.top - containerRect.top)
+                    return (
+                      <div
+                        key={m.label}
+                        className="pointer-events-none absolute"
+                        style={{ left: 0, top: 0 }}
+                      >
+                        {/* vertical line */}
+                        <div
+                          className="absolute"
+                          style={{
+                            left: x,
+                            top: rect.top - containerRect.top,
+                            width: 1,
+                            height: rect.height,
+                            background: color,
+                            opacity: 0.6,
+                          }}
+                        />
+                        {/* horizontal line */}
+                        <div
+                          className="absolute"
+                          style={{
+                            left: rect.left - containerRect.left,
+                            top: y,
+                            width: rect.width,
+                            height: 1,
+                            background: color,
+                            opacity: 0.6,
+                          }}
+                        />
+                        {/* ring */}
+                        <div
+                          className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2"
+                          style={{
+                            left: x,
+                            top: y,
+                            width: 14,
+                            height: 14,
+                            borderColor: color,
+                          }}
+                        />
+                        {/* label badge */}
+                        <div
+                          className="absolute -translate-y-full rounded px-1 text-[10px] font-semibold text-white"
+                          style={{
+                            left: x + 8,
+                            top: y - 4,
+                            background: color,
+                          }}
+                        >
+                          {gcpShortLabel(m.label)}
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Footer: progress + actions */}
+      <div
+        className="flex flex-wrap items-center justify-between gap-2"
+        data-testid="gcp-footer"
+      >
+        <div className="flex flex-col gap-0.5 text-xs">
+          <p className="text-muted-foreground">
+            {marks.length} mark{marks.length === 1 ? "" : "s"} ·{" "}
+            {labelsCovered.size}/{catalog.length} GCPs covered
+          </p>
+          {unmarkedLabels.length > 0 && labelsCovered.size > 0 && (
+            <p className="text-amber-600">
+              {unmarkedLabels.length} GCP
+              {unmarkedLabels.length === 1 ? "" : "s"} will be skipped (no
+              marks): {unmarkedLabels.slice(0, 4).join(", ")}
+              {unmarkedLabels.length > 4
+                ? `, +${unmarkedLabels.length - 4} more`
+                : ""}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {onCancel && (
+            <Button variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+          )}
+          <Button variant="outline" onClick={handleSkip} data-testid="gcp-skip">
+            <SkipForward className="mr-1.5 h-3.5 w-3.5" />
+            Skip
+          </Button>
+          <Button
+            data-testid="gcp-save-and-complete"
+            onClick={() => saveMutation.mutate()}
+            disabled={!canSave || saveMutation.isPending}
+          >
+            {saveMutation.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Save & complete
+          </Button>
+        </div>
+      </div>
     </div>
-  );
+  )
 }

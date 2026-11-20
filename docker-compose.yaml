@@ -1,0 +1,12 @@
+# Top-level compose for GEMINI-App.
+#
+# The GEMINIbase backend lives as a submodule at backend/. This file just
+# includes the submodule's compose so `docker compose` commands can be run
+# from the repo root.
+#
+# Before `docker compose up`, run scripts/setup-backend.sh once to initialize
+# the submodule and seed the .env files.
+
+include:
+  - path: backend/gemini/pipeline/docker-compose.yaml
+    env_file: backend/gemini/pipeline/.env

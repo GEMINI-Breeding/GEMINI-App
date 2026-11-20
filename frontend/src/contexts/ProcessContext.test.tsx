@@ -1,37 +1,75 @@
-import { act, renderHook } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
+// Mock the wsManager module before importing ProcessContext so the
+// auto-subscribe effect under test is wired to our capture functions
+// instead of real WebSockets.
 const subscribeMock = vi.fn()
-const closeRunMock = vi.fn()
+const closeJobMock = vi.fn()
 
-vi.mock("@/lib/sseManager", () => ({
+vi.mock("@/lib/wsManager", () => ({
   subscribe: (...args: unknown[]) => subscribeMock(...args),
-  closeRun: (...args: unknown[]) => closeRunMock(...args),
+  closeJob: (...args: unknown[]) => closeJobMock(...args),
 }))
 
+// useAuth gates the rehydration query (`enabled: Boolean(user)`). We
+// flip it per-test to drive the null-user vs logged-in branches.
+const authMock = vi.fn<() => { user: { id: string } | null }>(() => ({
+  user: null,
+}))
+vi.mock("@/hooks/useAuth", () => ({
+  default: () => authMock(),
+  isLoggedIn: () => false,
+}))
+
+// JobsService.apiJobsAllGetAllJobs is the rehydration data source.
+const apiJobsAllMock = vi.fn()
+vi.mock("@/client", () => ({
+  JobsService: {
+    apiJobsAllGetAllJobs: (...args: unknown[]) => apiJobsAllMock(...args),
+  },
+}))
+
+// findRunByJobId is the reverse-lookup that lets rehydration build the
+// `/process/{wsId}/run/{runId}` link. Stubbed so rehydration tests
+// don't need to seed the real runStore.
+const findRunByJobIdMock = vi.fn()
+vi.mock("@/features/process/lib/runStore", () => ({
+  findRunByJobId: (jobId: string) => findRunByJobIdMock(jobId),
+  getState: () => ({ workspaces: [], pipelines: [], runs: [] }),
+  useRunStoreReady: () => true,
+}))
+
+import type { JobProgressEvent } from "@/lib/wsManager"
 import { ProcessProvider, useProcess } from "./ProcessContext"
 
-type SseEvent =
-  | { event: "progress"; progress?: number; message?: string }
-  | { event: "complete" }
-  | { event: "error"; message?: string }
-  | { event: "cancelled" }
+type Listener = (evt: JobProgressEvent) => void
 
-type Listener = (evt: SseEvent) => void
+// ProcessProvider now uses TanStack Query for the crash-recovery
+// rehydration (see ProcessContext.tsx ~line 118). The query is
+// auth-gated and won't fire in tests (no token in localStorage),
+// but `useQuery` still requires a QueryClient in context.
+const wrapper = ({ children }: { children: ReactNode }) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return (
+    <QueryClientProvider client={client}>
+      <ProcessProvider>{children}</ProcessProvider>
+    </QueryClientProvider>
+  )
+}
 
-const wrapper = ({ children }: { children: ReactNode }) => (
-  <ProcessProvider>{children}</ProcessProvider>
-)
-
-function setupSseCapture() {
+function setupCapture() {
   const listeners = new Map<string, Listener>()
   const unsubs = new Map<string, ReturnType<typeof vi.fn>>()
 
-  subscribeMock.mockImplementation((runId: string, fn: Listener) => {
-    listeners.set(runId, fn)
-    const unsub = vi.fn(() => listeners.delete(runId))
-    unsubs.set(runId, unsub)
+  subscribeMock.mockImplementation((jobId: string, fn: Listener) => {
+    listeners.set(jobId, fn)
+    const unsub = vi.fn(() => listeners.delete(jobId))
+    unsubs.set(jobId, unsub)
     return unsub
   })
 
@@ -41,7 +79,11 @@ function setupSseCapture() {
 describe("useProcess (consumer hook)", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
-    closeRunMock.mockReset()
+    closeJobMock.mockReset()
+    authMock.mockReset()
+    authMock.mockReturnValue({ user: null })
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
   })
 
   it("throws a helpful error when called outside the provider", () => {
@@ -51,7 +93,7 @@ describe("useProcess (consumer hook)", () => {
   })
 
   it("exposes empty arrays and hasBeenActive=false initially", () => {
-    setupSseCapture()
+    setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     expect(result.current.processes).toEqual([])
     expect(result.current.history).toEqual([])
@@ -62,8 +104,12 @@ describe("useProcess (consumer hook)", () => {
 describe("ProcessContext mutation actions", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
-    closeRunMock.mockReset()
-    setupSseCapture()
+    closeJobMock.mockReset()
+    authMock.mockReset()
+    authMock.mockReturnValue({ user: null })
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
+    setupCapture()
   })
 
   it("addProcess assigns an id + createdAt and flips hasBeenActive", () => {
@@ -124,7 +170,11 @@ describe("ProcessContext mutation actions", () => {
     )
     const items = result.current.processes[0].items
     expect(items[0]).toMatchObject({ id: "0", status: "pending" })
-    expect(items[1]).toMatchObject({ id: "1", status: "completed", label: "done" })
+    expect(items[1]).toMatchObject({
+      id: "1",
+      status: "completed",
+      label: "done",
+    })
   })
 
   it("removeProcess moves the process into history", () => {
@@ -156,7 +206,6 @@ describe("ProcessContext mutation actions", () => {
       })
     })
     act(() => result.current.removeProcess(id))
-    // Second remove is a no-op on an already-removed id, still only one history entry
     act(() => result.current.removeProcess(id))
     expect(result.current.history).toHaveLength(1)
   })
@@ -184,7 +233,9 @@ describe("ProcessContext mutation actions", () => {
       })
     })
     act(() => result.current.clearCompleted())
-    expect(result.current.processes.map((p) => p.title)).toEqual(["still-going"])
+    expect(result.current.processes.map((p) => p.title)).toEqual([
+      "still-going",
+    ])
     expect(result.current.history.map((p) => p.title).sort()).toEqual([
       "done",
       "failed",
@@ -209,14 +260,18 @@ describe("ProcessContext mutation actions", () => {
   })
 })
 
-describe("ProcessContext SSE bridge", () => {
+describe("ProcessContext wsManager bridge", () => {
   beforeEach(() => {
     subscribeMock.mockReset()
-    closeRunMock.mockReset()
+    closeJobMock.mockReset()
+    authMock.mockReset()
+    authMock.mockReturnValue({ user: null })
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
   })
 
-  it("subscribes to an SSE stream for each running process that has a runId", () => {
-    const { listeners } = setupSseCapture()
+  it("subscribes for each running process that has a runId", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
 
     act(() => {
@@ -225,15 +280,15 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    expect(subscribeMock).toHaveBeenCalledWith("run-1", expect.any(Function))
-    expect(listeners.has("run-1")).toBe(true)
+    expect(subscribeMock).toHaveBeenCalledWith("job-1", expect.any(Function))
+    expect(listeners.has("job-1")).toBe(true)
   })
 
-  it("progress events update the process's progress + message fields", () => {
-    const { listeners } = setupSseCapture()
+  it("progress events update the process's progress field and translate progress_detail.stage to message", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -241,14 +296,14 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
     act(() =>
-      listeners.get("run-1")!({
-        event: "progress",
+      listeners.get("job-1")!({
+        status: "RUNNING",
         progress: 37,
-        message: "stage 2",
+        progress_detail: { stage: "stage 2" },
       }),
     )
     const p = result.current.processes[0]
@@ -256,8 +311,46 @@ describe("ProcessContext SSE bridge", () => {
     expect(p.message).toBe("stage 2")
   })
 
-  it("complete event marks the process as completed at 100%", () => {
-    const { listeners } = setupSseCapture()
+  it("waits for every job of a multi-job process before Done", () => {
+    const { listeners } = setupCapture()
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    act(() => {
+      result.current.addProcess({
+        type: "file_upload",
+        status: "running",
+        title: "Processing 2 .bin files",
+        items: [],
+        runId: "job-1",
+        nextRunIds: ["job-2"],
+      })
+    })
+    act(() =>
+      listeners.get("job-1")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
+    let p = result.current.processes[0]
+    expect(p.status).toBe("running")
+    expect(p.runId).toBe("job-2")
+    expect(p.message).toBe("Extracting file 2 of 2")
+    // The effect subscribes to the next job; its (possibly already
+    // final) status finishes the process.
+    act(() =>
+      listeners.get("job-2")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
+    p = result.current.processes[0]
+    expect(p.status).toBe("completed")
+    expect(p.message).toBe("Done")
+  })
+
+  it("terminal COMPLETED marks the process as completed at 100%", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -265,18 +358,24 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "complete" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
     const p = result.current.processes[0]
     expect(p.status).toBe("completed")
     expect(p.progress).toBe(100)
     expect(p.message).toBe("Done")
   })
 
-  it("error event flips status=error and surfaces the provided message", () => {
-    const { listeners } = setupSseCapture()
+  it("terminal FAILED flips status=error and surfaces the error_message", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -284,18 +383,24 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "error", message: "oom" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "FAILED",
+        error_message: "oom",
+        terminal: true,
+      }),
+    )
     expect(result.current.processes[0]).toMatchObject({
       status: "error",
       message: "oom",
     })
   })
 
-  it("error event without a message falls back to 'Failed'", () => {
-    const { listeners } = setupSseCapture()
+  it("terminal FAILED without an error_message falls back to 'Failed'", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -303,15 +408,20 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "error" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "FAILED",
+        terminal: true,
+      }),
+    )
     expect(result.current.processes[0].message).toBe("Failed")
   })
 
-  it("cancelled event flips status=error with message 'Cancelled'", () => {
-    const { listeners } = setupSseCapture()
+  it("terminal CANCELLED flips status=error with message 'Cancelled'", () => {
+    const { listeners } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -319,18 +429,23 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "cancelled" }))
+    act(() =>
+      listeners.get("job-1")!({
+        status: "CANCELLED",
+        terminal: true,
+      }),
+    )
     expect(result.current.processes[0]).toMatchObject({
       status: "error",
       message: "Cancelled",
     })
   })
 
-  it("terminal events cause the effect to unsubscribe and close the SSE connection", () => {
-    const { listeners, unsubs } = setupSseCapture()
+  it("terminal events cause the effect to unsubscribe and close the connection", () => {
+    const { listeners, unsubs } = setupCapture()
     const { result } = renderHook(() => useProcess(), { wrapper })
     act(() => {
       result.current.addProcess({
@@ -338,12 +453,95 @@ describe("ProcessContext SSE bridge", () => {
         status: "running",
         title: "t",
         items: [],
-        runId: "run-1",
+        runId: "job-1",
       })
     })
-    act(() => listeners.get("run-1")!({ event: "complete" }))
-    // After the state update settles, the effect should have cleaned up:
-    expect(unsubs.get("run-1")).toHaveBeenCalled()
-    expect(closeRunMock).toHaveBeenCalledWith("run-1")
+    act(() =>
+      listeners.get("job-1")!({
+        status: "COMPLETED",
+        progress: 100,
+        terminal: true,
+      }),
+    )
+    expect(unsubs.get("job-1")).toHaveBeenCalled()
+    expect(closeJobMock).toHaveBeenCalledWith("job-1")
+  })
+})
+
+describe("ProcessContext crash-recovery rehydration", () => {
+  beforeEach(() => {
+    subscribeMock.mockReset()
+    closeJobMock.mockReset()
+    apiJobsAllMock.mockReset()
+    findRunByJobIdMock.mockReset()
+    authMock.mockReset()
+    setupCapture()
+  })
+
+  it("does not query /api/jobs/all when useAuth().user is null", async () => {
+    authMock.mockReturnValue({ user: null })
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    // Give the query layer a tick to settle.
+    await waitFor(() => {
+      expect(result.current.processes).toEqual([])
+    })
+    expect(apiJobsAllMock).not.toHaveBeenCalled()
+  })
+
+  it("rehydrates running jobs into processes with a /process/{wsId}/run/{runId} link", async () => {
+    authMock.mockReturnValue({ user: { id: "u-1" } })
+    apiJobsAllMock.mockResolvedValue([
+      {
+        id: "job-rehydrate-1",
+        job_type: "RUN_ODM",
+        status: "RUNNING",
+        progress: 47,
+        progress_detail: { stage: "stitching" },
+      },
+    ])
+    findRunByJobIdMock.mockReturnValue({
+      id: "run-uuid-1",
+      workspaceId: "ws-uuid-1",
+    })
+
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    await waitFor(() => {
+      expect(result.current.processes).toHaveLength(1)
+    })
+
+    const p = result.current.processes[0]
+    expect(p).toMatchObject({
+      type: "processing",
+      status: "running",
+      runId: "job-rehydrate-1",
+      progress: 47,
+      message: "stitching",
+      link: "/process/ws-uuid-1/run/run-uuid-1",
+    })
+    expect(result.current.hasBeenActive).toBe(true)
+  })
+
+  it("silently drops rehydrated jobs whose owning Run is unknown to runStore", async () => {
+    authMock.mockReturnValue({ user: { id: "u-1" } })
+    apiJobsAllMock.mockResolvedValue([
+      {
+        id: "orphan-job",
+        job_type: "RUN_ODM",
+        status: "RUNNING",
+        progress: 10,
+      },
+    ])
+    findRunByJobIdMock.mockReturnValue(undefined)
+
+    const { result } = renderHook(() => useProcess(), { wrapper })
+    // Wait directly on the post-query effect having run (i.e. the
+    // findRunByJobId reverse-lookup was attempted). Waiting on
+    // apiJobsAllMock alone races with React's commit phase on slow
+    // CI runners — the query has resolved but the effect hasn't
+    // dispatched yet, so the assertion fires too early.
+    await waitFor(() => {
+      expect(findRunByJobIdMock).toHaveBeenCalledWith("orphan-job")
+    })
+    expect(result.current.processes).toEqual([])
   })
 })

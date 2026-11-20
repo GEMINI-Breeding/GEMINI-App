@@ -1,0 +1,242 @@
+/**
+ * React-Query hooks over GEMINIbase PlotGeometryService.
+ *
+ * The backend stores plot-geometry as named, versioned state snapshots
+ * keyed on a MinIO `directory` (the Processed/{...}/{date}/ prefix). One
+ * version per directory is "active" at a time; SPLIT_ORTHOMOSAIC and
+ * EXTRACT_TRAITS pick up the active version's `boundaries` GeoJSON.
+ *
+ * The state-snapshot payload itself is freeform JSON (the backend doesn't
+ * impose a schema); the convention this app uses is:
+ *   {
+ *     boundaries: GeoJSON.FeatureCollection,
+ *     grid?: { rows: number, cols: number, spacing_m: number, angle_deg: number },
+ *     created_from?: "draw" | "grid" | "import"
+ *   }
+ */
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import { PlotGeometryService } from "@/client"
+import type { FieldDesign } from "@/features/process/lib/fieldDesign"
+import { isLoggedIn } from "@/lib/auth"
+
+export type PlotGeometryVersion = {
+  version: number
+  name: string | null
+  is_active: boolean
+  created_at: string | null
+  created_by?: string | null
+}
+
+export type PlotGeometryStateSnapshot = {
+  boundaries: GeoJSON.FeatureCollection
+  grid?: {
+    rows: number
+    cols: number
+    spacing_m: number
+    /** Gap between columns (beds), metres; unset = spacing_m. */
+    spacing_col_m?: number
+    angle_deg: number
+    /** Field-coordinate offsets + plot-number order (alembic-free; lives
+     *  in the snapshot). Optional for back-compat with pre-offset
+     *  snapshots — absence means 0 / "row-major". */
+    row_offset?: number
+    col_offset?: number
+    fill_pattern?: "row-major" | "snake"
+  }
+  created_from?: "draw" | "grid" | "import"
+  field_design?: FieldDesign
+}
+
+export type PlotGeometryVersionLoaded = PlotGeometryVersion & {
+  state_snapshot: PlotGeometryStateSnapshot
+}
+
+export type GpsShiftStatus = {
+  shifted: boolean
+  current_lat?: number
+  current_lon?: number
+  reference_lat?: number
+  reference_lon?: number
+}
+
+const versionKey = (directory: string) => [
+  "plot-geometry",
+  "versions",
+  directory,
+]
+const gpsKey = (directory: string) => ["plot-geometry", "gps-shift", directory]
+
+export function usePlotGeometryVersions(directory: string | null | undefined) {
+  return useQuery<PlotGeometryVersion[], Error>({
+    queryKey: versionKey(directory ?? ""),
+    queryFn: async () => {
+      if (!directory) return []
+      const res =
+        await PlotGeometryService.apiPlotGeometryVersionsListListVersions({
+          requestBody: { directory },
+        })
+      return (res as PlotGeometryVersion[] | null) ?? []
+    },
+    enabled: isLoggedIn() && Boolean(directory),
+  })
+}
+
+/** One saved version anywhere, for "Import boundaries from…". */
+export type PlotGeometryVersionEverywhere = PlotGeometryVersion & {
+  directory: string
+  plot_count: number
+}
+
+export function useAllPlotGeometryVersions(enabled = true) {
+  return useQuery<PlotGeometryVersionEverywhere[], Error>({
+    queryKey: ["plot-geometry", "versions", "all"],
+    queryFn: async () =>
+      ((await PlotGeometryService.apiPlotGeometryVersionsAllListAllVersions()) ??
+        []) as unknown as PlotGeometryVersionEverywhere[],
+    enabled: isLoggedIn() && enabled,
+  })
+}
+
+export function useLoadPlotGeometryVersion(
+  directory: string | null | undefined,
+  version: number | null,
+) {
+  return useQuery<PlotGeometryVersionLoaded, Error>({
+    queryKey: ["plot-geometry", "version", directory, version],
+    queryFn: async () => {
+      if (!directory) throw new Error("directory required")
+      if (version == null) throw new Error("version required")
+      const res =
+        await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+          requestBody: { directory, version },
+        })
+      return res as unknown as PlotGeometryVersionLoaded
+    },
+    // Only fire when the caller has actually picked a version. Without
+    // this gate the load endpoint 404s on every render where no version
+    // is selected — noisy and breaks the strict-E2E console-error guard.
+    enabled: isLoggedIn() && Boolean(directory) && version != null,
+    // A saved version is put in the editor once, when opened; refetching it
+    // on window focus only risked overwriting unsaved edits.
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useSavePlotGeometryVersion() {
+  const qc = useQueryClient()
+  return useMutation<
+    PlotGeometryVersion,
+    Error,
+    {
+      directory: string
+      stateSnapshot: PlotGeometryStateSnapshot
+      name?: string
+      /** Replace this version (keeps its number) rather than add a new one. */
+      version?: number
+    }
+  >({
+    mutationFn: async ({ directory, stateSnapshot, name, version }) => {
+      const res =
+        await PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion({
+          requestBody: {
+            directory,
+            state_snapshot: stateSnapshot as unknown as Record<string, unknown>,
+            name: name ?? undefined,
+            // The API takes it; the generated client predates the field.
+            ...(version !== undefined ? { version } : {}),
+          } as Parameters<
+            typeof PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion
+          >[0]["requestBody"],
+        })
+      return res as unknown as PlotGeometryVersion
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: versionKey(vars.directory) })
+    },
+  })
+}
+
+export function useActivatePlotGeometryVersion() {
+  const qc = useQueryClient()
+  return useMutation<unknown, Error, { directory: string; version: number }>({
+    mutationFn: async ({ directory, version }) => {
+      return PlotGeometryService.apiPlotGeometryVersionsActivateActivateVersion(
+        { requestBody: { directory, version } },
+      )
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: versionKey(vars.directory) })
+    },
+  })
+}
+
+export function useDeletePlotGeometryVersion() {
+  const qc = useQueryClient()
+  return useMutation<unknown, Error, { directory: string; version: number }>({
+    mutationFn: async ({ directory, version }) => {
+      return PlotGeometryService.apiPlotGeometryVersionsDeleteDeleteVersion({
+        requestBody: { directory, version },
+      })
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: versionKey(vars.directory) })
+    },
+  })
+}
+
+// --- GPS shift ---
+
+export function useGpsShiftStatus(directory: string | null | undefined) {
+  return useQuery<GpsShiftStatus, Error>({
+    queryKey: gpsKey(directory ?? ""),
+    queryFn: async () => {
+      if (!directory) return { shifted: false }
+      const res =
+        await PlotGeometryService.apiPlotGeometryGpsShiftStatusCheckGpsShiftStatus(
+          { requestBody: { directory } },
+        )
+      return res as unknown as GpsShiftStatus
+    },
+    enabled: isLoggedIn() && Boolean(directory),
+  })
+}
+
+export function useShiftGps() {
+  const qc = useQueryClient()
+  return useMutation<
+    unknown,
+    Error,
+    { directory: string; currentLat: number; currentLon: number }
+  >({
+    mutationFn: async ({ directory, currentLat, currentLon }) => {
+      return PlotGeometryService.apiPlotGeometryShiftGpsShiftGps({
+        requestBody: {
+          directory,
+          current_lat: currentLat,
+          current_lon: currentLon,
+        },
+      })
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: gpsKey(vars.directory) })
+      qc.invalidateQueries({ queryKey: versionKey(vars.directory) })
+    },
+  })
+}
+
+export function useUndoGpsShift() {
+  const qc = useQueryClient()
+  return useMutation<unknown, Error, { directory: string }>({
+    mutationFn: async ({ directory }) => {
+      return PlotGeometryService.apiPlotGeometryUndoGpsShiftUndoGpsShift({
+        requestBody: { directory },
+      })
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: gpsKey(vars.directory) })
+      qc.invalidateQueries({ queryKey: versionKey(vars.directory) })
+    },
+  })
+}

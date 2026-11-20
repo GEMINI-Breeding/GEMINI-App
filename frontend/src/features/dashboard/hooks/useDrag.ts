@@ -6,9 +6,12 @@
  * chain means no stale-listener removal on re-render.
  */
 
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
-export interface DragPos { x: number; y: number }
+export interface DragPos {
+  x: number
+  y: number
+}
 
 export function useDrag(onDropCallback: (id: string) => void) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -34,8 +37,15 @@ export function useDrag(onDropCallback: (id: string) => void) {
     function isOver(clientX: number, clientY: number): boolean {
       if (!canvasRef.current) return false
       const r = canvasRef.current.getBoundingClientRect()
-      console.log(`[useDrag] canvas bounds: ${r.left} ${r.top} ${r.right} ${r.bottom} | cursor: ${clientX} ${clientY}`)
-      return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
+      console.log(
+        `[useDrag] canvas bounds: ${r.left} ${r.top} ${r.right} ${r.bottom} | cursor: ${clientX} ${clientY}`,
+      )
+      return (
+        clientX >= r.left &&
+        clientX <= r.right &&
+        clientY >= r.top &&
+        clientY <= r.bottom
+      )
     }
 
     function onMove(ev: MouseEvent) {
@@ -46,7 +56,9 @@ export function useDrag(onDropCallback: (id: string) => void) {
     function onUp(ev: MouseEvent) {
       const currentId = draggingIdRef.current
       const over = isOver(ev.clientX, ev.clientY)
-      console.log(`[useDrag] mouseup id: ${currentId} | over: ${over} | pos: ${ev.clientX} ${ev.clientY}`)
+      console.log(
+        `[useDrag] mouseup id: ${currentId} | over: ${over} | pos: ${ev.clientX} ${ev.clientY}`,
+      )
 
       if (currentId && over) {
         console.log(`[useDrag] dropping: ${currentId}`)

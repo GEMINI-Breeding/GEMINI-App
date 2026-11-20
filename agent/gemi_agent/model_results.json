@@ -1,0 +1,69 @@
+{
+ "gemma4-31b": {
+  "passed": 24,
+  "of": 24,
+  "checks": 12,
+  "repeats": 2,
+  "bad_calls": 2,
+  "seconds_per_check": 8,
+  "weak": [],
+  "tested_as": "gemma4-31b",
+  "when": "2026-10-12"
+ },
+ "gemma4-e4b": {
+  "passed": 19,
+  "of": 20,
+  "checks": 10,
+  "repeats": 2,
+  "bad_calls": 7,
+  "seconds_per_check": 27,
+  "weak": [
+   "Drone run to labelled plots (field design + orientation) (1/2)"
+  ],
+  "tested_as": "gemma4:e4b",
+  "when": "2026-10-12"
+ },
+ "qwen3-vl-8b": {
+  "passed": 18,
+  "of": 24,
+  "checks": 12,
+  "repeats": 2,
+  "bad_calls": 2,
+  "seconds_per_check": 6,
+  "weak": [
+   "Explain a failed job (0/2)",
+   "Stop only what is idle (0/2)",
+   "Mark rover plots; small plots need no stitching (0/2)"
+  ],
+  "tested_as": "Qwen/Qwen3-VL-8B-Instruct",
+  "when": "2026-10-12"
+ },
+ "gemma4-e2b": {
+  "passed": 19,
+  "of": 20,
+  "checks": 10,
+  "repeats": 2,
+  "bad_calls": 7,
+  "seconds_per_check": 16,
+  "weak": [
+   "Ask instead of guessing (1/2)"
+  ],
+  "tested_as": "gemma4:e2b",
+  "when": "2026-10-12"
+ },
+ "qwen3.5-4b": {
+  "passed": 17,
+  "of": 20,
+  "checks": 10,
+  "repeats": 2,
+  "bad_calls": 6,
+  "seconds_per_check": 27,
+  "weak": [
+   "Upload a drone flight with the right labels (1/2)",
+   "Stop only what is idle (1/2)",
+   "Run a named model on the right plot images (1/2)"
+  ],
+  "tested_as": "qwen3.5:4b",
+  "when": "2026-10-12"
+ }
+}

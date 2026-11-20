@@ -1,0 +1,544 @@
+import { useQuery } from "@tanstack/react-query"
+import { Pin } from "lucide-react"
+import { useMemo, useState } from "react"
+import { toast } from "sonner"
+import {
+  type ExperimentOutput,
+  ExperimentsService,
+  type PopulationOutput,
+  PopulationsService,
+  type SeasonOutput,
+  SeasonsService,
+  type SiteOutput,
+  SitesService,
+  type TraitOutput,
+} from "@/client"
+import { MultiSelectFilter } from "@/components/Common/MultiSelectFilter"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useTraitRecords } from "@/features/dashboard/hooks/useTraitData"
+import { pinWidget } from "@/features/dashboard/store"
+import { correlationSentence } from "@/features/dashboard/widgets/AnalysisWidget"
+import { traitLabel } from "@/lib/traitName"
+import { AggregationControl } from "../components/AggregationControl"
+import { CorrelationHeatmap } from "../components/CorrelationHeatmap"
+import { ManovaTable } from "../components/ManovaTable"
+import { PcaBiplot } from "../components/PcaBiplot"
+import { comparable } from "../lib/mapDate"
+import {
+  type Aggregation,
+  type CorrelationResponse,
+  fetchCorrelation,
+  fetchManova,
+  fetchMatrix,
+  fetchPCA,
+  type ManovaResponse,
+  type MatrixResponse,
+  type MultivariateRequest,
+  type PCAResponse,
+} from "../lib/multivariate"
+
+interface Props {
+  traits: TraitOutput[]
+  traitsLoading: boolean
+}
+
+export function MultivariateAnalyze({ traits, traitsLoading }: Props) {
+  // Shared filters + aggregation across all sub-tabs
+  const [experiments, setExperiments] = useState<Set<string>>(new Set())
+  const [seasons, setSeasons] = useState<Set<string>>(new Set())
+  const [sites, setSites] = useState<Set<string>>(new Set())
+  const [populations, setPopulations] = useState<Set<string>>(new Set())
+  // Time-aggregation defaults to "mean" — it's a no-op when each plot has
+  // one record, and Mean is the right answer when there are several.
+  // (Surfacing the dropdown only when needed is a follow-up.)
+  const [aggregation, setAggregation] = useState<Aggregation>("mean")
+  const [aggregationDate, setAggregationDate] = useState<string | null>(null)
+  const [showTimeAgg, setShowTimeAgg] = useState(false)
+
+  // Per-sub-tab state
+  const [corrTraits, setCorrTraits] = useState<Set<string>>(new Set())
+  // Default on: correlating genotype means is the conventional breeding view.
+  // For pre-aggregated CSVs this is a no-op (each accession is already a
+  // single row), and for replicated field data it removes within-genotype
+  // noise from the off-diagonal cells.
+  const [corrCollapseReps, setCorrCollapseReps] = useState(true)
+  const [pcaTraits, setPcaTraits] = useState<Set<string>>(new Set())
+  // PCA defaults on for collapse: typically you want a genotype-level
+  // ordination, not a per-plot point cloud (which mostly shows noise).
+  const [pcaCollapseReps, setPcaCollapseReps] = useState(true)
+  const [manovaTraits, setManovaTraits] = useState<Set<string>>(new Set())
+
+  const [corrResults, setCorrResults] = useState<{
+    matrix: MatrixResponse
+    correlation: CorrelationResponse
+  } | null>(null)
+  const [pcaResult, setPcaResult] = useState<PCAResponse | null>(null)
+  const [manovaResult, setManovaResult] = useState<ManovaResponse | null>(null)
+
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Only traits that can be compared here: with records in the filters, and
+  // on the chosen date when one date is analysed. Traits from another field,
+  // season or date have no plots in common with these.
+  const catalog = useTraitRecords()
+  const scopeData = useMemo(
+    () =>
+      catalog.data
+        ? comparable(
+            catalog.data,
+            { experiments, seasons, sites, populations },
+            aggregation === "date" ? aggregationDate : null,
+          )
+        : null,
+    [
+      catalog.data,
+      experiments,
+      seasons,
+      sites,
+      populations,
+      aggregation,
+      aggregationDate,
+    ],
+  )
+  const traitOptions = useMemo(
+    () =>
+      traits
+        .map((t) => t.trait_name)
+        .filter((n): n is string => !!n)
+        .filter((n) => !scopeData || scopeData.traits.has(n)),
+    [traits, scopeData],
+  )
+  // Picks that the filters no longer allow are left out of the analysis.
+  const usable = (picked: Set<string>) =>
+    [...picked].filter((t) => traitOptions.includes(t))
+
+  // *GetAll* endpoints return the full set without a search predicate. The
+  // *Get* variants 400 when no filter param is supplied.
+  const experimentsQuery = useQuery({
+    queryKey: ["mv", "experiments"],
+    queryFn: () =>
+      ExperimentsService.apiExperimentsAllGetAllExperiments({ limit: 500 }),
+  })
+  const seasonsQuery = useQuery({
+    queryKey: ["mv", "seasons"],
+    queryFn: () => SeasonsService.apiSeasonsAllGetAllSeasons({ limit: 500 }),
+  })
+  const sitesQuery = useQuery({
+    queryKey: ["mv", "sites"],
+    queryFn: () => SitesService.apiSitesAllGetAllSites({ limit: 500 }),
+  })
+  const populationsQuery = useQuery({
+    queryKey: ["mv", "populations"],
+    queryFn: () =>
+      PopulationsService.apiPopulationsAllGetAllPopulations({ limit: 500 }),
+  })
+
+  const experimentOptions = useMemo(
+    () =>
+      ((experimentsQuery.data as ExperimentOutput[] | null) ?? [])
+        .map((e) => e.experiment_name)
+        .filter((s): s is string => !!s),
+    [experimentsQuery.data],
+  )
+  const seasonOptions = useMemo(
+    () =>
+      ((seasonsQuery.data as SeasonOutput[] | null) ?? [])
+        .map((s) => s.season_name)
+        .filter((s): s is string => !!s),
+    [seasonsQuery.data],
+  )
+  const siteOptions = useMemo(
+    () =>
+      ((sitesQuery.data as SiteOutput[] | null) ?? [])
+        .map((s) => s.site_name)
+        .filter((s): s is string => !!s),
+    [sitesQuery.data],
+  )
+  const populationOptions = useMemo(
+    () =>
+      ((populationsQuery.data as PopulationOutput[] | null) ?? [])
+        .map((p) => p.population_name)
+        .filter((s): s is string => !!s),
+    [populationsQuery.data],
+  )
+
+  const aggOk = aggregation !== "date" || !!aggregationDate
+
+  // MultiSelectFilter's convention: empty Set = "All". Resolve to the full
+  // trait list so the Run button can enable and the request payload is
+  // explicit about which traits to compute over.
+  const effectiveCorrTraits =
+    usable(corrTraits).length === 0 ? traitOptions : usable(corrTraits)
+  const effectivePcaTraits =
+    usable(pcaTraits).length === 0 ? traitOptions : usable(pcaTraits)
+  const effectiveManovaTraits =
+    usable(manovaTraits).length === 0 ? traitOptions : usable(manovaTraits)
+
+  function baseRequest(
+    traitNames: string[],
+    collapseReplicates: boolean,
+  ): MultivariateRequest {
+    return {
+      trait_names: traitNames,
+      experiment_names: experiments.size ? [...experiments] : undefined,
+      season_names: seasons.size ? [...seasons] : undefined,
+      site_names: sites.size ? [...sites] : undefined,
+      populations: populations.size ? [...populations] : undefined,
+      aggregation,
+      aggregation_date:
+        aggregation === "date" ? (aggregationDate ?? undefined) : undefined,
+      collapse_replicates: collapseReplicates,
+    }
+  }
+
+  async function runCorrelation() {
+    const req = baseRequest(effectiveCorrTraits, corrCollapseReps)
+    setLoading(true)
+    setError(null)
+    setCorrResults(null)
+    try {
+      const [matrix, correlation] = await Promise.all([
+        fetchMatrix(req),
+        fetchCorrelation(req),
+      ])
+      setCorrResults({ matrix, correlation })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function runPCA() {
+    const req = baseRequest(effectivePcaTraits, pcaCollapseReps)
+    setLoading(true)
+    setError(null)
+    setPcaResult(null)
+    try {
+      const r = await fetchPCA(req)
+      setPcaResult(r)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function runManova() {
+    // MANOVA needs raw per-plot variance; backend force-disables collapse.
+    const req = baseRequest(effectiveManovaTraits, false)
+    setLoading(true)
+    setError(null)
+    setManovaResult(null)
+    try {
+      const r = await fetchManova(req)
+      setManovaResult(r)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <MultiSelectFilter
+            label="Experiment"
+            options={experimentOptions}
+            selected={experiments}
+            onChange={setExperiments}
+            width="w-56"
+            testId="mv-experiment"
+          />
+          <MultiSelectFilter
+            label="Season"
+            options={seasonOptions}
+            selected={seasons}
+            onChange={setSeasons}
+            width="w-44"
+            testId="mv-season"
+          />
+          <MultiSelectFilter
+            label="Site"
+            options={siteOptions}
+            selected={sites}
+            onChange={setSites}
+            width="w-44"
+            testId="mv-site"
+          />
+          <MultiSelectFilter
+            label="Population"
+            options={populationOptions}
+            selected={populations}
+            onChange={setPopulations}
+            width="w-44"
+            testId="mv-population"
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            className="self-start text-xs text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => setShowTimeAgg((v) => !v)}
+            data-testid="mv-show-time-agg"
+          >
+            {showTimeAgg ? "Hide" : "Show"} time-aggregation options
+          </button>
+          {showTimeAgg && (
+            <div className="rounded-md border bg-muted/40 p-3">
+              <p className="mb-2 text-xs text-muted-foreground">
+                How to collapse multiple measurements of the same plot across
+                different dates. Defaults to Mean. Has no effect when each plot
+                has one measurement.
+              </p>
+              <AggregationControl
+                value={aggregation}
+                onChange={setAggregation}
+                date={aggregationDate}
+                onDateChange={setAggregationDate}
+                dates={scopeData?.dates}
+              />
+            </div>
+          )}
+        </div>
+      </section>
+
+      {error && (
+        <div
+          className="rounded-md border border-destructive bg-destructive/5 p-3 text-sm text-destructive"
+          data-testid="mv-error"
+        >
+          {error}
+        </div>
+      )}
+
+      <Tabs defaultValue="correlation">
+        <TabsList>
+          <TabsTrigger value="correlation" data-testid="mv-subtab-correlation">
+            Correlation
+          </TabsTrigger>
+          <TabsTrigger value="pca" data-testid="mv-subtab-pca">
+            PCA
+          </TabsTrigger>
+          <TabsTrigger value="manova" data-testid="mv-subtab-manova">
+            MANOVA
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="correlation" className="mt-4 flex flex-col gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="accent-primary h-4 w-4"
+              checked={corrCollapseReps}
+              onChange={(e) => setCorrCollapseReps(e.target.checked)}
+              data-testid="mv-corr-collapse-replicates"
+            />
+            Average replicates by genotype
+            <span className="text-xs text-muted-foreground">
+              — correlate genotype means instead of raw per-plot values
+            </span>
+          </label>
+          <div className="flex flex-wrap items-end gap-3">
+            <MultiSelectFilter
+              label="Traits"
+              options={traitOptions}
+              optionLabel={traitLabel}
+              selected={corrTraits}
+              onChange={setCorrTraits}
+              width="w-72"
+              testId="mv-trait-picker"
+            />
+            <button
+              type="button"
+              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              disabled={
+                effectiveCorrTraits.length < 2 ||
+                !aggOk ||
+                loading ||
+                traitsLoading
+              }
+              onClick={runCorrelation}
+              data-testid="mv-run"
+            >
+              {loading ? "Running…" : "Run analysis"}
+            </button>
+            {(effectiveCorrTraits.length < 2 || !aggOk) && (
+              <span className="text-xs text-muted-foreground">
+                {effectiveCorrTraits.length < 2
+                  ? "Need at least 2 traits"
+                  : !aggregation
+                    ? "Pick an aggregation"
+                    : "Pick a collection date"}
+              </span>
+            )}
+          </div>
+
+          {corrResults && corrResults.matrix.status !== "ok" && (
+            <div
+              className="rounded-md border border-amber-500 bg-amber-50 p-3 text-sm text-amber-900"
+              data-testid="mv-warning"
+            >
+              {corrResults.matrix.message || corrResults.matrix.status}
+            </div>
+          )}
+          {corrResults && corrResults.matrix.status === "ok" && (
+            <div className="flex items-center gap-3 text-sm">
+              <span className="flex-1">
+                {correlationSentence(corrResults.correlation)}
+              </span>
+              {experiments.size === 1 && (
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border px-3 text-xs"
+                  data-testid="mv-pin-correlation"
+                  onClick={() => {
+                    const experiment = [...experiments][0]
+                    const tab = pinWidget({
+                      instanceId: `widget-${Date.now()}`,
+                      type: "analysis",
+                      title: `Which traits move together · ${experiment}`,
+                      span: "md",
+                      config: {
+                        kind: "correlation",
+                        experiment,
+                        traits: [...corrTraits],
+                      },
+                    })
+                    toast.success(`Pinned to the dashboard ("${tab}")`)
+                  }}
+                >
+                  <Pin className="h-3 w-3" /> Pin to dashboard
+                </button>
+              )}
+            </div>
+          )}
+          {corrResults && corrResults.matrix.status === "ok" && (
+            <CorrelationHeatmap
+              matrix={corrResults.matrix}
+              correlation={corrResults.correlation}
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="pca" className="mt-4 flex flex-col gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="accent-primary h-4 w-4"
+              checked={pcaCollapseReps}
+              onChange={(e) => setPcaCollapseReps(e.target.checked)}
+              data-testid="mv-pca-collapse-replicates"
+            />
+            Average replicates by genotype
+            <span className="text-xs text-muted-foreground">
+              — ordinate genotype means instead of raw per-plot values
+            </span>
+          </label>
+          <div className="flex flex-wrap items-end gap-3">
+            <MultiSelectFilter
+              label="Traits"
+              options={traitOptions}
+              optionLabel={traitLabel}
+              selected={pcaTraits}
+              onChange={setPcaTraits}
+              width="w-72"
+              testId="mv-pca-trait-picker"
+            />
+            <button
+              type="button"
+              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              disabled={
+                effectivePcaTraits.length < 3 ||
+                !aggOk ||
+                loading ||
+                traitsLoading
+              }
+              onClick={runPCA}
+              data-testid="mv-pca-run"
+            >
+              {loading ? "Running…" : "Run PCA"}
+            </button>
+            {(effectivePcaTraits.length < 3 || !aggOk) && (
+              <span className="text-xs text-muted-foreground">
+                {effectivePcaTraits.length < 3
+                  ? "Need at least 3 traits"
+                  : !aggregation
+                    ? "Pick an aggregation"
+                    : "Pick a collection date"}
+              </span>
+            )}
+          </div>
+
+          {pcaResult && pcaResult.status !== "ok" && (
+            <div
+              className="rounded-md border border-amber-500 bg-amber-50 p-3 text-sm text-amber-900"
+              data-testid="mv-pca-warning"
+            >
+              {pcaResult.message || pcaResult.status}
+            </div>
+          )}
+          {pcaResult && pcaResult.status === "ok" && (
+            <PcaBiplot response={pcaResult} />
+          )}
+        </TabsContent>
+
+        <TabsContent value="manova" className="mt-4 flex flex-col gap-4">
+          <p className="text-xs text-muted-foreground">
+            MANOVA tests whether group means differ on the trait vector
+            simultaneously — the multivariate analogue of ANOVA. Needs raw
+            per-plot values, so replicate collapsing is disabled here.
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <MultiSelectFilter
+              label="Traits"
+              options={traitOptions}
+              optionLabel={traitLabel}
+              selected={manovaTraits}
+              onChange={setManovaTraits}
+              width="w-72"
+              testId="mv-manova-trait-picker"
+            />
+            <button
+              type="button"
+              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              disabled={
+                effectiveManovaTraits.length < 2 ||
+                !aggOk ||
+                loading ||
+                traitsLoading
+              }
+              onClick={runManova}
+              data-testid="mv-manova-run"
+            >
+              {loading ? "Running…" : "Run MANOVA"}
+            </button>
+            {(effectiveManovaTraits.length < 2 || !aggOk) && (
+              <span className="text-xs text-muted-foreground">
+                {effectiveManovaTraits.length < 2
+                  ? "Need at least 2 traits"
+                  : !aggregation
+                    ? "Pick an aggregation"
+                    : "Pick a collection date"}
+              </span>
+            )}
+          </div>
+          {manovaResult && manovaResult.status !== "ok" && (
+            <div
+              className="rounded-md border border-amber-500 bg-amber-50 p-3 text-sm text-amber-900"
+              data-testid="mv-manova-status-warning"
+            >
+              {manovaResult.message || manovaResult.status}
+            </div>
+          )}
+          {manovaResult && manovaResult.status === "ok" && (
+            <ManovaTable response={manovaResult} />
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

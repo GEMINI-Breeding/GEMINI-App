@@ -13,7 +13,9 @@ export function featuresToCsv(features: GeoJSON.Feature[]): string {
     cols
       .map((c) => {
         const v = f.properties?.[c]
-        return typeof v === "string" && v.includes(",") ? `"${v}"` : String(v ?? "")
+        return typeof v === "string" && v.includes(",")
+          ? `"${v}"`
+          : String(v ?? "")
       })
       .join(","),
   )

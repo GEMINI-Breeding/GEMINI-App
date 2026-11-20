@@ -1,0 +1,1126 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  File as FileIcon,
+  Flame,
+  Image as ImageIcon,
+  Trash2,
+} from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+
+import {
+  type DatasetOutput,
+  type ExperimentOutput,
+  ExperimentsService,
+  type FileMetadata,
+  FilesService,
+  OpenAPI,
+} from "@/client"
+import { MultiSelectFilter } from "@/components/Common/MultiSelectFilter"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { useConfirm } from "@/components/ui/confirm-dialog"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { idAsString } from "@/features/admin/lib/ids"
+import { ImageLightbox } from "@/features/files/components/ImageLightbox"
+import { ThermalViewerDialog } from "@/features/files/components/ThermalViewerDialog"
+import { classify } from "@/features/files/lib/experimentContents"
+import { deriveImagePathAttrs } from "@/features/files/lib/imagePath"
+import useCustomToast from "@/hooks/useCustomToast"
+import { getToken } from "@/lib/auth"
+
+const DEFAULT_BUCKET = "gemini"
+const PAGE_SIZE = 50
+const TOP_PREFIXES = ["Raw", "Processed"] as const
+const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "tif", "tiff", "svg"])
+
+function fileExt(name: string): string {
+  return name.split(".").pop()?.toLowerCase() ?? ""
+}
+
+function isImageFile(name: string): boolean {
+  return IMAGE_EXTS.has(fileExt(name))
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function fileNameOf(objectName: string): string {
+  return objectName.split("/").pop() ?? objectName
+}
+
+function apiUrl(path: string): string {
+  return `${(OpenAPI.BASE ?? "").replace(/\/$/, "")}${path}`
+}
+
+/**
+ * Fetch a thumbnail with bearer auth and return an object URL.
+ *
+ * The `<img src="/api/files/thumbnail/...">` form cannot include the
+ * Authorization header, so we blob-fetch and feed `URL.createObjectURL`.
+ *
+ * `previewObjectName` lets the caller substitute a sibling file for
+ * the rendered thumbnail. Used for thermal TIFFs: browsers can't
+ * decode 16-bit BlackIsZero TIFFs and the backend thumbnail endpoint
+ * 405s on `.tiff`, so we fetch the worker-written palette JPEG via
+ * the full-download endpoint instead. The result is small enough
+ * (~80 KB) that not going through the thumbnail resizer is fine.
+ */
+function useThumbnailUrl(
+  bucket: string,
+  objectName: string,
+  previewObjectName?: string,
+): { url: string | null; loading: boolean } {
+  const [url, setUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    let createdObjectUrl: string | null = null
+    setLoading(true)
+    setUrl(null)
+    // When we have a sibling preview, fetch the full bytes from the
+    // download endpoint (the preview is already small + already
+    // rendered by the worker). Otherwise hit the resizing thumbnail
+    // endpoint as before.
+    const path = previewObjectName
+      ? `/api/files/download/${bucket}/${previewObjectName}`
+      : `/api/files/thumbnail/${bucket}/${objectName}?size=200`
+    fetch(apiUrl(path), {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Thumbnail ${res.status}`)
+        return res.blob()
+      })
+      .then((blob) => {
+        if (!active) return
+        createdObjectUrl = URL.createObjectURL(blob)
+        setUrl(createdObjectUrl)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl)
+    }
+  }, [bucket, objectName, previewObjectName])
+
+  return { url, loading }
+}
+
+function ThumbnailTile({
+  file,
+  isThermal,
+  previewObjectName,
+  onOpen,
+  selectable = false,
+  selected = false,
+  onToggle,
+}: {
+  file: FileMetadata
+  isThermal: boolean
+  /** Optional MinIO key for a JPEG preview to render in place of
+   *  this file's own bytes. Used for thermal TIFFs: the browser
+   *  can't decode 16-bit single-channel TIFFs, so we paint the
+   *  worker-written `Images/{base}.jpg` instead. The file's own
+   *  name is still what shows under the tile. */
+  previewObjectName?: string
+  onOpen: ((file: FileMetadata) => void) | null
+  /** Select mode: the tile toggles selection instead of opening. */
+  selectable?: boolean
+  selected?: boolean
+  onToggle?: (file: FileMetadata) => void
+}) {
+  const { url, loading } = useThumbnailUrl(
+    file.bucket_name,
+    file.object_name,
+    previewObjectName,
+  )
+  const name = fileNameOf(file.object_name)
+  // Thermal images open the thermal viewer; others open full size.
+  const clickable = selectable || onOpen !== null
+  const activate = () => {
+    if (selectable) onToggle?.(file)
+    else onOpen?.(file)
+  }
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: role="button" + tabIndex are set whenever it is clickable
+    <div
+      className={`group relative rounded-lg border overflow-hidden hover:border-primary transition-colors ${
+        clickable ? "cursor-pointer" : ""
+      } ${selected ? "border-primary ring-2 ring-primary" : ""}`}
+      data-testid={isThermal ? "thermal-thumbnail" : "image-thumbnail"}
+      data-selected={selectable ? String(selected) : undefined}
+      onClick={clickable ? activate : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                activate()
+              }
+            }
+          : undefined
+      }
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+    >
+      <div className="aspect-square bg-muted flex items-center justify-center">
+        {url ? (
+          <img
+            src={url}
+            alt={name}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        ) : loading ? (
+          <ImageIcon className="text-muted-foreground h-6 w-6 animate-pulse" />
+        ) : (
+          <ImageIcon className="text-muted-foreground h-6 w-6" />
+        )}
+        {selectable && (
+          <Checkbox
+            checked={selected}
+            tabIndex={-1}
+            aria-label={`Select ${name}`}
+            className="absolute top-1 left-1 bg-background/90 pointer-events-none"
+          />
+        )}
+        {isThermal && (
+          <span
+            className="absolute top-1 right-1 inline-flex items-center gap-1 rounded bg-orange-500/90 px-1.5 py-0.5 text-[10px] font-medium text-white"
+            data-testid="thermal-badge"
+          >
+            <Flame className="h-3 w-3" />
+            Thermal
+          </span>
+        )}
+      </div>
+      <div className="p-1.5">
+        <p className="text-xs truncate" title={name}>
+          {name}
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          {formatSize(file.size ?? 0)}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+async function downloadFile(file: FileMetadata): Promise<void> {
+  const url = apiUrl(
+    `/api/files/download/${file.bucket_name}/${file.object_name}`,
+  )
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  })
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = objectUrl
+  a.download = fileNameOf(file.object_name)
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+/** One folder the user can look at: an upload's images or a flight's outputs. */
+interface Source {
+  key: string
+  label: string
+  prefixes: string[]
+}
+
+const EVERYTHING = "__everything__"
+
+/**
+ * The folders of an experiment worth viewing, from its datasets: for each
+ * field date / site / platform, the uploaded images (Raw/…) and what
+ * processing made from them (Processed/…). Listing one folder is quick;
+ * listing all of storage and filtering (the last option) takes minutes on a
+ * real season, so it is only there for files filed nowhere else.
+ */
+function sourcesOf(experiment: string, datasets: DatasetOutput[]): Source[] {
+  const seen = new Map<string, Source>()
+  const entries = datasets
+    .map(classify)
+    .filter((e) => e.where)
+    .sort((a, b) => (b.where?.date ?? "").localeCompare(a.where?.date ?? ""))
+  for (const e of entries) {
+    const w = e.where
+    if (!w) continue
+    const tail = `${w.season}/${experiment}/${w.site}/${w.population}/${w.date}/${w.platform}/${w.sensor}/`
+    const what = `${w.date} · ${[w.site, w.population].filter(Boolean).join(" ")} · ${w.platform} ${w.sensor}`
+    if (e.kind === "upload" && !seen.has(`raw:${tail}`))
+      seen.set(`raw:${tail}`, {
+        key: `raw:${tail}`,
+        label: `${what} — uploaded images`,
+        prefixes: [`Raw/${tail}`],
+      })
+    if (!seen.has(`proc:${tail}`))
+      seen.set(`proc:${tail}`, {
+        key: `proc:${tail}`,
+        label: `${what} — processed (plot images, maps)`,
+        prefixes: [`Processed/${tail}`],
+      })
+  }
+  return [
+    ...seen.values(),
+    {
+      key: EVERYTHING,
+      label: "Everything in this experiment (slow: searches all storage)",
+      prefixes: [...TOP_PREFIXES],
+    },
+  ]
+}
+
+export function ImageViewer() {
+  const [experimentName, setExperimentName] = useState<string>("")
+  const [offset, setOffset] = useState(0)
+  const [filenameQuery, setFilenameQuery] = useState<string>("")
+  const [filterLocation, setFilterLocation] = useState<Set<string>>(new Set())
+  const [filterPopulation, setFilterPopulation] = useState<Set<string>>(
+    new Set(),
+  )
+  const [filterDate, setFilterDate] = useState<Set<string>>(new Set())
+  const [filterPlatform, setFilterPlatform] = useState<Set<string>>(new Set())
+  const [filterSensor, setFilterSensor] = useState<Set<string>>(new Set())
+
+  const experimentsQuery = useQuery({
+    queryKey: ["view", "experiments"],
+    queryFn: () =>
+      ExperimentsService.apiExperimentsAllGetAllExperiments({
+        limit: 500,
+        offset: 0,
+      }),
+  })
+  const experiments: ExperimentOutput[] =
+    (experimentsQuery.data as ExperimentOutput[] | null) ?? []
+
+  // Files land under varying path layouts depending on the upload route:
+  //   Raw/{year}/{experiment}/{location}/.../Images/...   (drone uploads)
+  //   Raw/{date}/{experiment}/{filename}                   (wizard / supplemental)
+  //   Processed/{year}/{experiment}/...                    (worker outputs)
+  // The experiment name is never the FIRST segment under Raw/, so we
+  // can't use `gemini/Raw/{experimentName}` as a server-side prefix.
+  // List each top-level prefix and filter client-side for objects whose
+  // path contains the experiment name as a complete segment. Same
+  // pattern as ManageData.tsx.
+  // Select mode for bulk delete. Selection is by object name and
+  // survives paging, so a user can pick across pages before deleting.
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [deleting, setDeleting] = useState(false)
+  const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const { showSuccessToast, showErrorToastWithCopy } = useCustomToast()
+  const toggleSelected = (f: FileMetadata) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(f.object_name)) next.delete(f.object_name)
+      else next.add(f.object_name)
+      return next
+    })
+
+  const pickedExperiment = experiments.find(
+    (e) => e.experiment_name === experimentName,
+  )
+  const experimentId = pickedExperiment ? idAsString(pickedExperiment.id) : null
+  const datasetsQuery = useQuery({
+    queryKey: ["experiments", experimentId, "datasets"],
+    queryFn: async () =>
+      ((await ExperimentsService.apiExperimentsIdExperimentIdDatasetsGetExperimentDatasets(
+        { experimentId: experimentId as string },
+      )) as DatasetOutput[] | null) ?? [],
+    enabled: Boolean(experimentId),
+  })
+  const sources = useMemo(
+    () => sourcesOf(experimentName, datasetsQuery.data ?? []),
+    [experimentName, datasetsQuery.data],
+  )
+  const [sourceKey, setSourceKey] = useState<string>("")
+  const source = sources.find((s) => s.key === sourceKey) ?? null
+
+  const filesQuery = useQuery({
+    queryKey: ["view", "image-files", experimentName, sourceKey],
+    queryFn: async () => {
+      if (!experimentName || !source) return [] as FileMetadata[]
+      const out: FileMetadata[] = []
+      const segment = `/${experimentName}/`
+      for (const top of source.prefixes) {
+        try {
+          const res = await FilesService.apiFilesListFilePathListFiles({
+            filePath: `${DEFAULT_BUCKET}/${top}`,
+          })
+          const list = (res as FileMetadata[] | null) ?? []
+          for (const f of list) {
+            if (f.object_name.includes(segment)) out.push(f)
+          }
+        } catch {
+          // 404 on an empty prefix (e.g. nothing processed yet) is
+          // benign — keep going.
+        }
+      }
+      return out
+    },
+    enabled: Boolean(experimentName && source),
+    staleTime: 5 * 60_000,
+  })
+
+  // Full-size viewing of ordinary images (thermal ones open their own dialog).
+  const [lightbox, setLightbox] = useState<number | null>(null)
+
+  // All matching files for the experiment. Build an attrs lookup once
+  // so per-file filter checks are O(1).
+  const allFiles: FileMetadata[] = filesQuery.data ?? []
+  const fileAttrs = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof deriveImagePathAttrs>>()
+    for (const f of allFiles) {
+      map.set(
+        f.object_name,
+        deriveImagePathAttrs(f.object_name, experimentName),
+      )
+    }
+    return map
+  }, [allFiles, experimentName])
+
+  // Thermal-aware indices for the gallery, built once per file list:
+  //
+  //   - `thermalSidecarKeys`: every `…/RawThermal/{base}.json` the
+  //     THERMAL_EXTRACT worker wrote. Used to tag matching gallery
+  //     entries with the "Thermal" badge.
+  //   - `previewJpegByOriginal`: maps an original-upload key (e.g.
+  //     `…/Images/camT-001.tiff`) to the worker-written JPEG preview
+  //     in the same directory (`…/Images/camT-001.jpg`). Boson TIFFs
+  //     don't render in the browser (Chrome has no TIFF decoder, the
+  //     server-side thumbnail endpoint 405s on `.tiff`); the JPEG
+  //     preview is what we paint instead.
+  //   - `previewJpegs`: the set of worker-written JPEG keys
+  //     themselves. The gallery hides these as standalone entries so
+  //     each original frame shows once, not as a (TIFF, JPEG) pair.
+  const thermalIndices = useMemo(() => {
+    const sidecarKeys = new Set<string>()
+    // basename → list of keys in the same Images/ directory grouped
+    // by basename. Lets us find a JPEG sibling for any TIFF and vice
+    // versa.
+    type Group = { dir: string; base: string; jpeg?: string; tiff?: string }
+    // Key is `dir + "\n" + base` — using a control character that
+    // never appears in a MinIO object name, so directories with
+    // spaces (e.g. "Cowpea MAGIC") don't break the split below.
+    const groupsByDirAndBase = new Map<string, Group>()
+
+    for (const f of allFiles) {
+      const name = f.object_name
+      if (name.includes("/RawThermal/") && name.endsWith(".json")) {
+        sidecarKeys.add(name)
+        continue
+      }
+      const lastSlash = name.lastIndexOf("/")
+      if (lastSlash < 0) continue
+      const dir = name.slice(0, lastSlash)
+      if (!dir.endsWith("/Images")) continue
+      const fileWithExt = name.slice(lastSlash + 1)
+      const dot = fileWithExt.lastIndexOf(".")
+      if (dot <= 0) continue
+      const base = fileWithExt.slice(0, dot)
+      const ext = fileWithExt.slice(dot + 1).toLowerCase()
+      // Key separates dir from base with "\n" (a control char
+      // that never appears in a MinIO object name), so directories
+      // with spaces (e.g. "Cowpea MAGIC") don't collide on a
+      // naive split downstream.
+      const key = `${dir}\n${base}`
+      let group = groupsByDirAndBase.get(key)
+      if (!group) {
+        group = { dir, base }
+        groupsByDirAndBase.set(key, group)
+      }
+      if (ext === "tif" || ext === "tiff") group.tiff = name
+      else if (ext === "jpg" || ext === "jpeg") {
+        // First JPEG wins as "the preview"; same-basename
+        // collisions should not happen, but if they do, any
+        // additional JPEGs stay visible in the gallery.
+        if (!group.jpeg) group.jpeg = name
+      }
+    }
+
+    const previewJpegByOriginal = new Map<string, string>()
+    const previewJpegs = new Set<string>()
+    for (const group of groupsByDirAndBase.values()) {
+      if (!group.tiff || !group.jpeg) continue
+      // Worker only writes the JPEG when it also wrote a sidecar;
+      // if the sidecar is missing this JPEG is genuinely user-
+      // uploaded and should not be hidden.
+      const sidecar =
+        group.dir.slice(0, -"/Images".length) +
+        "/RawThermal/" +
+        group.base +
+        ".json"
+      if (!sidecarKeys.has(sidecar)) continue
+      previewJpegByOriginal.set(group.tiff, group.jpeg)
+      previewJpegs.add(group.jpeg)
+    }
+    return { sidecarKeys, previewJpegByOriginal, previewJpegs }
+  }, [allFiles])
+  const {
+    sidecarKeys: thermalSidecarKeys,
+    previewJpegByOriginal,
+    previewJpegs,
+  } = thermalIndices
+
+  function isThermalImage(file: FileMetadata): boolean {
+    // Match `…/Images/{base}.{ext}` against `…/RawThermal/{base}.json`.
+    const name = file.object_name
+    const lastSlash = name.lastIndexOf("/")
+    if (lastSlash < 0) return false
+    const dir = name.slice(0, lastSlash)
+    if (!dir.endsWith("/Images")) return false
+    const fileWithExt = name.slice(lastSlash + 1)
+    const dot = fileWithExt.lastIndexOf(".")
+    const basename = dot > 0 ? fileWithExt.slice(0, dot) : fileWithExt
+    const sidecar = `${dir.slice(0, -"/Images".length)}/RawThermal/${basename}.json`
+    return thermalSidecarKeys.has(sidecar)
+  }
+
+  // Per-click handler for thermal thumbnails. State lives at this
+  // level so the dialog survives gallery scrolls / pagination.
+  const [thermalOpenFile, setThermalOpenFile] = useState<FileMetadata | null>(
+    null,
+  )
+
+  // Distinct option lists per attribute (drop empty values so the
+  // dropdown only lists real choices).
+  // Distinct option lists per attribute (drop empty values so the
+  // dropdowns only list real choices). Computed once per attrs change.
+  const optionLists = useMemo(() => {
+    const sets = {
+      location: new Set<string>(),
+      population: new Set<string>(),
+      date: new Set<string>(),
+      platform: new Set<string>(),
+      sensor: new Set<string>(),
+    }
+    for (const f of allFiles) {
+      const a = fileAttrs.get(f.object_name)
+      if (!a) continue
+      if (a.location) sets.location.add(a.location)
+      if (a.population) sets.population.add(a.population)
+      if (a.date) sets.date.add(a.date)
+      if (a.platform) sets.platform.add(a.platform)
+      if (a.sensor) sets.sensor.add(a.sensor)
+    }
+    return {
+      location: [...sets.location].sort(),
+      population: [...sets.population].sort(),
+      date: [...sets.date].sort(),
+      platform: [...sets.platform].sort(),
+      sensor: [...sets.sensor].sort(),
+    }
+  }, [allFiles, fileAttrs])
+  const {
+    location: locationOptions,
+    population: populationOptions,
+    date: dateOptions,
+    platform: platformOptions,
+    sensor: sensorOptions,
+  } = optionLists
+
+  // Apply filters: filename text + per-attribute multi-selects. A file
+  // matches iff every active filter (non-empty selected set) contains
+  // its derived value at that position. Files that lack a derived value
+  // for an active filter are excluded — the user explicitly narrowed.
+  const filteredFiles = useMemo(() => {
+    const fnQuery = filenameQuery.trim().toLowerCase()
+    return allFiles.filter((f) => {
+      // `RawThermal/` is the THERMAL_EXTRACT worker's output tier
+      // (raw uint16 TIFFs + per-file JSON sidecars + a per-dataset
+      // summary). Those files are inputs to the ThermalViewerDialog,
+      // not user-facing browser entries — hiding them collapses each
+      // thermal frame down to a single tile in the gallery.
+      if (f.object_name.includes("/RawThermal/")) return false
+      // Worker-written JPEG previews are infrastructure, not user
+      // files: a `Images/{base}.jpg` whose sibling `RawThermal/
+      // {base}.json` exists is just the renderable version of the
+      // original Boson TIFF. Hide them so each thermal frame shows
+      // once. The TIFF itself stays visible and its thumbnail is
+      // served from this JPEG (see ThumbnailTile).
+      if (previewJpegs.has(f.object_name)) return false
+      if (fnQuery && !f.object_name.toLowerCase().includes(fnQuery))
+        return false
+      const attrs = fileAttrs.get(f.object_name)
+      if (!attrs) return false
+      if (filterLocation.size > 0 && !filterLocation.has(attrs.location))
+        return false
+      if (filterPopulation.size > 0 && !filterPopulation.has(attrs.population))
+        return false
+      if (filterDate.size > 0 && !filterDate.has(attrs.date)) return false
+      if (filterPlatform.size > 0 && !filterPlatform.has(attrs.platform))
+        return false
+      if (filterSensor.size > 0 && !filterSensor.has(attrs.sensor)) return false
+      return true
+    })
+  }, [
+    allFiles,
+    fileAttrs,
+    filenameQuery,
+    previewJpegs,
+    filterLocation,
+    filterPopulation,
+    filterDate,
+    filterPlatform,
+    filterSensor,
+  ])
+
+  // Order images first, then non-images, then paginate client-side.
+  const orderedFiles = useMemo(() => {
+    const imgs = filteredFiles.filter((f) => isImageFile(f.object_name))
+    const others = filteredFiles.filter((f) => !isImageFile(f.object_name))
+    return [...imgs, ...others]
+  }, [filteredFiles])
+  const totalCount = orderedFiles.length
+  const pagedFiles = useMemo(
+    () => orderedFiles.slice(offset, offset + PAGE_SIZE),
+    [orderedFiles, offset],
+  )
+  const imageFiles = pagedFiles.filter((f) => isImageFile(f.object_name))
+  // What the full-size viewer steps through: every matching image, not just
+  // this page.
+  const viewable = useMemo(
+    () =>
+      orderedFiles
+        .filter((f) => isImageFile(f.object_name))
+        .map((f) => f.object_name),
+    [orderedFiles],
+  )
+  const otherFiles = pagedFiles.filter((f) => !isImageFile(f.object_name))
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  const currentPage = Math.floor(offset / PAGE_SIZE) + 1
+  const rangeStart = totalCount === 0 ? 0 : offset + 1
+  const rangeEnd = Math.min(offset + PAGE_SIZE, totalCount)
+
+  const anyFilterActive =
+    filenameQuery.trim().length > 0 ||
+    filterLocation.size > 0 ||
+    filterPopulation.size > 0 ||
+    filterDate.size > 0 ||
+    filterPlatform.size > 0 ||
+    filterSensor.size > 0
+
+  /** The object plus anything that only exists because of it: a thermal
+   *  TIFF's preview JPEG and RawThermal/ calibration sidecar. */
+  function withCompanions(objectName: string): string[] {
+    const out = [objectName]
+    const preview = previewJpegByOriginal.get(objectName)
+    if (preview) out.push(preview)
+    const slash = objectName.lastIndexOf("/")
+    const dir = objectName.slice(0, slash)
+    const base = objectName.slice(slash + 1).replace(/\.[^.]+$/, "")
+    const sidecar = `${dir.replace(/\/Images$/, "")}/RawThermal/${base}.json`
+    if (thermalSidecarKeys.has(sidecar)) out.push(sidecar)
+    return out
+  }
+
+  async function deleteSelected() {
+    const picked = [...selected]
+    if (picked.length === 0) return
+    const ok = await confirm({
+      title: `Delete ${picked.length} image${picked.length === 1 ? "" : "s"}?`,
+      description: (
+        <span>
+          Removes the selected files from storage and from their upload's file
+          count. Orthomosaics already built from them are not changed.{" "}
+          <strong>This cannot be undone.</strong>
+        </span>
+      ),
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+    if (!ok) return
+    setDeleting(true)
+    try {
+      const res = (await FilesService.apiFilesDeleteManyDeleteMany({
+        requestBody: { objects: picked.flatMap(withCompanions) },
+      })) as { deleted: string[]; failed: { object: string; error: string }[] }
+      const gone = new Set(res.deleted)
+      setSelected(new Set(picked.filter((o) => !gone.has(o))))
+      queryClient.invalidateQueries({ queryKey: ["view", "image-files"] })
+      queryClient.invalidateQueries({ queryKey: ["files"] })
+      const deletedImages = picked.filter((o) => gone.has(o)).length
+      if (deletedImages > 0)
+        showSuccessToast(
+          `Deleted ${deletedImages} image${deletedImages === 1 ? "" : "s"}`,
+        )
+      if (res.failed.length > 0)
+        showErrorToastWithCopy(
+          `${res.failed.length} file(s) could not be deleted:\n${res.failed
+            .map((f) => `${f.object}: ${f.error}`)
+            .join("\n")}`,
+        )
+    } catch (err) {
+      showErrorToastWithCopy(
+        err instanceof Error ? err.message : "Delete failed",
+      )
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  function resetFilters() {
+    setFilenameQuery("")
+    setFilterLocation(new Set())
+    setFilterPopulation(new Set())
+    setFilterDate(new Set())
+    setFilterPlatform(new Set())
+    setFilterSensor(new Set())
+    setOffset(0)
+  }
+  const resetOffset = () => setOffset(0)
+
+  return (
+    <div className="space-y-4" data-testid="image-viewer">
+      <div className="flex items-end gap-4">
+        <div className="space-y-1">
+          <label
+            htmlFor="image-viewer-experiment"
+            className="text-xs text-muted-foreground"
+          >
+            Experiment
+          </label>
+          <Select
+            value={experimentName}
+            onValueChange={(v) => {
+              setExperimentName(v)
+              setSourceKey("")
+              setOffset(0)
+            }}
+          >
+            <SelectTrigger
+              id="image-viewer-experiment"
+              className="w-64"
+              data-testid="image-viewer-experiment"
+            >
+              <SelectValue placeholder="Pick an experiment" />
+            </SelectTrigger>
+            <SelectContent>
+              {experiments.map((e) => (
+                <SelectItem key={idAsString(e.id)} value={e.experiment_name}>
+                  {e.experiment_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {experimentName && (
+          <div className="min-w-0 flex-1 space-y-1">
+            <label
+              htmlFor="image-viewer-source"
+              className="text-xs text-muted-foreground"
+            >
+              What to view
+            </label>
+            <Select
+              value={sourceKey}
+              onValueChange={(v) => {
+                setSourceKey(v)
+                setOffset(0)
+                setLightbox(null)
+              }}
+            >
+              <SelectTrigger
+                id="image-viewer-source"
+                className="w-full max-w-xl"
+                data-testid="image-viewer-source"
+              >
+                <SelectValue
+                  placeholder={
+                    datasetsQuery.isLoading
+                      ? "Loading…"
+                      : "Pick a flight or drive"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {sources.map((s) => (
+                  <SelectItem key={s.key} value={s.key}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+
+      {experimentName && !sourceKey && (
+        <p className="text-sm text-muted-foreground">
+          Pick a date and what to view: the images as uploaded, or what
+          processing made from them.
+        </p>
+      )}
+
+      {!experimentName && (
+        <p className="text-sm text-muted-foreground">
+          Pick an experiment to browse its uploaded files.
+        </p>
+      )}
+
+      {experimentName && source && filesQuery.isLoading && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ImageIcon className="h-4 w-4 animate-pulse" />
+          {sourceKey === EVERYTHING
+            ? "Searching all storage for this experiment's files — this can take minutes on a large season…"
+            : "Listing files…"}
+        </p>
+      )}
+
+      {experimentName && filesQuery.isError && (
+        <p className="text-sm text-destructive">
+          Failed to load files. The experiment may have no uploads yet.
+        </p>
+      )}
+
+      {experimentName &&
+        !filesQuery.isLoading &&
+        !filesQuery.isError &&
+        allFiles.length > 0 && (
+          <div
+            className="flex flex-wrap items-end gap-3"
+            data-testid="image-viewer-filters"
+          >
+            <div className="space-y-1">
+              <label
+                htmlFor="image-viewer-filename"
+                className="text-xs text-muted-foreground"
+              >
+                Filename contains
+              </label>
+              <Input
+                id="image-viewer-filename"
+                value={filenameQuery}
+                onChange={(e) => {
+                  setFilenameQuery(e.target.value)
+                  resetOffset()
+                }}
+                placeholder="e.g. IMG_0018"
+                className="w-48"
+                data-testid="image-viewer-filter-filename"
+              />
+            </div>
+            {locationOptions.length > 1 && (
+              <MultiSelectFilter
+                label="Location"
+                options={locationOptions}
+                selected={filterLocation}
+                onChange={(next) => {
+                  setFilterLocation(next)
+                  resetOffset()
+                }}
+                width="w-40"
+                testId="image-viewer-filter-location"
+              />
+            )}
+            {populationOptions.length > 1 && (
+              <MultiSelectFilter
+                label="Population"
+                options={populationOptions}
+                selected={filterPopulation}
+                onChange={(next) => {
+                  setFilterPopulation(next)
+                  resetOffset()
+                }}
+                width="w-44"
+                testId="image-viewer-filter-population"
+              />
+            )}
+            {dateOptions.length > 1 && (
+              <MultiSelectFilter
+                label="Date"
+                options={dateOptions}
+                selected={filterDate}
+                onChange={(next) => {
+                  setFilterDate(next)
+                  resetOffset()
+                }}
+                width="w-40"
+                testId="image-viewer-filter-date"
+              />
+            )}
+            {platformOptions.length > 1 && (
+              <MultiSelectFilter
+                label="Platform"
+                options={platformOptions}
+                selected={filterPlatform}
+                onChange={(next) => {
+                  setFilterPlatform(next)
+                  resetOffset()
+                }}
+                width="w-36"
+                testId="image-viewer-filter-platform"
+              />
+            )}
+            {sensorOptions.length > 1 && (
+              <MultiSelectFilter
+                label="Sensor"
+                options={sensorOptions}
+                selected={filterSensor}
+                onChange={(next) => {
+                  setFilterSensor(next)
+                  resetOffset()
+                }}
+                width="w-36"
+                testId="image-viewer-filter-sensor"
+              />
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={resetFilters}
+              disabled={!anyFilterActive}
+              className="self-end"
+              data-testid="image-viewer-reset-filters"
+            >
+              Reset filters
+            </Button>
+          </div>
+        )}
+
+      {experimentName &&
+        source &&
+        !filesQuery.isLoading &&
+        !filesQuery.isError &&
+        allFiles.length === 0 && (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="image-viewer-empty"
+          >
+            {sourceKey === EVERYTHING
+              ? "No files found for this experiment."
+              : "Nothing here yet."}
+          </p>
+        )}
+
+      {experimentName &&
+        !filesQuery.isLoading &&
+        !filesQuery.isError &&
+        allFiles.length > 0 &&
+        totalCount === 0 && (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="image-viewer-no-match"
+          >
+            No files match the current filters. Try clearing them.
+          </p>
+        )}
+
+      {experimentName && totalCount > 0 && (
+        <>
+          <div className="flex items-center justify-between">
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="image-viewer-count"
+            >
+              {totalCount === 1
+                ? "1 file"
+                : `${rangeStart}-${rangeEnd} of ${totalCount} files`}
+              {anyFilterActive ? ` (filtered from ${allFiles.length})` : ""}
+            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={offset + PAGE_SIZE >= totalCount}
+                  onClick={() => setOffset(offset + PAGE_SIZE)}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {imageFiles.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-medium">
+                  Images ({imageFiles.length} on this page)
+                </h4>
+                <div className="flex items-center gap-2">
+                  {selectMode && (
+                    <>
+                      <span
+                        className="text-muted-foreground text-xs"
+                        data-testid="image-viewer-selected-count"
+                      >
+                        {selected.size} selected
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid="image-viewer-select-page"
+                        onClick={() =>
+                          setSelected(
+                            (prev) =>
+                              new Set([
+                                ...prev,
+                                ...imageFiles.map((f) => f.object_name),
+                              ]),
+                          )
+                        }
+                      >
+                        Select page
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={selected.size === 0 || deleting}
+                        data-testid="image-viewer-delete-selected"
+                        onClick={deleteSelected}
+                      >
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        {deleting ? "Deleting…" : "Delete selected"}
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    variant={selectMode ? "secondary" : "outline"}
+                    size="sm"
+                    data-testid="image-viewer-select-mode"
+                    onClick={() => {
+                      setSelectMode(!selectMode)
+                      setSelected(new Set())
+                    }}
+                  >
+                    {selectMode ? "Done" : "Select"}
+                  </Button>
+                </div>
+              </div>
+              <div
+                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"
+                data-testid="image-gallery"
+              >
+                {imageFiles.map((f) => (
+                  <ThumbnailTile
+                    key={f.object_name}
+                    file={f}
+                    isThermal={isThermalImage(f)}
+                    previewObjectName={previewJpegByOriginal.get(f.object_name)}
+                    onOpen={(file) =>
+                      isThermalImage(file)
+                        ? setThermalOpenFile(file)
+                        : setLightbox(viewable.indexOf(file.object_name))
+                    }
+                    selectable={selectMode}
+                    selected={selected.has(f.object_name)}
+                    onToggle={toggleSelected}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {imageFiles.length === 0 && otherFiles.length > 0 && (
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="image-viewer-no-images-on-page"
+            >
+              No images on this page. Advance to find image files, or check the
+              "Other Files" list below.
+            </p>
+          )}
+
+          {otherFiles.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium">
+                Other Files ({otherFiles.length} on this page)
+              </h4>
+              <div
+                className="rounded-md border divide-y"
+                data-testid="image-viewer-files"
+              >
+                {otherFiles.map((f) => (
+                  <div
+                    key={f.object_name}
+                    className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40"
+                  >
+                    <FileIcon className="text-muted-foreground h-4 w-4 shrink-0" />
+                    <span
+                      className="text-sm truncate flex-1 font-mono"
+                      title={f.object_name}
+                    >
+                      {fileNameOf(f.object_name)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatSize(f.size ?? 0)}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        downloadFile(f).catch(() => {
+                          /* swallow — caller surface is best-effort */
+                        })
+                      }}
+                      title="Download"
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      <ImageLightbox
+        images={viewable}
+        index={lightbox}
+        onIndex={(i) => {
+          setLightbox(i)
+          // Keep the gallery page in step with the viewer.
+          setOffset(Math.floor(i / PAGE_SIZE) * PAGE_SIZE)
+        }}
+        onClose={() => setLightbox(null)}
+      />
+
+      {thermalOpenFile && (
+        <ThermalViewerDialog
+          open={true}
+          bucket={thermalOpenFile.bucket_name}
+          rgbObjectName={thermalOpenFile.object_name}
+          onOpenChange={(open) => {
+            if (!open) setThermalOpenFile(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}

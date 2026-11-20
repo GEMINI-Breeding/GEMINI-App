@@ -15,10 +15,7 @@ export async function findRowByPrefix(
   page: Page,
   prefix: string,
 ): Promise<Locator> {
-  const row = page
-    .getByRole("row")
-    .filter({ hasText: prefix })
-    .first()
+  const row = page.getByRole("row").filter({ hasText: prefix }).first()
   await expect(row).toBeVisible({ timeout: 20_000 })
   return row
 }
@@ -38,7 +35,7 @@ export async function openImageViewer(
 
   // ImageViewerDialog is a fixed overlay; scope by the Loading/No-images text
   // or the range slider (unique to this component).
-  const dialog = page.locator('div.fixed.inset-0.z-50.bg-black\\/80')
+  const dialog = page.locator("div.fixed.inset-0.z-50.bg-black\\/80")
   await expect(dialog).toBeVisible({ timeout: 15_000 })
   return dialog
 }

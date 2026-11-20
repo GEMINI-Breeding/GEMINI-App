@@ -18,7 +18,10 @@ interface ColumnFilterProps<TData> {
   title: string
 }
 
-export function ColumnFilter<TData>({ column, title }: ColumnFilterProps<TData>) {
+export function ColumnFilter<TData>({
+  column,
+  title,
+}: ColumnFilterProps<TData>) {
   const selectedValues = (column.getFilterValue() as string[] | undefined) ?? []
   const isActive = selectedValues.length > 0
 
@@ -58,7 +61,9 @@ export function ColumnFilter<TData>({ column, title }: ColumnFilterProps<TData>)
           <DropdownMenuSeparator />
           {isActive && (
             <>
-              <DropdownMenuItem onClick={() => column.setFilterValue(undefined)}>
+              <DropdownMenuItem
+                onClick={() => column.setFilterValue(undefined)}
+              >
                 Clear filter
               </DropdownMenuItem>
               <DropdownMenuSeparator />

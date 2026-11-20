@@ -3,15 +3,27 @@
  * Rendered via React portal into document.body so it always sits on top.
  */
 
-import { createPortal } from "react-dom"
 import {
-  Hash, TrendingUp, BarChart3, ScatterChart, Table2, Image, Activity,
+  Activity,
+  BarChart3,
+  Hash,
+  Image,
+  ScatterChart,
+  Table2,
+  TrendingUp,
 } from "lucide-react"
-import { WIDGET_TEMPLATES } from "./WidgetToolbox"
+import { createPortal } from "react-dom"
 import type { DragPos } from "../hooks/useDrag"
+import { WIDGET_TEMPLATES } from "./WidgetToolbox"
 
 const ICON_MAP: Record<string, React.FC<{ className?: string }>> = {
-  Hash, TrendingUp, BarChart3, ScatterChart, Table2, Image, Activity,
+  Hash,
+  TrendingUp,
+  BarChart3,
+  ScatterChart,
+  Table2,
+  Image,
+  Activity,
 }
 
 interface DragGhostProps {
@@ -39,15 +51,16 @@ export function DragGhost({ templateId, pos, isOverCanvas }: DragGhostProps) {
     >
       <div
         className={`flex items-center gap-2 px-3 py-2 rounded-lg border shadow-lg text-sm font-medium
-          ${isOverCanvas
-            ? "bg-primary text-primary-foreground border-primary"
-            : "bg-card text-foreground border-border opacity-80"
+          ${
+            isOverCanvas
+              ? "bg-primary text-primary-foreground border-primary"
+              : "bg-card text-foreground border-border opacity-80"
           }`}
       >
         <Icon className="w-4 h-4 flex-shrink-0" />
         <span>{template.name}</span>
       </div>
     </div>,
-    document.body
+    document.body,
   )
 }

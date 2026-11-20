@@ -1,7 +1,7 @@
 import { AxiosError } from "axios"
 import { describe, expect, it, vi } from "vitest"
-import { getInitials, handleError } from "./utils"
 import type { ApiError } from "./client"
+import { getInitials, handleError } from "./utils"
 
 describe("getInitials", () => {
   it("returns the uppercase first letters of the first two words", () => {
@@ -54,5 +54,24 @@ describe("handleError", () => {
     const axiosErr = new AxiosError("timeout of 5000ms exceeded")
     handleError.call(cb, axiosErr as unknown as ApiError)
     expect(cb).toHaveBeenCalledWith("timeout of 5000ms exceeded")
+  })
+
+  it("prefers GEMINIbase error_description over the short error slug", () => {
+    const cb = vi.fn()
+    const err = {
+      body: {
+        error: "Invalid credentials",
+        error_description: "Incorrect email or password.",
+      },
+    } as unknown as ApiError
+    handleError.call(cb, err)
+    expect(cb).toHaveBeenCalledWith("Incorrect email or password.")
+  })
+
+  it("falls back to GEMINIbase error slug when description is missing", () => {
+    const cb = vi.fn()
+    const err = { body: { error: "Email taken" } } as unknown as ApiError
+    handleError.call(cb, err)
+    expect(cb).toHaveBeenCalledWith("Email taken")
   })
 })

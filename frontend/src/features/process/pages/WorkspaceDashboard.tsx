@@ -1,7 +1,30 @@
-import { Plus, FolderOpen, MoreVertical, Trash2, RefreshCw, Layers, Pencil } from "lucide-react"
+/**
+ * WorkspaceDashboard — Process feature landing page.
+ *
+ * Mirrors `main`'s wizard-style UI: a Workspace is a name + description,
+ * with no experiment binding. Experiment / site / population / date /
+ * platform / sensor are all picked at run-creation time from an uploaded
+ * dataset (see NewRunDialog). Backed by the local runStore.
+ *
+ * Card pictures: up to three of the workspace's runs, each shown by a plot
+ * image or stitched plot when processing has made one, else a raw photo
+ * (lib/runPreview: one short listing per run, remembered, then a small
+ * server-made thumbnail). A workspace without runs keeps the placeholder.
+ */
+
 import { useNavigate } from "@tanstack/react-router"
+import {
+  Bot,
+  FolderOpen,
+  Layers,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react"
 import { useState } from "react"
-import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { WhereLine } from "@/components/Sidebar/WhereSwitch"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -20,90 +43,193 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { WorkspacesService, type WorkspacePublic } from "@/client"
-import useCustomToast from "@/hooks/useCustomToast"
-
-function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
-  return base ? `${base}${path}` : path
-}
-
-function authHeaders() {
-  return { Authorization: `Bearer ${localStorage.getItem("access_token") || ""}` }
-}
+import { useProcess } from "@/contexts/ProcessContext"
+import { AuthImage } from "@/features/genotyping/components/AuthImage"
+import {
+  type ExperimentPerson,
+  shortName,
+  useExperimentPeople,
+} from "@/features/people/api"
+import { ExperimentRuns } from "@/features/process/components/ExperimentRuns"
+import {
+  legacyRunCount,
+  regroupAgentRuns,
+} from "@/features/process/lib/regroup"
+import {
+  ORTHO,
+  previewRuns,
+  previewSrc,
+  useRunPreview,
+} from "@/features/process/lib/runPreview"
+import {
+  type RunTag,
+  runState,
+  TAG_CLASS,
+  TAG_HINT,
+  TAG_LABEL,
+} from "@/features/process/lib/runStatus"
+import {
+  agentLastChanged,
+  createWorkspace,
+  deleteWorkspace,
+  type Run,
+  updateWorkspace,
+  usePipelines,
+  useWorkspaceRuns,
+  useWorkspaces,
+  type Workspace,
+} from "@/features/process/lib/runStore"
 
 interface WorkspaceStats {
   aerial: number
   ground: number
+  agent: number
+  /** Runs per status, as on the run lists ("input needed", "running", …). */
+  byTag: Partial<Record<RunTag, number>>
 }
 
-interface CardImage {
-  url: string
-  type: "aerial" | "ground"
+/** Order the statuses are shown in: what needs the person first. */
+const TAG_ORDER: RunTag[] = [
+  "waiting",
+  "failed",
+  "running",
+  "queued",
+  "new",
+  "complete",
+]
+
+/** The owners of the experiments this workspace's runs belong to. */
+function useWorkspaceOwners(workspaceId: string): ExperimentPerson[] {
+  const runs = useWorkspaceRuns(workspaceId)
+  const linked = useExperimentPeople()
+  const out = new Map<string, ExperimentPerson>()
+  for (const r of runs) {
+    const id = r.uploadScope?.experimentId
+    for (const p of (id && linked.data?.[String(id)]) || [])
+      if (p.role === "owner") out.set(p.user_id, p)
+  }
+  return [...out.values()]
 }
 
-// ── Per-card image strip ───────────────────────────────────────────────────
+function useWorkspaceStats(workspaceId: string): WorkspaceStats {
+  // Match main's per-workspace "dataset" count semantics: number of
+  // *runs* per pipeline type, not number of pipelines.
+  const pipelines = usePipelines(workspaceId)
+  const runs = useWorkspaceRuns(workspaceId)
+  const aerialPipelineIds = new Set(
+    pipelines.filter((p) => p.type === "aerial").map((p) => p.id),
+  )
+  const groundPipelineIds = new Set(
+    pipelines.filter((p) => p.type === "ground").map((p) => p.id),
+  )
+  const { queuedJobIds } = useProcess()
+  const byTag: Partial<Record<RunTag, number>> = {}
+  for (const r of runs) {
+    const tag = runState(
+      r,
+      groundPipelineIds.has(r.pipelineId) ? "ground" : "aerial",
+      queuedJobIds,
+    ).tag
+    byTag[tag] = (byTag[tag] ?? 0) + 1
+  }
+  return {
+    aerial: runs.filter((r) => aerialPipelineIds.has(r.pipelineId)).length,
+    ground: runs.filter((r) => groundPipelineIds.has(r.pipelineId)).length,
+    agent: runs.filter((r) => agentLastChanged(r)).length,
+    byTag,
+  }
+}
 
-function WorkspaceCardImages({ workspaceId }: { workspaceId: string }) {
-  const { data: images = [] } = useQuery<CardImage[]>({
-    queryKey: ["workspace-card-images", workspaceId],
-    queryFn: () =>
-      fetch(apiUrl(`/api/v1/workspaces/${workspaceId}/card-images`), {
-        headers: authHeaders(),
-      }).then((r) => r.json()),
-    staleTime: 0,
-  })
-
-  if (images.length === 0) {
+/** One run's picture in a card; nothing (the backdrop shows) until found. */
+function RunPicture({ run }: { run: Run }) {
+  const preview = useRunPreview(run)
+  const u = run.uploadScope
+  if (!preview.data)
     return (
-      <div className="h-28 w-full rounded-t-lg bg-muted flex items-center justify-center">
+      <div
+        className={`bg-muted h-full w-full ${preview.isLoading ? "animate-pulse" : ""}`}
+      />
+    )
+  const alt = u ? `${u.location} ${u.date} ${u.platform}` : "Run image"
+  return (
+    <div className="relative h-full w-full">
+      {preview.data.startsWith(ORTHO) ? (
+        // An orthomosaic, rendered small by the tile server.
+        <img
+          src={previewSrc(preview.data, 400)}
+          alt={alt}
+          className="h-full w-full bg-muted object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <AuthImage
+          src={previewSrc(preview.data, 400)}
+          alt={alt}
+          className="h-full w-full rounded-none border-0 object-cover"
+          lazy
+        />
+      )}
+      {u && (
+        <span className="absolute bottom-1 left-1 rounded bg-black/55 px-1 py-px text-[10px] text-white">
+          {u.date}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function CardPictures({ workspaceId }: { workspaceId: string }) {
+  const runs = previewRuns(useWorkspaceRuns(workspaceId))
+  if (runs.length === 0)
+    return (
+      <div className="flex h-28 w-full items-center justify-center rounded-t-lg bg-muted">
         <Layers className="h-8 w-8 text-muted-foreground/30" />
       </div>
     )
-  }
-
   return (
-    <div className="h-28 w-full rounded-t-lg overflow-hidden flex">
-      {images.map((img, i) => (
-        <img
-          key={i}
-          src={apiUrl(img.url)}
-          alt={`${img.type} preview`}
-          className="h-full flex-1 object-cover"
-          style={{ width: `${100 / images.length}%` }}
-          draggable={false}
-        />
+    <div
+      className={`grid h-28 w-full gap-px overflow-hidden rounded-t-lg bg-border ${
+        runs.length === 1
+          ? "grid-cols-1"
+          : runs.length === 2
+            ? "grid-cols-2"
+            : "grid-cols-3"
+      }`}
+      data-testid="workspace-card-pictures"
+    >
+      {runs.map((r) => (
+        <RunPicture key={r.id} run={r} />
       ))}
     </div>
   )
 }
 
-// ── Workspace card ─────────────────────────────────────────────────────────
-
 function WorkspaceCard({
   workspace,
-  stats,
   onDelete,
   onEdit,
 }: {
-  workspace: WorkspacePublic
-  stats: WorkspaceStats | undefined
-  onDelete: (ws: WorkspacePublic) => void
-  onEdit: (ws: WorkspacePublic) => void
+  workspace: Workspace
+  onDelete: (ws: Workspace) => void
+  onEdit: (ws: Workspace) => void
 }) {
   const navigate = useNavigate()
+  const stats = useWorkspaceStats(workspace.id)
+  const owners = useWorkspaceOwners(workspace.id)
 
   return (
     <div
       className="relative rounded-lg border bg-card cursor-pointer transition-all hover:border-primary/60 hover:shadow-md group overflow-hidden flex flex-col"
+      data-testid={`workspace-card-${workspace.name}`}
       onClick={() =>
-        navigate({ to: "/process/$workspaceId", params: { workspaceId: workspace.id } })
+        navigate({
+          to: "/process/$workspaceId",
+          params: { workspaceId: workspace.id },
+        })
       }
     >
-      {/* Image strip */}
-      <WorkspaceCardImages workspaceId={workspace.id} />
+      <CardPictures workspaceId={workspace.id} />
 
-      {/* Three-dot menu — over the image */}
       <div className="absolute top-2 right-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
@@ -111,6 +237,7 @@ function WorkspaceCard({
               variant="ghost"
               size="icon"
               className="h-7 w-7 bg-black/30 hover:bg-black/50 text-white"
+              aria-label="Workspace actions"
             >
               <MoreVertical className="w-4 h-4" />
             </Button>
@@ -120,7 +247,10 @@ function WorkspaceCard({
               <Pencil className="w-4 h-4 mr-2" />
               Edit
             </DropdownMenuItem>
-            <DropdownMenuItem className="text-red-600" onClick={() => onDelete(workspace)}>
+            <DropdownMenuItem
+              className="text-red-600"
+              onClick={() => onDelete(workspace)}
+            >
               <Trash2 className="w-4 h-4 mr-2" />
               Delete
             </DropdownMenuItem>
@@ -128,117 +258,145 @@ function WorkspaceCard({
         </DropdownMenu>
       </div>
 
-      {/* Content */}
       <div className="p-4 flex flex-col gap-1.5 flex-1">
-        <p className="font-medium text-sm leading-tight truncate pr-6">{workspace.name}</p>
+        <p className="font-medium text-sm leading-tight truncate pr-6">
+          {workspace.name}
+        </p>
         {workspace.description && (
-          <p className="text-muted-foreground text-xs truncate">{workspace.description}</p>
+          <p className="text-muted-foreground text-xs truncate">
+            {workspace.description}
+          </p>
         )}
-
-        {/* Pipeline stats */}
+        {owners.length > 0 && (
+          <p
+            className="text-muted-foreground text-xs truncate"
+            data-testid={`workspace-owners-${workspace.name}`}
+            title={owners.map((o) => o.email).join(", ")}
+          >
+            <span className="font-medium text-foreground/70">Owner:</span>{" "}
+            {owners.map((o) => shortName(o)).join(", ")}
+          </p>
+        )}
         <div className="mt-1 space-y-0.5">
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground/70">Aerial Pipeline:</span>{" "}
-            {stats ? `${stats.aerial} dataset${stats.aerial !== 1 ? "s" : ""}` : "—"}
+            <span className="font-medium text-foreground/70">
+              Aerial Pipeline:
+            </span>{" "}
+            {stats.aerial} dataset{stats.aerial !== 1 ? "s" : ""}
           </p>
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground/70">Ground Pipeline:</span>{" "}
-            {stats ? `${stats.ground} dataset${stats.ground !== 1 ? "s" : ""}` : "—"}
+            <span className="font-medium text-foreground/70">
+              Ground Pipeline:
+            </span>{" "}
+            {stats.ground} dataset{stats.ground !== 1 ? "s" : ""}
           </p>
+          {TAG_ORDER.some((t) => stats.byTag[t]) && (
+            <div
+              className="flex flex-wrap gap-1 pt-1"
+              data-testid="workspace-card-status"
+            >
+              {TAG_ORDER.filter((t) => stats.byTag[t]).map((t) => (
+                <span
+                  key={t}
+                  className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${TAG_CLASS[t]}`}
+                  title={TAG_HINT[t]}
+                >
+                  {stats.byTag[t]} {TAG_LABEL[t]}
+                </span>
+              ))}
+            </div>
+          )}
+          {stats.agent > 0 && (
+            <p
+              className="flex items-center gap-1 text-xs text-muted-foreground"
+              title="Runs the agent started; marked with this icon inside"
+            >
+              <Bot className="h-3 w-3" />
+              {stats.agent} last changed by the agent
+            </p>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-// ── Dashboard ──────────────────────────────────────────────────────────────
+function RegroupBanner() {
+  // re-render when the store changes
+  useWorkspaces()
+  const n = legacyRunCount()
+  if (n === 0) return null
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-4 py-2 text-sm">
+      <Bot className="h-4 w-4 text-muted-foreground" />
+      <span className="flex-1">
+        {n} run{n === 1 ? "" : "s"} the agent started {n === 1 ? "is" : "are"}{" "}
+        in the old "Agent runs" workspace. Move them into their experiments'
+        workspaces? They keep the agent mark; jobs and data are not touched.
+      </span>
+      <Button
+        size="sm"
+        data-testid="regroup-agent-runs"
+        onClick={() => {
+          const moved = regroupAgentRuns()
+          toast.success(`Moved ${moved} run${moved === 1 ? "" : "s"}`)
+        }}
+      >
+        Move them
+      </Button>
+    </div>
+  )
+}
+
+const VIEW_KEY = "gemi.process.view"
 
 export function WorkspaceDashboard() {
-  const queryClient = useQueryClient()
-  const { showErrorToast } = useCustomToast()
-  const [open, setOpen] = useState(false)
-  const [newWorkspace, setNewWorkspace] = useState({ name: "", description: "" })
-
-  const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: () => WorkspacesService.readAll(),
-  })
-
-  const [isSyncing, setIsSyncing] = useState(false)
-  async function handleRefresh() {
-    setIsSyncing(true)
+  const workspaces = useWorkspaces()
+  // Workspaces first; "By experiment" is the second view (remembered).
+  const [view, setViewState] = useState<"experiments" | "workspaces">(() => {
     try {
-      await fetch(apiUrl("/api/v1/workspaces/sync"), {
-        method: "POST",
-        headers: authHeaders(),
-      })
-      await refetch()
-      queryClient.invalidateQueries({ queryKey: ["workspace-stats"] })
-    } finally {
-      setIsSyncing(false)
+      return localStorage.getItem(VIEW_KEY) === "experiments"
+        ? "experiments"
+        : "workspaces"
+    } catch {
+      return "workspaces"
+    }
+  })
+  const setView = (v: "experiments" | "workspaces") => {
+    setViewState(v)
+    try {
+      localStorage.setItem(VIEW_KEY, v)
+    } catch {
+      // remembered for this visit only
     }
   }
 
-  const [editWorkspace, setEditWorkspace] = useState<WorkspacePublic | null>(null)
+  const [open, setOpen] = useState(false)
+  const [newWorkspace, setNewWorkspace] = useState({
+    name: "",
+    description: "",
+  })
+  const [editWorkspace, setEditWorkspace] = useState<Workspace | null>(null)
   const [editForm, setEditForm] = useState({ name: "", description: "" })
-
-  const editMutation = useMutation({
-    mutationFn: ({ id, name, description }: { id: string; name: string; description: string }) =>
-      WorkspacesService.update({ id, requestBody: { name, description } }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["workspaces"] })
-      setEditWorkspace(null)
-    },
-    onError: () => showErrorToast("Failed to update workspace"),
-  })
-
-  const { data: statsMap = {} } = useQuery<Record<string, WorkspaceStats>>({
-    queryKey: ["workspace-stats"],
-    queryFn: () =>
-      fetch(apiUrl("/api/v1/workspaces/stats"), { headers: authHeaders() }).then((r) => r.json()),
-    staleTime: 60_000,
-  })
-
-  const workspaces = data?.data ?? []
-
-  // Pre-fetch card images for all workspaces so we can show them all at once
-  const imageQueries = useQueries({
-    queries: workspaces.map((ws) => ({
-      queryKey: ["workspace-card-images", ws.id],
-      queryFn: () =>
-        fetch(apiUrl(`/api/v1/workspaces/${ws.id}/card-images`), {
-          headers: authHeaders(),
-        }).then((r) => r.json()),
-      staleTime: 0,
-    })),
-  })
-  const allImagesLoaded = workspaces.length === 0 || imageQueries.every((q) => !q.isLoading)
-
-  const createMutation = useMutation({
-    mutationFn: (body: { name: string; description: string }) =>
-      WorkspacesService.create({ requestBody: body }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["workspaces"] })
-      queryClient.invalidateQueries({ queryKey: ["workspace-stats"] })
-      setNewWorkspace({ name: "", description: "" })
-      setOpen(false)
-    },
-    onError: () => showErrorToast("Failed to create workspace"),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => WorkspacesService.delete({ id }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["workspaces"] })
-      queryClient.invalidateQueries({ queryKey: ["workspace-stats"] })
-    },
-    onError: () => showErrorToast("Failed to delete workspace"),
-  })
-
-  const [confirmDelete, setConfirmDelete] = useState<WorkspacePublic | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<Workspace | null>(null)
 
   const handleCreate = () => {
-    if (newWorkspace.name.trim()) createMutation.mutate(newWorkspace)
+    if (!newWorkspace.name.trim()) return
+    createWorkspace({
+      name: newWorkspace.name.trim(),
+      description: newWorkspace.description.trim() || undefined,
+    })
+    setNewWorkspace({ name: "", description: "" })
+    setOpen(false)
+  }
+
+  const handleEdit = () => {
+    if (!editWorkspace || !editForm.name.trim()) return
+    updateWorkspace(editWorkspace.id, {
+      name: editForm.name.trim(),
+      description: editForm.description.trim() || undefined,
+    })
+    setEditWorkspace(null)
   }
 
   return (
@@ -248,19 +406,32 @@ export function WorkspaceDashboard() {
           <div>
             <h1 className="text-xl font-semibold">Process</h1>
             <p className="text-muted-foreground text-sm">
-              Create and manage your phenotyping projects
+              Every run by experiment and date; workspaces hold pipeline
+              settings
             </p>
+            <WhereLine className="mt-1" />
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleRefresh}
-              disabled={isFetching || isSyncing}
-              title="Refresh workspaces — removes stale entries with no data on disk"
-            >
-              <RefreshCw className={`h-4 w-4 ${isFetching || isSyncing ? "animate-spin" : ""}`} />
-            </Button>
+            <div className="flex rounded-md border p-0.5" role="tablist">
+              {(
+                [
+                  ["workspaces", "Workspaces"],
+                  ["experiments", "By experiment"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === id}
+                  data-testid={`process-view-${id}`}
+                  onClick={() => setView(id)}
+                  className={`rounded px-3 py-1 text-sm ${view === id ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button data-onboarding="process-new-workspace">
@@ -272,8 +443,9 @@ export function WorkspaceDashboard() {
                 <DialogHeader>
                   <DialogTitle>Create New Workspace</DialogTitle>
                   <DialogDescription>
-                    Create a workspace to organize your phenotyping projects. You can add aerial
-                    and ground-based processing pipelines within each workspace.
+                    Create a workspace to organize your phenotyping projects.
+                    You can add aerial and ground processing pipelines inside
+                    each workspace.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -283,7 +455,12 @@ export function WorkspaceDashboard() {
                       id="name"
                       placeholder="e.g., Corn Field Study 2026"
                       value={newWorkspace.name}
-                      onChange={(e) => setNewWorkspace({ ...newWorkspace, name: e.target.value })}
+                      onChange={(e) =>
+                        setNewWorkspace({
+                          ...newWorkspace,
+                          name: e.target.value,
+                        })
+                      }
                       onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                     />
                   </div>
@@ -294,7 +471,10 @@ export function WorkspaceDashboard() {
                       placeholder="Brief description of your project"
                       value={newWorkspace.description}
                       onChange={(e) =>
-                        setNewWorkspace({ ...newWorkspace, description: e.target.value })
+                        setNewWorkspace({
+                          ...newWorkspace,
+                          description: e.target.value,
+                        })
                       }
                     />
                   </div>
@@ -305,7 +485,7 @@ export function WorkspaceDashboard() {
                   </Button>
                   <Button
                     onClick={handleCreate}
-                    disabled={!newWorkspace.name.trim() || createMutation.isPending}
+                    disabled={!newWorkspace.name.trim()}
                   >
                     Create Workspace
                   </Button>
@@ -315,23 +495,11 @@ export function WorkspaceDashboard() {
           </div>
         </div>
       </div>
+
       <div className="flex-1 overflow-auto px-6 pb-6">
-        {isLoading || (workspaces.length > 0 && !allImagesLoaded) ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {(isLoading ? Array(3).fill(null) : workspaces).map((_, i) => (
-              <div key={i} className="rounded-lg border bg-card overflow-hidden flex flex-col animate-pulse">
-                <div className="h-28 w-full bg-muted" />
-                <div className="p-4 flex flex-col gap-2">
-                  <div className="h-3.5 w-2/3 rounded bg-muted" />
-                  <div className="h-3 w-1/2 rounded bg-muted" />
-                  <div className="mt-1 space-y-1.5">
-                    <div className="h-3 w-3/4 rounded bg-muted" />
-                    <div className="h-3 w-3/4 rounded bg-muted" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        <RegroupBanner />
+        {view === "experiments" ? (
+          <ExperimentRuns />
         ) : workspaces.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
             <FolderOpen className="h-10 w-10 text-muted-foreground" />
@@ -345,19 +513,23 @@ export function WorkspaceDashboard() {
               <WorkspaceCard
                 key={workspace.id}
                 workspace={workspace}
-                stats={statsMap[workspace.id]}
                 onDelete={setConfirmDelete}
                 onEdit={(ws) => {
                   setEditWorkspace(ws)
-                  setEditForm({ name: ws.name, description: ws.description ?? "" })
+                  setEditForm({
+                    name: ws.name,
+                    description: ws.description ?? "",
+                  })
                 }}
               />
             ))}
           </div>
         )}
 
-        {/* Edit dialog */}
-        <Dialog open={!!editWorkspace} onOpenChange={(v) => !v && setEditWorkspace(null)}>
+        <Dialog
+          open={!!editWorkspace}
+          onOpenChange={(v) => !v && setEditWorkspace(null)}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Edit Workspace</DialogTitle>
@@ -368,11 +540,11 @@ export function WorkspaceDashboard() {
                 <Input
                   id="edit-name"
                   value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, name: e.target.value })
+                  }
                   onKeyDown={(e) =>
-                    e.key === "Enter" &&
-                    editForm.name.trim() &&
-                    editMutation.mutate({ id: editWorkspace!.id, ...editForm })
+                    e.key === "Enter" && editForm.name.trim() && handleEdit()
                   }
                 />
               </div>
@@ -382,7 +554,9 @@ export function WorkspaceDashboard() {
                   id="edit-description"
                   placeholder="Brief description of your project"
                   value={editForm.description}
-                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, description: e.target.value })
+                  }
                 />
               </div>
             </div>
@@ -390,25 +564,24 @@ export function WorkspaceDashboard() {
               <Button variant="outline" onClick={() => setEditWorkspace(null)}>
                 Cancel
               </Button>
-              <Button
-                disabled={!editForm.name.trim() || editMutation.isPending}
-                onClick={() =>
-                  editMutation.mutate({ id: editWorkspace!.id, ...editForm })
-                }
-              >
+              <Button disabled={!editForm.name.trim()} onClick={handleEdit}>
                 Save
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        <Dialog open={!!confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(null)}>
+        <Dialog
+          open={!!confirmDelete}
+          onOpenChange={(v) => !v && setConfirmDelete(null)}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete Workspace</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete <strong>{confirmDelete?.name}</strong>? This will
-                permanently remove the workspace and all its pipelines and runs.
+                Are you sure you want to delete{" "}
+                <strong>{confirmDelete?.name}</strong>? This will permanently
+                remove the workspace and all its pipelines and runs.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -417,12 +590,11 @@ export function WorkspaceDashboard() {
               </Button>
               <Button
                 variant="destructive"
-                disabled={deleteMutation.isPending}
                 onClick={() => {
-                  if (confirmDelete)
-                    deleteMutation.mutate(confirmDelete.id, {
-                      onSuccess: () => setConfirmDelete(null),
-                    })
+                  if (confirmDelete) {
+                    deleteWorkspace(confirmDelete.id)
+                    setConfirmDelete(null)
+                  }
                 }}
               >
                 Delete
@@ -434,4 +606,3 @@ export function WorkspaceDashboard() {
     </div>
   )
 }
-

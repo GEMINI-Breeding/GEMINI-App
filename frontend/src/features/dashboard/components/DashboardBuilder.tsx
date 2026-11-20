@@ -9,22 +9,29 @@
  *   └──────────┴───────────────────────────────────────────────┘
  */
 
-import { useCallback, useState } from "react"
-import { Plus, X, RefreshCw } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
-import { useTraitRecords } from "../hooks/useTraitData"
-import { useDrag } from "../hooks/useDrag"
+import { Plus, RefreshCw, X } from "lucide-react"
+import { useCallback, useState } from "react"
+import { WhereLine } from "@/components/Sidebar/WhereSwitch"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { WidgetToolbox, WIDGET_TEMPLATES } from "./WidgetToolbox"
+import { useDrag } from "../hooks/useDrag"
+import { useTraitRecords } from "../hooks/useTraitData"
+import { AUTO_TAB_ID, useDashboardStore } from "../store"
+import type { DashboardWidget } from "../types"
+import { AutoOverview } from "./AutoOverview"
 import { DashboardCanvas } from "./DashboardCanvas"
 import { DragGhost } from "./DragGhost"
 import { WidgetConfigDialog } from "./WidgetConfigDialog"
-import { useDashboardStore } from "../store"
-import type { DashboardWidget } from "../types"
+import { WIDGET_TEMPLATES, WidgetToolbox } from "./WidgetToolbox"
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
@@ -37,12 +44,33 @@ interface TabBarProps {
   onDelete: (id: string) => void
 }
 
-function TabBar({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete }: TabBarProps) {
+function TabBar({
+  tabs,
+  activeTabId,
+  onSelect,
+  onAdd,
+  onRename,
+  onDelete,
+}: TabBarProps) {
   return (
     <div className="flex items-center gap-1 overflow-x-auto">
+      <button
+        type="button"
+        onClick={() => onSelect(AUTO_TAB_ID)}
+        title="Generated from your data"
+        data-testid="dashboard-tab-overview"
+        className={`px-3 py-1 text-xs font-medium rounded-t border-b-2 transition-colors flex-shrink-0 ${
+          activeTabId === AUTO_TAB_ID
+            ? "border-primary text-primary bg-primary/5"
+            : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+        }`}
+      >
+        Overview
+      </button>
       {tabs.map((tab) => (
         <div key={tab.id} className="relative group/tab flex-shrink-0">
           <button
+            type="button"
             onClick={() => onSelect(tab.id)}
             onDoubleClick={() => onRename(tab.id)}
             title="Double-click to rename"
@@ -56,7 +84,11 @@ function TabBar({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete }: TabB
           </button>
           {tabs.length > 1 && (
             <button
-              onClick={(e) => { e.stopPropagation(); onDelete(tab.id) }}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete(tab.id)
+              }}
               className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-muted text-muted-foreground hover:bg-destructive hover:text-destructive-foreground items-center justify-center opacity-0 group-hover/tab:opacity-100 transition-opacity hidden group-hover/tab:flex"
             >
               <X className="w-2.5 h-2.5" />
@@ -65,6 +97,7 @@ function TabBar({ tabs, activeTabId, onSelect, onAdd, onRename, onDelete }: TabB
         </div>
       ))}
       <button
+        type="button"
         onClick={onAdd}
         className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors ml-1 flex-shrink-0"
         title="Add tab"
@@ -100,12 +133,18 @@ function RenameDialog({
           className="h-8 text-xs"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") onConfirm(name) }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onConfirm(name)
+          }}
           autoFocus
         />
         <DialogFooter className="gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={() => onConfirm(name)}>Rename</Button>
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={() => onConfirm(name)}>
+            Rename
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -135,12 +174,18 @@ function AddTabDialog({
           className="h-8 text-xs"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") onConfirm(name) }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onConfirm(name)
+          }}
           autoFocus
         />
         <DialogFooter className="gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={() => onConfirm(name)}>Add</Button>
+          <Button variant="outline" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={() => onConfirm(name)}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -149,19 +194,22 @@ function AddTabDialog({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function DashboardBuilder() {
+export function DashboardBuilder({ embedded = false }: { embedded?: boolean }) {
   const store = useDashboardStore()
   const queryClient = useQueryClient()
   const { isFetching: isSyncing } = useTraitRecords()
 
   const [renameTabId, setRenameTabId] = useState<string | null>(null)
   const [addTabOpen, setAddTabOpen] = useState(false)
-  const [pendingConfigWidget, setPendingConfigWidget] = useState<DashboardWidget | null>(null)
+  const [pendingConfigWidget, setPendingConfigWidget] =
+    useState<DashboardWidget | null>(null)
 
   // ── Pointer-based drag (replaces HTML5 DnD which Tauri WebKit drops) ─────────
 
   function handleDrop(templateId: string) {
-    console.log(`[DashboardBuilder] handleDrop templateId: ${templateId} | activeTab: ${store.activeTab.id}`)
+    console.log(
+      `[DashboardBuilder] handleDrop templateId: ${templateId} | activeTab: ${store.activeTab.id}`,
+    )
     const template = WIDGET_TEMPLATES.find((t) => t.templateId === templateId)
     if (!template) {
       console.warn("[DashboardBuilder] no template found for id:", templateId)
@@ -189,21 +237,54 @@ export function DashboardBuilder() {
     (instanceId: string, updated: DashboardWidget) => {
       store.updateWidget(store.activeTab.id, instanceId, updated)
     },
-    [store]
+    [store],
   )
 
+  const confirm = useConfirm()
   const handleRemoveWidget = useCallback(
-    (instanceId: string) => {
+    async (instanceId: string) => {
+      const widget = store.activeTab.widgets.find(
+        (w) => w.instanceId === instanceId,
+      )
+      const ok = await confirm({
+        title: "Remove widget?",
+        description: widget
+          ? `"${widget.title}" will be removed from this tab.`
+          : "This widget will be removed from this tab.",
+        confirmLabel: "Remove",
+        variant: "destructive",
+      })
+      if (!ok) return
       store.removeWidget(store.activeTab.id, instanceId)
     },
-    [store]
+    [store, confirm],
+  )
+
+  const handleDeleteTab = useCallback(
+    async (tabId: string) => {
+      const tab = store.state.tabs.find((t) => t.id === tabId)
+      if (!tab) return
+      const widgetCount = tab.widgets.length
+      const ok = await confirm({
+        title: `Delete tab "${tab.name}"?`,
+        description:
+          widgetCount > 0
+            ? `This removes the tab and its ${widgetCount} widget${widgetCount === 1 ? "" : "s"}. This cannot be undone.`
+            : "This removes the tab. This cannot be undone.",
+        confirmLabel: "Delete tab",
+        variant: "destructive",
+      })
+      if (!ok) return
+      store.deleteTab(tabId)
+    },
+    [store, confirm],
   )
 
   const handleReorderWidget = useCallback(
     (instanceId: string, direction: "left" | "right") => {
       store.reorderWidget(store.activeTab.id, instanceId, direction)
     },
-    [store]
+    [store],
   )
 
   // ── Sync ─────────────────────────────────────────────────────────────────────
@@ -220,19 +301,32 @@ export function DashboardBuilder() {
   return (
     // Layout now removes padding/max-width for the home route, so we just fill the space.
     <div className="flex flex-1 overflow-hidden min-h-0">
-      {/* Left sidebar */}
-      <WidgetToolbox
-        onDragStart={drag.start}
-        draggingTemplateId={drag.draggingId}
-      />
+      {/* Left sidebar: widgets to drag onto the person's own tabs */}
+      {!store.autoActive && (
+        <WidgetToolbox
+          onDragStart={drag.start}
+          draggingTemplateId={drag.draggingId}
+        />
+      )}
 
       {/* Right side */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <div className="bg-card border-b border-border flex-shrink-0">
           {/* Top bar — h-16 matches the sticky app header and toolbox header */}
-          <div className="h-16 px-4 flex items-center justify-between border-b border-border">
-            <span className="text-xl font-semibold">Dashboard</span>
+          <div
+            className={`${embedded ? "h-10" : "h-16"} px-4 flex items-center justify-between border-b border-border`}
+          >
+            <span className="flex items-baseline gap-3">
+              <span
+                className={
+                  embedded ? "text-sm font-medium" : "text-xl font-semibold"
+                }
+              >
+                Dashboard
+              </span>
+              <WhereLine />
+            </span>
             <div className="flex items-center gap-1.5">
               <Button
                 variant="ghost"
@@ -241,7 +335,9 @@ export function DashboardBuilder() {
                 onClick={handleSync}
                 title="Force refresh all data"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`}
+                />
                 Refresh
               </Button>
             </div>
@@ -255,26 +351,34 @@ export function DashboardBuilder() {
               onSelect={store.setActiveTab}
               onAdd={() => setAddTabOpen(true)}
               onRename={(id) => setRenameTabId(id)}
-              onDelete={(id) => store.deleteTab(id)}
+              onDelete={handleDeleteTab}
             />
           </div>
         </div>
 
         {/* Canvas — receives ref for bounds detection */}
-        <DashboardCanvas
-          ref={drag.canvasRef}
-          tab={store.activeTab}
-          draggingTemplateId={drag.draggingId}
-          isOver={drag.isOverCanvas}
-          onUpdateWidget={handleUpdateWidget}
-          onRemoveWidget={handleRemoveWidget}
-          onReorderWidget={handleReorderWidget}
-        />
+        {store.autoActive ? (
+          <AutoOverview />
+        ) : (
+          <DashboardCanvas
+            ref={drag.canvasRef}
+            tab={store.activeTab}
+            draggingTemplateId={drag.draggingId}
+            isOver={drag.isOverCanvas}
+            onUpdateWidget={handleUpdateWidget}
+            onRemoveWidget={handleRemoveWidget}
+            onReorderWidget={handleReorderWidget}
+          />
+        )}
       </div>
 
       {/* Floating ghost that follows the cursor while dragging */}
       {drag.isDragging && drag.draggingId && (
-        <DragGhost templateId={drag.draggingId} pos={drag.pos} isOverCanvas={drag.isOverCanvas} />
+        <DragGhost
+          templateId={drag.draggingId}
+          pos={drag.pos}
+          isOverCanvas={drag.isOverCanvas}
+        />
       )}
 
       {/* Pending config dialog (auto-opens after drop) */}

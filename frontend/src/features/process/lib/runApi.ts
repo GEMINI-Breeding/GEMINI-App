@@ -1,0 +1,777 @@
+/**
+ * runApi — step-execution facade for the restored RunDetail.
+ *
+ * Main's RunDetail called `ProcessingService.executeStep({step, ...})` and
+ * waited on an SSE stream keyed by pipeline_run_id. GEMINIbase has no
+ * pipeline-run state machine and no `/execute-step` route; instead each
+ * compute step is a plain Job submission.
+ *
+ * This module bridges the two: per `runId + step`, decide which Job (if
+ * any) to submit, write the resulting job id back into the runStore so
+ * runEvents/wsManager can subscribe, and expose markStepComplete /
+ * markStepSkipped for steps that have no backend work.
+ *
+ * R4a wires data_sync, gcp_selection, orthomosaic. R4b/R4c/R5/R6 add the
+ * remaining step types in this same file.
+ */
+import { type JobOutput, JobsService } from "@/client"
+
+import type { AerialScope } from "@/features/process/lib/paths"
+import {
+  appendStepJobId,
+  getRun,
+  type Id,
+  type RunStepStatus,
+  setStepState,
+  startStepBatch,
+  updateRun,
+} from "@/features/process/lib/runStore"
+import {
+  checkThermalGpsPreflight,
+  ThermalGpsRequiredError,
+} from "@/features/process/lib/thermalGpsPreflight"
+
+function traitParams(t: TraitExtractionParams): Record<string, unknown> {
+  return {
+    orthomosaic_path: t.orthomosaicPath,
+    boundary_geojson_path: t.boundaryGeojsonPath,
+    output_traits_geojson_path: t.outputTraitsGeojsonPath,
+    ...(t.demPath ? { dem_path: t.demPath } : {}),
+    ...(t.thermalPath ? { thermal_path: t.thermalPath } : {}),
+    ...(typeof t.exgThreshold === "number"
+      ? { exg_threshold: t.exgThreshold }
+      : {}),
+    ...(t.datasetLabel ? { dataset_label: t.datasetLabel } : {}),
+  }
+}
+
+export interface OrthomosaicParams {
+  reconstruction_quality?: string
+  custom_options?: string
+}
+
+export interface TraitExtractionParams {
+  /** MinIO path to the chosen ortho TIF (no bucket prefix). */
+  orthomosaicPath: string
+  /** MinIO path to the active plot-boundary GeoJSON (no bucket prefix). */
+  boundaryGeojsonPath: string
+  /** Optional MinIO path to a DEM TIF (gives canopy height). */
+  demPath?: string
+  /** Optional MinIO path to a thermal ortho in °C (gives canopy temperature). */
+  thermalPath?: string
+  /** ExG vegetation threshold; defaults to 0.1 in the worker. */
+  exgThreshold?: number
+  /** MinIO path the worker should write the traits GeoJSON to (no bucket prefix). */
+  outputTraitsGeojsonPath: string
+  /** Names the trait dataset of one flight among several on a date (one per
+   *  treatment), so each run replaces only its own earlier records. */
+  datasetLabel?: string
+}
+
+export interface InferenceParams {
+  /**
+   * MinIO path to a single input image (no bucket prefix).
+   *
+   * Mutually exclusive with `imagesPrefix`. Exactly one must be set: the
+   * worker branches on which it receives, and sending both would silently
+   * take the single-image path.
+   */
+  imagePath?: string
+  /**
+   * MinIO prefix to infer over — every image under it, in ONE job, with
+   * results keyed by plot number (no bucket prefix).
+   *
+   * The alternative is the client submitting a job per plot, which means
+   * hundreds of jobs for one field, each paying container + model startup.
+   */
+  imagesPrefix?: string
+  /**
+   * Batch mode only: the plot boundaries the images were split with. When
+   * set, the worker writes per-plot detection counts to `trait_records` so
+   * they appear in Analyze. Boundaries supply the row/col each record needs
+   * to resolve to a plot; the PNG filename only carries the plot number.
+   */
+  boundaries?: GeoJSON.FeatureCollection
+  /** Names the count traits, e.g. "plant count (Stand counter)". */
+  countLabel?: string
+  /**
+   * Self-hosted Roboflow inference server. Omit for Roboflow cloud. The
+   * worker rewrites localhost to reach the user's machine from inside its
+   * container, so the form's `http://localhost:9002` default works as typed.
+   */
+  apiUrl?: string
+  /** Roboflow API key. Ignored when `model` is set. */
+  apiKey?: string
+  /** Roboflow "workspace/model/version" or "workspace/model". Ignored when `model` is set. */
+  modelId?: string
+  /**
+   * Source-specific model parameters (`source`, `task_type`, `hf_*`,
+   * `weights_path`, …) from `modelJobParams()` in `inferenceModels.ts`.
+   * Covers Hugging Face and uploaded local weights as well as Roboflow;
+   * without it the job is a Roboflow detection from apiKey/modelId.
+   */
+  model?: Record<string, unknown>
+  /** Default 0.1 in the worker. */
+  confidenceThreshold?: number
+  /** Default 0.5 in the worker. */
+  iouThreshold?: number
+  /** Where to write the predictions JSON (no bucket prefix). */
+  outputPredictionsPath: string
+}
+
+export interface StitchingParams {
+  /** The track's top-camera frames (`…/RGB/Images/top/`). */
+  imagesPrefix: string
+  /** The track's msgs_synced.csv (frame order, GPS, direction). */
+  msgsSyncedPath: string
+  /** The saved Plot Marking version's plots. */
+  plots: {
+    plot_id: number
+    start_image: string
+    end_image: string
+    direction: string
+    /** Several plots per frame: this plot's lane (1-based) of `lanes`. */
+    lane?: number
+    lanes?: number
+    split?: "top_bottom" | "left_right"
+    /** The drone plot it was marked from: association takes it as is. */
+    boundary?: { label: string; properties: Record<string, unknown> }
+  }[]
+  /** Where this stitch version goes (`…/AgRowStitch_v{N}/`). */
+  outputPrefix: string
+  /** Pipeline knobs: forward_limit, max_reprojection_error, masks, crop_rules… */
+  settings?: Record<string, unknown>
+  /** The pipeline's free-form AgRowStitch options (YAML text). */
+  customOptions?: string
+  device?: string
+  /** 0 = all cores but one. */
+  numCpu?: number
+}
+
+export interface SplitOrthomosaicParams {
+  /** Some plots only: add to the earlier plot images rather than replace them. */
+  merge?: boolean
+  /**
+   * Plot polygons in WGS84. The worker treats EVERY feature as a plot, so
+   * the enclosing `role: "outer"` rectangle must already be stripped —
+   * `state_snapshot.boundaries` from a saved plot-geometry version is
+   * exactly that (PlotBoundaryPrep.saveCurrent filters it out).
+   *
+   * It reads `properties.plot` and `properties.accession` to name each
+   * output PNG, falling back to the feature index and "unknown".
+   */
+  boundaries: GeoJSON.FeatureCollection
+  /**
+   * MinIO path (no bucket) of the ortho to cut — the run's active one.
+   * Needed for imported orthos under Raw/, which the worker's own
+   * discovery (Processed/…/odm_orthophoto*) never finds.
+   */
+  orthomosaicPath?: string
+  /**
+   * "frames": each plot's best raw frames instead of a cut of the ortho,
+   * placed with the camera positions of the ODM run(s) that made these
+   * orthos (one per treatment flown apart). Written under PlotFrames/.
+   */
+  source?: "ortho" | "frames"
+  orthomosaicPaths?: string[]
+  /** Frames kept per plot (default 3). */
+  framesPerPlot?: number
+  /** A labelled run of the day: its own output folder (framesRunKey) and the
+   * label its canopy-temperature trait carries. */
+  runKey?: string
+  runLabel?: string
+}
+
+export interface ExecuteStepInput {
+  runId: Id
+  stepKey: string
+  /** Resolved aerial scope (date, platform, sensor, name path components). */
+  scope: AerialScope
+  /**
+   * Dataset short-ids selected for this step. Empty / undefined means
+   * "all datasets at this scope" — the worker recurses the scope root.
+   * Set to one or more 8-hex segments to restrict the job to specific
+   * uploads.
+   */
+  datasetShortIds?: string[]
+  /** GEMINIbase Experiment.id from the workspace. */
+  experimentId: string
+  /** Per-step parameters. */
+  orthomosaic?: OrthomosaicParams
+  traitExtraction?: TraitExtractionParams
+  /** Several at once: one per orthomosaic of the date (per treatment). */
+  traitExtractions?: TraitExtractionParams[]
+  inference?: InferenceParams
+  stitching?: StitchingParams
+  splitOrthomosaic?: SplitOrthomosaicParams
+  associateBoundaries?: AssociateBoundariesParams
+  /** Ground plot images from the raw frames instead of the stitch. */
+  groundFrames?: GroundFramesParams
+  dataSync?: DataSyncParams
+}
+
+/** GROUND_PLOT_FRAMES (geo worker): each marked plot's frames. */
+export interface GroundFramesParams {
+  imagesPrefix: string
+  msgsSyncedPath: string | null
+  plots: Record<string, unknown>[]
+  /** …/PlotFrames/ of the run's processed scope. */
+  outputPrefix: string
+  boundaries?: GeoJSON.FeatureCollection
+  /** Plot properties in marking order (a field design paired by order). */
+  design?: Record<string, unknown>[]
+}
+
+export interface DataSyncParams {
+  /** The run's raw scope (`Raw/…/{sensor}/`): platform logs, geo.txt. */
+  scopePrefix: string
+  /** The run's image folders. */
+  imagesPrefixes: string[]
+  mode: "own_metadata" | "cross_sensor"
+  /** cross_sensor: the other sensor's synced track. */
+  sourceTrackPath?: string
+  maxExtrapolationSec?: number
+  /** Seconds added to capture times with no time zone; omitted = fitted to the log. */
+  clockOffsetSec?: number
+  /** Aerial: write geo.txt for ODM. */
+  writeGeoTxt: boolean
+}
+
+export interface AssociateBoundariesParams {
+  /** The stitch version to associate (`…/AgRowStitch_v{N}/`). */
+  stitchPrefix: string
+  /** The active plot-boundary version's polygons. */
+  boundaries: GeoJSON.FeatureCollection
+  boundaryVersion: number
+  /** Where matched plots' images go (`…/PlotImages/`). */
+  plotImagesPrefix: string
+  /** GPS corrections set on the Plot Boundary map (lib/gpsCorrections). */
+  corrections?: Record<string, unknown>
+}
+
+export interface ExecuteStepResult {
+  /** Job uuid if a backend job was submitted; null for no-op steps. */
+  jobId: string | null
+  /** True if the step is now complete (no further user action needed). */
+  done: boolean
+}
+
+/**
+ * Submit (or virtually-execute) a step. Updates the runStore in place.
+ * Throws if the step type is unknown — callers should pre-check kind.
+ */
+export async function executeStep(
+  input: ExecuteStepInput,
+): Promise<ExecuteStepResult> {
+  const { runId, stepKey, scope, experimentId, orthomosaic } = input
+  const datasetShortIds = input.datasetShortIds ?? []
+
+  switch (stepKey) {
+    case "data_sync": {
+      // Every image gets a capture time and position: its own EXIF refined
+      // by uploaded ArduPilot logs, or interpolated from another sensor's
+      // track (main's Data Sync). Runs in the geo worker.
+      const d = input.dataSync
+      if (!d) throw new Error("data_sync requires the run's image folders")
+      if (d.imagesPrefixes.length === 0)
+        throw new Error("No images found at this run's scope to sync")
+      if (d.mode === "cross_sensor" && !d.sourceTrackPath)
+        throw new Error("Pick the sensor to sync from")
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "DATA_SYNC",
+          parameters: {
+            scope_prefix: d.scopePrefix,
+            images_prefixes: d.imagesPrefixes,
+            mode: d.mode,
+            write_geo_txt: d.writeGeoTxt,
+            ...(d.clockOffsetSec !== undefined
+              ? { clock_offset_sec: d.clockOffsetSec }
+              : {}),
+            // A ground run's photos may have no GPS at all (paired with the
+            // field design instead): that finishes the sync, not fails it.
+            ...(d.writeGeoTxt ? {} : { allow_unlocated: true }),
+            ...(d.mode === "cross_sensor"
+              ? {
+                  source_track_path: d.sourceTrackPath,
+                  max_extrapolation_sec: d.maxExtrapolationSec ?? 30,
+                }
+              : {}),
+          },
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId) throw new Error("DATA_SYNC submitted but no job id returned")
+      appendStepJobId(runId, "data_sync", jobId)
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
+    }
+
+    case "gcp_selection": {
+      // GCP marks live client-side until the user opens the GcpPicker tool
+      // (R5). Here we just flip the step to "completed" if the user clicked
+      // "skip" (no marks needed) — the actual mark→gcp_list.txt upload
+      // happens inside the picker. This branch is the "skip" path.
+      setStepState(runId, "gcp_selection", {
+        status: "skipped",
+        completedAt: new Date().toISOString(),
+      })
+      return { jobId: null, done: true }
+    }
+
+    case "orthomosaic": {
+      // Preflight: if any selected dataset is a thermal dataset whose
+      // worker-written summary says `has_gps=false`, refuse to submit.
+      // ODM would otherwise spin for ~10 minutes before bailing on
+      // "Not enough features" — a worse UX and a wasted compute slot.
+      // Non-thermal datasets (no sidecar) pass through unchanged. When
+      // the user picked "all datasets at this scope" (empty list), we
+      // skip the preflight: there's no canonical short-id to check
+      // against and the wizard shows a separate "all datasets selected"
+      // affordance for that case.
+      let preflight: Awaited<ReturnType<typeof checkThermalGpsPreflight>> = {
+        kind: "ok",
+        thermal: false,
+        hasGps: false,
+      }
+      for (const shortId of datasetShortIds) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await checkThermalGpsPreflight(scope, shortId)
+        if (result.kind === "missing_gps") {
+          throw new ThermalGpsRequiredError(result.mode, result.totalFiles)
+        }
+        // First thermal-with-GPS hit wins for the quality-preset
+        // heuristic below.
+        if (
+          result.kind === "ok" &&
+          result.thermal &&
+          preflight.kind === "ok" &&
+          !preflight.thermal
+        ) {
+          preflight = result
+        }
+      }
+      // If the user clicked "Skip" in the GCP picker, tell the worker
+      // to ignore any gcp_list.txt / geo.txt sidecars sitting in MinIO
+      // from a prior session. Without this the worker forwards
+      // whatever it finds at the scope root and the GCPs silently
+      // re-apply across runs — there is no UI to delete sidecars and
+      // the user should never have to touch MinIO.
+      const gcpSkipped =
+        getRun(runId)?.steps.gcp_selection?.status === "skipped"
+      const params: Record<string, unknown> = {
+        year: scope.year,
+        experiment: scope.experiment,
+        location: scope.location,
+        population: scope.population,
+        date: scope.date,
+        platform: scope.platform,
+        sensor: scope.sensor,
+        // Worker uses dataset_short_ids to restrict listing; absent =>
+        // recursive listing under the scope root (legacy / "all"
+        // semantics).
+        ...(datasetShortIds.length > 0
+          ? { dataset_short_ids: datasetShortIds }
+          : {}),
+        ...(gcpSkipped ? { skip_gcps: true } : {}),
+        // Default Standard quality for radiometric thermal scopes — the
+        // low-contrast, narrow-temperature-range raw previews over-detect
+        // features if pushed to higher tiers. The user can still override
+        // via the orthomosaic params input.
+        ...(preflight.kind === "ok" &&
+        preflight.thermal &&
+        !orthomosaic?.reconstruction_quality &&
+        !orthomosaic?.custom_options
+          ? { reconstruction_quality: "Standard" }
+          : {}),
+        ...(orthomosaic?.reconstruction_quality
+          ? { reconstruction_quality: orthomosaic.reconstruction_quality }
+          : {}),
+        ...(orthomosaic?.custom_options
+          ? { custom_options: orthomosaic.custom_options }
+          : {}),
+      }
+      const submitOdm = async (ids: string[]) => {
+        const job = (await JobsService.apiJobsSubmitSubmitJob({
+          requestBody: {
+            job_type: "RUN_ODM",
+            parameters: {
+              ...params,
+              ...(ids.length ? { dataset_short_ids: ids } : {}),
+            },
+            experiment_id: experimentId,
+          } as Parameters<
+            typeof JobsService.apiJobsSubmitSubmitJob
+          >[0]["requestBody"],
+        })) as JobOutput
+        const id = String(job?.id ?? "")
+        if (!id) throw new Error("RUN_ODM submitted but no job id returned")
+        return id
+      }
+      // A date flown in parts (one flight per treatment): one orthomosaic
+      // per part, as separate jobs, unless one part was picked.
+      const treatments = getRun(runId)?.uploadScope?.treatments ?? []
+      if (treatments.length > 1 && datasetShortIds.length !== 1) {
+        const ids: string[] = []
+        const done: typeof treatments = []
+        for (const t of treatments) {
+          // eslint-disable-next-line no-await-in-loop
+          const id = await submitOdm([t.datasetShortId])
+          ids.push(id)
+          done.push({ ...t, orthoJobId: id })
+        }
+        const r0 = getRun(runId)
+        if (r0?.uploadScope)
+          updateRun(runId, {
+            uploadScope: { ...r0.uploadScope, treatments: done },
+            ...(r0.status === "draft" ? { status: "running" as const } : {}),
+          })
+        startStepBatch(runId, "orthomosaic", ids)
+        return { jobId: ids[ids.length - 1], done: false }
+      }
+      const jobId = await submitOdm(datasetShortIds)
+      appendStepJobId(runId, "orthomosaic", jobId)
+      if (treatments.length > 1 && datasetShortIds.length === 1) {
+        // One part re-made: it is that treatment's orthomosaic now.
+        const r0 = getRun(runId)
+        if (r0?.uploadScope)
+          updateRun(runId, {
+            uploadScope: {
+              ...r0.uploadScope,
+              treatments: treatments.map((t) =>
+                t.datasetShortId === datasetShortIds[0]
+                  ? { ...t, orthoJobId: jobId }
+                  : t,
+              ),
+            },
+          })
+      }
+      // appendStepJobId flips the step to running and sets startedAt.
+      // Bump the Run's status so WorkspaceDetail's run badge reflects activity.
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
+    }
+
+    case "trait_extraction": {
+      const all =
+        input.traitExtractions ??
+        (input.traitExtraction ? [input.traitExtraction] : [])
+      if (all.length === 0) {
+        throw new Error("trait_extraction requires ortho + boundary inputs")
+      }
+      if (all.length > 1) {
+        const ids: string[] = []
+        for (const t of all) {
+          // eslint-disable-next-line no-await-in-loop
+          const job = (await JobsService.apiJobsSubmitSubmitJob({
+            requestBody: {
+              job_type: "EXTRACT_TRAITS",
+              parameters: traitParams(t),
+              experiment_id: experimentId,
+            } as Parameters<
+              typeof JobsService.apiJobsSubmitSubmitJob
+            >[0]["requestBody"],
+          })) as JobOutput
+          const id = String(job?.id ?? "")
+          if (!id)
+            throw new Error("EXTRACT_TRAITS submitted but no job id returned")
+          ids.push(id)
+        }
+        startStepBatch(runId, "trait_extraction", ids)
+        const r = getRun(runId)
+        if (r && r.status === "draft") updateRun(runId, { status: "running" })
+        return { jobId: ids[ids.length - 1], done: false }
+      }
+      const t = all[0]
+      const params: Record<string, unknown> = {
+        orthomosaic_path: t.orthomosaicPath,
+        boundary_geojson_path: t.boundaryGeojsonPath,
+        output_traits_geojson_path: t.outputTraitsGeojsonPath,
+        ...(t.demPath ? { dem_path: t.demPath } : {}),
+        ...(t.thermalPath ? { thermal_path: t.thermalPath } : {}),
+        ...(typeof t.exgThreshold === "number"
+          ? { exg_threshold: t.exgThreshold }
+          : {}),
+        ...(t.datasetLabel ? { dataset_label: t.datasetLabel } : {}),
+      }
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "EXTRACT_TRAITS",
+          parameters: params,
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId) {
+        throw new Error("EXTRACT_TRAITS submitted but no job id returned")
+      }
+      appendStepJobId(runId, "trait_extraction", jobId)
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
+    }
+
+    case "split_orthomosaic": {
+      // The geo worker has supported SPLIT_ORTHOMOSAIC all along and
+      // nothing ever submitted it, so per-plot images were never produced
+      // — which in turn broke plot-image viewing, per-plot inference,
+      // crop downloads and the Analyze click-through. It discovers the
+      // newest ortho per (platform, sensor) folder itself, so the only
+      // input it needs is the plot polygons.
+      if (!input.splitOrthomosaic) {
+        throw new Error("split_orthomosaic requires plot boundaries")
+      }
+      const featureCount =
+        input.splitOrthomosaic.boundaries?.features?.length ?? 0
+      if (featureCount === 0) {
+        throw new Error(
+          "split_orthomosaic needs at least one plot boundary — save and activate a plot-geometry version first",
+        )
+      }
+      const params: Record<string, unknown> = {
+        year: scope.year,
+        experiment: scope.experiment,
+        location: scope.location,
+        population: scope.population,
+        date: scope.date,
+        boundaries: input.splitOrthomosaic.boundaries,
+        ...(input.splitOrthomosaic.orthomosaicPath
+          ? { orthomosaic_path: input.splitOrthomosaic.orthomosaicPath }
+          : {}),
+        // Some plots only: the worker adds them to the earlier plot images
+        // (manifest, tables, canopy temperature) instead of replacing them.
+        ...(input.splitOrthomosaic.merge ? { merge: true } : {}),
+        ...(input.splitOrthomosaic.source === "frames"
+          ? {
+              source: "frames",
+              orthomosaic_paths: input.splitOrthomosaic.orthomosaicPaths,
+              frames_per_plot: input.splitOrthomosaic.framesPerPlot ?? 3,
+              ...(input.splitOrthomosaic.runKey
+                ? {
+                    run_key: input.splitOrthomosaic.runKey,
+                    run_label: input.splitOrthomosaic.runLabel,
+                  }
+                : {}),
+            }
+          : {}),
+      }
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "SPLIT_ORTHOMOSAIC",
+          parameters: params,
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId) {
+        throw new Error("SPLIT_ORTHOMOSAIC submitted but no job id returned")
+      }
+      appendStepJobId(runId, "split_orthomosaic", jobId)
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
+    }
+
+    case "stitching": {
+      if (!input.stitching) {
+        throw new Error("stitching requires the marked plots and their track")
+      }
+      const s = input.stitching
+      if (s.plots.length === 0) {
+        throw new Error("Mark at least one plot before stitching")
+      }
+      const params: Record<string, unknown> = {
+        images_prefix: s.imagesPrefix,
+        msgs_synced_path: s.msgsSyncedPath,
+        plots: s.plots,
+        output_prefix: s.outputPrefix,
+        settings: s.settings ?? {},
+        ...(s.customOptions?.trim() ? { custom_options: s.customOptions } : {}),
+        ...(s.device ? { device: s.device } : {}),
+        ...(typeof s.numCpu === "number" ? { num_cpu: s.numCpu } : {}),
+      }
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "RUN_STITCH",
+          parameters: params,
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId) throw new Error("RUN_STITCH submitted but no job id returned")
+      appendStepJobId(runId, "stitching", jobId)
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
+    }
+
+    case "associate_boundaries": {
+      if (input.groundFrames) {
+        // The raw frames instead of the stitch: each plot's frames that
+        // do not overlap, named by its plot (geo worker).
+        const g = input.groundFrames
+        const job = (await JobsService.apiJobsSubmitSubmitJob({
+          requestBody: {
+            job_type: "GROUND_PLOT_FRAMES",
+            parameters: {
+              images_prefix: g.imagesPrefix,
+              plots: g.plots,
+              output_prefix: g.outputPrefix,
+              ...(g.msgsSyncedPath
+                ? { msgs_synced_path: g.msgsSyncedPath }
+                : {}),
+              ...(g.boundaries ? { boundaries: g.boundaries } : {}),
+              ...(g.design?.length ? { design: g.design } : {}),
+            },
+            experiment_id: experimentId,
+          } as Parameters<
+            typeof JobsService.apiJobsSubmitSubmitJob
+          >[0]["requestBody"],
+        })) as JobOutput
+        const jobId = String(job?.id ?? "")
+        if (!jobId)
+          throw new Error("GROUND_PLOT_FRAMES submitted but no job id returned")
+        appendStepJobId(runId, "associate_boundaries", jobId)
+        return { jobId, done: false }
+      }
+      // Stitched plot → boundary polygon by centre-in-polygon (main's
+      // run_associate_boundaries), in the stitch worker.
+      const a = input.associateBoundaries
+      if (!a) {
+        throw new Error(
+          "associate_boundaries requires a stitch version and plot boundaries",
+        )
+      }
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "ASSOCIATE_BOUNDARIES",
+          parameters: {
+            stitch_prefix: a.stitchPrefix,
+            boundaries: a.boundaries,
+            boundary_version: a.boundaryVersion,
+            plot_images_prefix: a.plotImagesPrefix,
+            ...(a.corrections ? { corrections: a.corrections } : {}),
+          },
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId)
+        throw new Error("ASSOCIATE_BOUNDARIES submitted but no job id returned")
+      appendStepJobId(runId, "associate_boundaries", jobId)
+      return { jobId, done: false }
+    }
+
+    case "inference": {
+      if (!input.inference) {
+        throw new Error("inference requires an image source + model + api_key")
+      }
+      const i = input.inference
+      if (!i.imagePath === !i.imagesPrefix) {
+        throw new Error(
+          "inference needs exactly one of imagePath or imagesPrefix",
+        )
+      }
+      if (!i.model && !(i.apiKey && i.modelId)) {
+        throw new Error(
+          "inference needs a model (or a Roboflow key + model ID)",
+        )
+      }
+      const params: Record<string, unknown> = {
+        // Exactly one of these is set (guarded above). The worker branches
+        // on which key it receives.
+        ...(i.imagePath ? { image_path: i.imagePath } : {}),
+        ...(i.imagesPrefix ? { images_prefix: i.imagesPrefix } : {}),
+        ...(i.imagesPrefix && i.boundaries?.features?.length
+          ? { boundaries: i.boundaries }
+          : {}),
+        ...(i.countLabel ? { count_label: i.countLabel } : {}),
+        ...(i.model
+          ? i.model
+          : {
+              ...(i.apiUrl ? { api_url: i.apiUrl } : {}),
+              api_key: i.apiKey,
+              model_id: i.modelId,
+            }),
+        output_predictions_path: i.outputPredictionsPath,
+        ...(typeof i.confidenceThreshold === "number"
+          ? { confidence_threshold: i.confidenceThreshold }
+          : {}),
+        ...(typeof i.iouThreshold === "number"
+          ? { iou_threshold: i.iouThreshold }
+          : {}),
+      }
+      const job = (await JobsService.apiJobsSubmitSubmitJob({
+        requestBody: {
+          job_type: "LOCATE_PLANTS",
+          parameters: params,
+          experiment_id: experimentId,
+        } as Parameters<
+          typeof JobsService.apiJobsSubmitSubmitJob
+        >[0]["requestBody"],
+      })) as JobOutput
+      const jobId = String(job?.id ?? "")
+      if (!jobId) {
+        throw new Error("LOCATE_PLANTS submitted but no job id returned")
+      }
+      appendStepJobId(runId, "inference", jobId)
+      const r = getRun(runId)
+      if (r && r.status === "draft") updateRun(runId, { status: "running" })
+      return { jobId, done: false }
+    }
+
+    default:
+      throw new Error(`runApi.executeStep: step "${stepKey}" not yet wired`)
+  }
+}
+
+/**
+ * Stop a step. Cancels every Job currently associated with it.
+ */
+export async function stopStep(runId: Id, stepKey: string): Promise<void> {
+  const run = getRun(runId)
+  if (!run) return
+  const step = run.steps[stepKey]
+  if (!step) return
+  for (const jobId of step.jobIds) {
+    try {
+      await JobsService.apiJobsJobIdCancelCancelJob({ jobId })
+    } catch {
+      // Best-effort — the job may already be terminal.
+    }
+  }
+  setStepState(runId, stepKey, {
+    status: "failed" as RunStepStatus,
+    error: "Cancelled",
+    completedAt: new Date().toISOString(),
+  })
+}
+
+/** Mark a step as completed without executing it (used by markStepComplete). */
+export function markStepComplete(runId: Id, stepKey: string): void {
+  setStepState(runId, stepKey, {
+    status: "completed",
+    completedAt: new Date().toISOString(),
+  })
+}
+
+/** Mark a step as skipped (e.g. user chooses to skip an optional step). */
+export function markStepSkipped(runId: Id, stepKey: string): void {
+  setStepState(runId, stepKey, {
+    status: "skipped",
+    completedAt: new Date().toISOString(),
+  })
+}

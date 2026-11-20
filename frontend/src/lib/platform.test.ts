@@ -3,28 +3,31 @@ import { downloadFile, isTauri, openUrl, pickFiles } from "./platform"
 
 describe("pickFiles — browser branch", () => {
   beforeEach(() => {
-    ;(window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__ =
-      undefined
+    ;(
+      window as unknown as { __E2E_PICK_FILES__?: string[] }
+    ).__E2E_PICK_FILES__ = undefined
   })
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
   it("returns the E2E-injected paths and clears the hook afterwards", async () => {
-    ;(window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__ = [
-      "/tmp/a.jpg",
-      "/tmp/b.jpg",
-    ]
+    ;(
+      window as unknown as { __E2E_PICK_FILES__?: string[] }
+    ).__E2E_PICK_FILES__ = ["/tmp/a.jpg", "/tmp/b.jpg"]
     const out = await pickFiles({ multiple: true })
     expect(out).toEqual(["/tmp/a.jpg", "/tmp/b.jpg"])
     // Hook is consumed so a second call goes through the normal path.
     expect(
-      (window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__,
+      (window as unknown as { __E2E_PICK_FILES__?: string[] })
+        .__E2E_PICK_FILES__,
     ).toBeUndefined()
   })
 
   it("ignores an empty injected array and falls through to the browser picker", async () => {
-    ;(window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__ = []
+    ;(
+      window as unknown as { __E2E_PICK_FILES__?: string[] }
+    ).__E2E_PICK_FILES__ = []
     // Intercept the dynamically-created <input> so we can resolve synchronously.
     const origCreate = document.createElement.bind(document)
     let createdInput: HTMLInputElement | null = null
@@ -95,7 +98,9 @@ describe("isTauri", () => {
   })
 
   it("returns true when window.__TAURI_INTERNALS__ is present", () => {
-    ;(window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {}
+    ;(
+      window as unknown as { __TAURI_INTERNALS__: unknown }
+    ).__TAURI_INTERNALS__ = {}
     expect(isTauri()).toBe(true)
   })
 })

@@ -17,10 +17,14 @@
  *   />
  */
 
-import { useState } from "react"
-import { ChevronLeft, ChevronRight } from "lucide-react"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { LucideIcon } from "lucide-react"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useState } from "react"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 export interface NavItem {
   id: string
@@ -48,20 +52,26 @@ export function NavSidebar({ groups, activeId, onSelect }: NavSidebarProps) {
       className={`${collapsed ? "w-10" : "w-44"} bg-card border-r border-border flex flex-col flex-shrink-0 transition-[width] duration-200 z-10`}
     >
       {/* Toggle */}
-      <div className={`h-10 border-b border-border flex items-center flex-shrink-0 ${collapsed ? "justify-center" : "justify-end px-2"}`}>
+      <div
+        className={`h-10 border-b border-border flex items-center flex-shrink-0 ${collapsed ? "justify-center" : "justify-end px-2"}`}
+      >
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed
-            ? <ChevronRight className="w-3.5 h-3.5" />
-            : <ChevronLeft className="w-3.5 h-3.5" />}
+          {collapsed ? (
+            <ChevronRight className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronLeft className="w-3.5 h-3.5" />
+          )}
         </button>
       </div>
 
       {/* Groups */}
-      <nav className={`flex-1 overflow-y-auto ${collapsed ? "p-1" : "p-2"} space-y-3`}>
+      <nav
+        className={`flex-1 overflow-y-auto ${collapsed ? "p-1" : "p-2"} space-y-3`}
+      >
         {groups.map((group, gi) => (
           <div key={gi}>
             {/* Group label (hidden when collapsed) */}
@@ -87,14 +97,17 @@ export function NavSidebar({ groups, activeId, onSelect }: NavSidebarProps) {
                     data-onboarding={`files-tab-${item.id}`}
                     className={`w-full flex items-center gap-2 rounded-md select-none transition-colors
                       ${collapsed ? "justify-center p-1.5" : "px-2 py-1.5"}
-                      ${isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                      ${
+                        isActive
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                       }`}
                   >
                     <Icon className="w-4 h-4 shrink-0" />
                     {!collapsed && (
-                      <span className="text-sm font-medium truncate">{item.label}</span>
+                      <span className="text-sm font-medium truncate">
+                        {item.label}
+                      </span>
                     )}
                   </button>
                 )

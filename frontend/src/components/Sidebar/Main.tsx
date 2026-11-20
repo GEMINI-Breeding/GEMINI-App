@@ -2,9 +2,9 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@radix-ui/react-collapsible";
-import { Link as RouterLink, useRouterState } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
+} from "@radix-ui/react-collapsible"
+import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
+import { ChevronRight } from "lucide-react"
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -15,39 +15,39 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
   useSidebar,
-} from "@/components/ui/sidebar";
-import type { NavItem } from "@/config/navigation";
+} from "@/components/ui/sidebar"
+import type { NavItem } from "@/config/navigation"
 
 interface MainProps {
-  items: NavItem[];
+  items: NavItem[]
 }
 
 export function Main({ items }: MainProps) {
-  const { isMobile, setOpenMobile, state, setOpen } = useSidebar();
-  const router = useRouterState();
-  const currentPath = router.location.pathname;
+  const { isMobile, setOpenMobile, state, setOpen } = useSidebar()
+  const router = useRouterState()
+  const currentPath = router.location.pathname
 
   const handleMenuClick = () => {
     if (isMobile) {
-      setOpenMobile(false);
+      setOpenMobile(false)
     }
-  };
+  }
 
   const handleCollapsibleClick = () => {
     if (state === "collapsed") {
-      setOpen(true);
+      setOpen(true)
     }
-  };
+  }
 
   return (
     <SidebarGroup>
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => {
-            const isActive = currentPath === item.path;
+            const isActive = currentPath === item.path
             const isSubItemActive = item.subItems?.some(
-              (subItem) => currentPath === subItem.path
-            );
+              (subItem) => currentPath === subItem.path,
+            )
 
             // Items WITH subItems - toggle dropdown only
             if (item.subItems) {
@@ -93,7 +93,7 @@ export function Main({ items }: MainProps) {
                     </CollapsibleContent>
                   </SidebarMenuItem>
                 </Collapsible>
-              );
+              )
             }
 
             // Items WITHOUT subItems - navigate
@@ -114,10 +114,10 @@ export function Main({ items }: MainProps) {
                   </RouterLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-            );
+            )
           })}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
-  );
+  )
 }

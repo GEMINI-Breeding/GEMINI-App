@@ -1,0 +1,3 @@
+plot_id,start_image,end_image,direction,start_lat,start_lon,end_lat,end_lon
+1,rgb-1721396406619415.jpg,rgb-1721396407019411.jpg,South,38.5366,-121.7765,38.5365,-121.7765
+2,rgb-1721396407419400.jpg,rgb-1721396407819404.jpg,South,38.5364,-121.7765,38.5363,-121.7765

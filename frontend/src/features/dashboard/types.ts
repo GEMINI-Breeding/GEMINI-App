@@ -151,6 +151,36 @@ export interface PlotViewerConfig {
   filters: Record<string, string[]>
 }
 
+/**
+ * A view from the Analyze tab, kept on the dashboard: generated on the
+ * Overview, or pinned by a person. Recomputed from the current data each
+ * time it is shown, so it follows new trait records.
+ */
+export type AnalysisKind =
+  | "summary"
+  | "trend"
+  | "correlation"
+  | "heritability"
+  | "field"
+
+export interface AnalysisConfig {
+  kind: AnalysisKind
+  experiment: string
+  /** Empty = every trait the experiment has. */
+  traits: string[]
+  /** The season (year) within the experiment; unset = all of them. */
+  season?: string | null
+  /** The site; unset = every site. */
+  site?: string | null
+  /** For "field": the collection date (latest when unset). */
+  date?: string | null
+  /** The population ("crop group") within the season: compare like with
+   *  like. Unset = every population. */
+  population?: string | null
+  /** For "trend": traits the person chose to hide. */
+  hiddenTraits?: string[]
+}
+
 // ── Widget definitions ─────────────────────────────────────────────────────────
 
 interface BaseWidget {
@@ -179,7 +209,13 @@ export interface PlotViewerWidgetDef extends BaseWidget {
   config: PlotViewerConfig
 }
 
+export interface AnalysisWidgetDef extends BaseWidget {
+  type: "analysis"
+  config: AnalysisConfig
+}
+
 export type DashboardWidget =
+  | AnalysisWidgetDef
   | KpiWidgetDef
   | ChartWidgetDef
   | TableWidgetDef
@@ -209,5 +245,9 @@ export interface WidgetTemplate {
   iconName: string
   defaultSpan: WidgetSpan
   category: "Metrics" | "Charts" | "Tables" | "Visual"
-  defaultConfig: Partial<KpiConfig> | Partial<ChartConfig> | Partial<TableConfig> | Partial<PlotViewerConfig>
+  defaultConfig:
+    | Partial<KpiConfig>
+    | Partial<ChartConfig>
+    | Partial<TableConfig>
+    | Partial<PlotViewerConfig>
 }

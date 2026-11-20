@@ -10,28 +10,51 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
-import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
+import { Route as LayoutDashboardRouteImport } from './routes/_layout/dashboard'
 import { Route as LayoutConsoleRouteImport } from './routes/_layout/console'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutProcessIndexRouteImport } from './routes/_layout/process/index'
+import { Route as LayoutGenotypingIndexRouteImport } from './routes/_layout/genotyping/index'
 import { Route as LayoutFilesIndexRouteImport } from './routes/_layout/files/index'
 import { Route as LayoutAnalyzeIndexRouteImport } from './routes/_layout/analyze/index'
+import { Route as LayoutAdminIndexRouteImport } from './routes/_layout/admin/index'
 import { Route as LayoutProcessWorkspaceIdRouteImport } from './routes/_layout/process/$workspaceId'
-import { Route as LayoutAnalyzeRunIdRouteImport } from './routes/_layout/analyze/$runId'
+import { Route as LayoutGenotypingStudyIdRouteImport } from './routes/_layout/genotyping/$studyId'
+import { Route as LayoutAdminTraitsRouteImport } from './routes/_layout/admin/traits'
+import { Route as LayoutAdminTraitLevelsRouteImport } from './routes/_layout/admin/trait-levels'
+import { Route as LayoutAdminSitesRouteImport } from './routes/_layout/admin/sites'
+import { Route as LayoutAdminSensorsRouteImport } from './routes/_layout/admin/sensors'
+import { Route as LayoutAdminSensorTypesRouteImport } from './routes/_layout/admin/sensor-types'
+import { Route as LayoutAdminSensorPlatformsRouteImport } from './routes/_layout/admin/sensor-platforms'
+import { Route as LayoutAdminSeasonsRouteImport } from './routes/_layout/admin/seasons'
+import { Route as LayoutAdminPopulationsRouteImport } from './routes/_layout/admin/populations'
+import { Route as LayoutAdminLinesRouteImport } from './routes/_layout/admin/lines'
+import { Route as LayoutAdminDatasetTypesRouteImport } from './routes/_layout/admin/dataset-types'
+import { Route as LayoutAdminDataTypesRouteImport } from './routes/_layout/admin/data-types'
+import { Route as LayoutAdminDataFormatsRouteImport } from './routes/_layout/admin/data-formats'
+import { Route as LayoutAdminAccessionsRouteImport } from './routes/_layout/admin/accessions'
 import { Route as LayoutProcessWorkspaceIdIndexRouteImport } from './routes/_layout/process/$workspaceId/index'
+import { Route as LayoutProcessJobsJobIdRouteImport } from './routes/_layout/process/jobs.$jobId'
 import { Route as LayoutProcessWorkspaceIdToolRouteImport } from './routes/_layout/process/$workspaceId/tool'
 import { Route as LayoutProcessWorkspaceIdPipelineRouteImport } from './routes/_layout/process/$workspaceId/pipeline'
 import { Route as LayoutProcessWorkspaceIdRunRunIdRouteImport } from './routes/_layout/process/$workspaceId/run/$runId'
+import { Route as LayoutGenotypingStudyIdGwasJobIdRouteImport } from './routes/_layout/genotyping/$studyId_.gwas.$jobId'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -63,9 +86,9 @@ const LayoutSettingsRoute = LayoutSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => LayoutRoute,
 } as any)
-const LayoutItemsRoute = LayoutItemsRouteImport.update({
-  id: '/items',
-  path: '/items',
+const LayoutDashboardRoute = LayoutDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutConsoleRoute = LayoutConsoleRouteImport.update({
@@ -83,6 +106,11 @@ const LayoutProcessIndexRoute = LayoutProcessIndexRouteImport.update({
   path: '/process/',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutGenotypingIndexRoute = LayoutGenotypingIndexRouteImport.update({
+  id: '/genotyping/',
+  path: '/genotyping/',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutFilesIndexRoute = LayoutFilesIndexRouteImport.update({
   id: '/files/',
   path: '/files/',
@@ -93,16 +121,87 @@ const LayoutAnalyzeIndexRoute = LayoutAnalyzeIndexRouteImport.update({
   path: '/analyze/',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutAdminIndexRoute = LayoutAdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
 const LayoutProcessWorkspaceIdRoute =
   LayoutProcessWorkspaceIdRouteImport.update({
     id: '/process/$workspaceId',
     path: '/process/$workspaceId',
     getParentRoute: () => LayoutRoute,
   } as any)
-const LayoutAnalyzeRunIdRoute = LayoutAnalyzeRunIdRouteImport.update({
-  id: '/analyze/$runId',
-  path: '/analyze/$runId',
+const LayoutGenotypingStudyIdRoute = LayoutGenotypingStudyIdRouteImport.update({
+  id: '/genotyping/$studyId',
+  path: '/genotyping/$studyId',
   getParentRoute: () => LayoutRoute,
+} as any)
+const LayoutAdminTraitsRoute = LayoutAdminTraitsRouteImport.update({
+  id: '/traits',
+  path: '/traits',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminTraitLevelsRoute = LayoutAdminTraitLevelsRouteImport.update({
+  id: '/trait-levels',
+  path: '/trait-levels',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSitesRoute = LayoutAdminSitesRouteImport.update({
+  id: '/sites',
+  path: '/sites',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSensorsRoute = LayoutAdminSensorsRouteImport.update({
+  id: '/sensors',
+  path: '/sensors',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSensorTypesRoute = LayoutAdminSensorTypesRouteImport.update({
+  id: '/sensor-types',
+  path: '/sensor-types',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminSensorPlatformsRoute =
+  LayoutAdminSensorPlatformsRouteImport.update({
+    id: '/sensor-platforms',
+    path: '/sensor-platforms',
+    getParentRoute: () => LayoutAdminRoute,
+  } as any)
+const LayoutAdminSeasonsRoute = LayoutAdminSeasonsRouteImport.update({
+  id: '/seasons',
+  path: '/seasons',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminPopulationsRoute = LayoutAdminPopulationsRouteImport.update({
+  id: '/populations',
+  path: '/populations',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminLinesRoute = LayoutAdminLinesRouteImport.update({
+  id: '/lines',
+  path: '/lines',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminDatasetTypesRoute = LayoutAdminDatasetTypesRouteImport.update({
+  id: '/dataset-types',
+  path: '/dataset-types',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminDataTypesRoute = LayoutAdminDataTypesRouteImport.update({
+  id: '/data-types',
+  path: '/data-types',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminDataFormatsRoute = LayoutAdminDataFormatsRouteImport.update({
+  id: '/data-formats',
+  path: '/data-formats',
+  getParentRoute: () => LayoutAdminRoute,
+} as any)
+const LayoutAdminAccessionsRoute = LayoutAdminAccessionsRouteImport.update({
+  id: '/accessions',
+  path: '/accessions',
+  getParentRoute: () => LayoutAdminRoute,
 } as any)
 const LayoutProcessWorkspaceIdIndexRoute =
   LayoutProcessWorkspaceIdIndexRouteImport.update({
@@ -110,6 +209,11 @@ const LayoutProcessWorkspaceIdIndexRoute =
     path: '/',
     getParentRoute: () => LayoutProcessWorkspaceIdRoute,
   } as any)
+const LayoutProcessJobsJobIdRoute = LayoutProcessJobsJobIdRouteImport.update({
+  id: '/process/jobs/$jobId',
+  path: '/process/jobs/$jobId',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutProcessWorkspaceIdToolRoute =
   LayoutProcessWorkspaceIdToolRouteImport.update({
     id: '/tool',
@@ -128,44 +232,85 @@ const LayoutProcessWorkspaceIdRunRunIdRoute =
     path: '/run/$runId',
     getParentRoute: () => LayoutProcessWorkspaceIdRoute,
   } as any)
+const LayoutGenotypingStudyIdGwasJobIdRoute =
+  LayoutGenotypingStudyIdGwasJobIdRouteImport.update({
+    id: '/genotyping/$studyId_/gwas/$jobId',
+    path: '/genotyping/$studyId/gwas/$jobId',
+    getParentRoute: () => LayoutRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/setup': typeof SetupRoute
   '/signup': typeof SignupRoute
-  '/admin': typeof LayoutAdminRoute
+  '/admin': typeof LayoutAdminRouteWithChildren
   '/console': typeof LayoutConsoleRoute
-  '/items': typeof LayoutItemsRoute
+  '/dashboard': typeof LayoutDashboardRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
-  '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
+  '/admin/accessions': typeof LayoutAdminAccessionsRoute
+  '/admin/data-formats': typeof LayoutAdminDataFormatsRoute
+  '/admin/data-types': typeof LayoutAdminDataTypesRoute
+  '/admin/dataset-types': typeof LayoutAdminDatasetTypesRoute
+  '/admin/lines': typeof LayoutAdminLinesRoute
+  '/admin/populations': typeof LayoutAdminPopulationsRoute
+  '/admin/seasons': typeof LayoutAdminSeasonsRoute
+  '/admin/sensor-platforms': typeof LayoutAdminSensorPlatformsRoute
+  '/admin/sensor-types': typeof LayoutAdminSensorTypesRoute
+  '/admin/sensors': typeof LayoutAdminSensorsRoute
+  '/admin/sites': typeof LayoutAdminSitesRoute
+  '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
+  '/admin/traits': typeof LayoutAdminTraitsRoute
+  '/genotyping/$studyId': typeof LayoutGenotypingStudyIdRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
+  '/admin/': typeof LayoutAdminIndexRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
+  '/genotyping': typeof LayoutGenotypingIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
+  '/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
   '/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/genotyping/$studyId/gwas/$jobId': typeof LayoutGenotypingStudyIdGwasJobIdRoute
   '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/setup': typeof SetupRoute
   '/signup': typeof SignupRoute
-  '/admin': typeof LayoutAdminRoute
   '/console': typeof LayoutConsoleRoute
-  '/items': typeof LayoutItemsRoute
+  '/dashboard': typeof LayoutDashboardRoute
   '/settings': typeof LayoutSettingsRoute
   '/': typeof LayoutIndexRoute
-  '/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
+  '/admin/accessions': typeof LayoutAdminAccessionsRoute
+  '/admin/data-formats': typeof LayoutAdminDataFormatsRoute
+  '/admin/data-types': typeof LayoutAdminDataTypesRoute
+  '/admin/dataset-types': typeof LayoutAdminDatasetTypesRoute
+  '/admin/lines': typeof LayoutAdminLinesRoute
+  '/admin/populations': typeof LayoutAdminPopulationsRoute
+  '/admin/seasons': typeof LayoutAdminSeasonsRoute
+  '/admin/sensor-platforms': typeof LayoutAdminSensorPlatformsRoute
+  '/admin/sensor-types': typeof LayoutAdminSensorTypesRoute
+  '/admin/sensors': typeof LayoutAdminSensorsRoute
+  '/admin/sites': typeof LayoutAdminSitesRoute
+  '/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
+  '/admin/traits': typeof LayoutAdminTraitsRoute
+  '/genotyping/$studyId': typeof LayoutGenotypingStudyIdRoute
+  '/admin': typeof LayoutAdminIndexRoute
   '/analyze': typeof LayoutAnalyzeIndexRoute
   '/files': typeof LayoutFilesIndexRoute
+  '/genotyping': typeof LayoutGenotypingIndexRoute
   '/process': typeof LayoutProcessIndexRoute
   '/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
+  '/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
   '/process/$workspaceId': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/genotyping/$studyId/gwas/$jobId': typeof LayoutGenotypingStudyIdGwasJobIdRoute
   '/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRoutesById {
@@ -174,20 +319,38 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/setup': typeof SetupRoute
   '/signup': typeof SignupRoute
-  '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/admin': typeof LayoutAdminRouteWithChildren
   '/_layout/console': typeof LayoutConsoleRoute
-  '/_layout/items': typeof LayoutItemsRoute
+  '/_layout/dashboard': typeof LayoutDashboardRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
-  '/_layout/analyze/$runId': typeof LayoutAnalyzeRunIdRoute
+  '/_layout/admin/accessions': typeof LayoutAdminAccessionsRoute
+  '/_layout/admin/data-formats': typeof LayoutAdminDataFormatsRoute
+  '/_layout/admin/data-types': typeof LayoutAdminDataTypesRoute
+  '/_layout/admin/dataset-types': typeof LayoutAdminDatasetTypesRoute
+  '/_layout/admin/lines': typeof LayoutAdminLinesRoute
+  '/_layout/admin/populations': typeof LayoutAdminPopulationsRoute
+  '/_layout/admin/seasons': typeof LayoutAdminSeasonsRoute
+  '/_layout/admin/sensor-platforms': typeof LayoutAdminSensorPlatformsRoute
+  '/_layout/admin/sensor-types': typeof LayoutAdminSensorTypesRoute
+  '/_layout/admin/sensors': typeof LayoutAdminSensorsRoute
+  '/_layout/admin/sites': typeof LayoutAdminSitesRoute
+  '/_layout/admin/trait-levels': typeof LayoutAdminTraitLevelsRoute
+  '/_layout/admin/traits': typeof LayoutAdminTraitsRoute
+  '/_layout/genotyping/$studyId': typeof LayoutGenotypingStudyIdRoute
   '/_layout/process/$workspaceId': typeof LayoutProcessWorkspaceIdRouteWithChildren
+  '/_layout/admin/': typeof LayoutAdminIndexRoute
   '/_layout/analyze/': typeof LayoutAnalyzeIndexRoute
   '/_layout/files/': typeof LayoutFilesIndexRoute
+  '/_layout/genotyping/': typeof LayoutGenotypingIndexRoute
   '/_layout/process/': typeof LayoutProcessIndexRoute
   '/_layout/process/$workspaceId/pipeline': typeof LayoutProcessWorkspaceIdPipelineRoute
   '/_layout/process/$workspaceId/tool': typeof LayoutProcessWorkspaceIdToolRoute
+  '/_layout/process/jobs/$jobId': typeof LayoutProcessJobsJobIdRoute
   '/_layout/process/$workspaceId/': typeof LayoutProcessWorkspaceIdIndexRoute
+  '/_layout/genotyping/$studyId_/gwas/$jobId': typeof LayoutGenotypingStudyIdGwasJobIdRoute
   '/_layout/process/$workspaceId/run/$runId': typeof LayoutProcessWorkspaceIdRunRunIdRoute
 }
 export interface FileRouteTypes {
@@ -196,39 +359,74 @@ export interface FileRouteTypes {
     | '/login'
     | '/recover-password'
     | '/reset-password'
+    | '/setup'
     | '/signup'
     | '/admin'
     | '/console'
-    | '/items'
+    | '/dashboard'
     | '/settings'
     | '/'
-    | '/analyze/$runId'
+    | '/admin/accessions'
+    | '/admin/data-formats'
+    | '/admin/data-types'
+    | '/admin/dataset-types'
+    | '/admin/lines'
+    | '/admin/populations'
+    | '/admin/seasons'
+    | '/admin/sensor-platforms'
+    | '/admin/sensor-types'
+    | '/admin/sensors'
+    | '/admin/sites'
+    | '/admin/trait-levels'
+    | '/admin/traits'
+    | '/genotyping/$studyId'
     | '/process/$workspaceId'
+    | '/admin/'
     | '/analyze'
     | '/files'
+    | '/genotyping'
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId/tool'
+    | '/process/jobs/$jobId'
     | '/process/$workspaceId/'
+    | '/genotyping/$studyId/gwas/$jobId'
     | '/process/$workspaceId/run/$runId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/recover-password'
     | '/reset-password'
+    | '/setup'
     | '/signup'
-    | '/admin'
     | '/console'
-    | '/items'
+    | '/dashboard'
     | '/settings'
     | '/'
-    | '/analyze/$runId'
+    | '/admin/accessions'
+    | '/admin/data-formats'
+    | '/admin/data-types'
+    | '/admin/dataset-types'
+    | '/admin/lines'
+    | '/admin/populations'
+    | '/admin/seasons'
+    | '/admin/sensor-platforms'
+    | '/admin/sensor-types'
+    | '/admin/sensors'
+    | '/admin/sites'
+    | '/admin/trait-levels'
+    | '/admin/traits'
+    | '/genotyping/$studyId'
+    | '/admin'
     | '/analyze'
     | '/files'
+    | '/genotyping'
     | '/process'
     | '/process/$workspaceId/pipeline'
     | '/process/$workspaceId/tool'
+    | '/process/jobs/$jobId'
     | '/process/$workspaceId'
+    | '/genotyping/$studyId/gwas/$jobId'
     | '/process/$workspaceId/run/$runId'
   id:
     | '__root__'
@@ -236,20 +434,38 @@ export interface FileRouteTypes {
     | '/login'
     | '/recover-password'
     | '/reset-password'
+    | '/setup'
     | '/signup'
     | '/_layout/admin'
     | '/_layout/console'
-    | '/_layout/items'
+    | '/_layout/dashboard'
     | '/_layout/settings'
     | '/_layout/'
-    | '/_layout/analyze/$runId'
+    | '/_layout/admin/accessions'
+    | '/_layout/admin/data-formats'
+    | '/_layout/admin/data-types'
+    | '/_layout/admin/dataset-types'
+    | '/_layout/admin/lines'
+    | '/_layout/admin/populations'
+    | '/_layout/admin/seasons'
+    | '/_layout/admin/sensor-platforms'
+    | '/_layout/admin/sensor-types'
+    | '/_layout/admin/sensors'
+    | '/_layout/admin/sites'
+    | '/_layout/admin/trait-levels'
+    | '/_layout/admin/traits'
+    | '/_layout/genotyping/$studyId'
     | '/_layout/process/$workspaceId'
+    | '/_layout/admin/'
     | '/_layout/analyze/'
     | '/_layout/files/'
+    | '/_layout/genotyping/'
     | '/_layout/process/'
     | '/_layout/process/$workspaceId/pipeline'
     | '/_layout/process/$workspaceId/tool'
+    | '/_layout/process/jobs/$jobId'
     | '/_layout/process/$workspaceId/'
+    | '/_layout/genotyping/$studyId_/gwas/$jobId'
     | '/_layout/process/$workspaceId/run/$runId'
   fileRoutesById: FileRoutesById
 }
@@ -258,6 +474,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  SetupRoute: typeof SetupRoute
   SignupRoute: typeof SignupRoute
 }
 
@@ -268,6 +485,13 @@ declare module '@tanstack/react-router' {
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -312,11 +536,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutSettingsRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/items': {
-      id: '/_layout/items'
-      path: '/items'
-      fullPath: '/items'
-      preLoaderRoute: typeof LayoutItemsRouteImport
+    '/_layout/dashboard': {
+      id: '/_layout/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof LayoutDashboardRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/console': {
@@ -340,6 +564,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProcessIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/genotyping/': {
+      id: '/_layout/genotyping/'
+      path: '/genotyping'
+      fullPath: '/genotyping'
+      preLoaderRoute: typeof LayoutGenotypingIndexRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/files/': {
       id: '/_layout/files/'
       path: '/files'
@@ -354,6 +585,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAnalyzeIndexRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/admin/': {
+      id: '/_layout/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof LayoutAdminIndexRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
     '/_layout/process/$workspaceId': {
       id: '/_layout/process/$workspaceId'
       path: '/process/$workspaceId'
@@ -361,12 +599,103 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProcessWorkspaceIdRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/analyze/$runId': {
-      id: '/_layout/analyze/$runId'
-      path: '/analyze/$runId'
-      fullPath: '/analyze/$runId'
-      preLoaderRoute: typeof LayoutAnalyzeRunIdRouteImport
+    '/_layout/genotyping/$studyId': {
+      id: '/_layout/genotyping/$studyId'
+      path: '/genotyping/$studyId'
+      fullPath: '/genotyping/$studyId'
+      preLoaderRoute: typeof LayoutGenotypingStudyIdRouteImport
       parentRoute: typeof LayoutRoute
+    }
+    '/_layout/admin/traits': {
+      id: '/_layout/admin/traits'
+      path: '/traits'
+      fullPath: '/admin/traits'
+      preLoaderRoute: typeof LayoutAdminTraitsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/trait-levels': {
+      id: '/_layout/admin/trait-levels'
+      path: '/trait-levels'
+      fullPath: '/admin/trait-levels'
+      preLoaderRoute: typeof LayoutAdminTraitLevelsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sites': {
+      id: '/_layout/admin/sites'
+      path: '/sites'
+      fullPath: '/admin/sites'
+      preLoaderRoute: typeof LayoutAdminSitesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sensors': {
+      id: '/_layout/admin/sensors'
+      path: '/sensors'
+      fullPath: '/admin/sensors'
+      preLoaderRoute: typeof LayoutAdminSensorsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sensor-types': {
+      id: '/_layout/admin/sensor-types'
+      path: '/sensor-types'
+      fullPath: '/admin/sensor-types'
+      preLoaderRoute: typeof LayoutAdminSensorTypesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/sensor-platforms': {
+      id: '/_layout/admin/sensor-platforms'
+      path: '/sensor-platforms'
+      fullPath: '/admin/sensor-platforms'
+      preLoaderRoute: typeof LayoutAdminSensorPlatformsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/seasons': {
+      id: '/_layout/admin/seasons'
+      path: '/seasons'
+      fullPath: '/admin/seasons'
+      preLoaderRoute: typeof LayoutAdminSeasonsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/populations': {
+      id: '/_layout/admin/populations'
+      path: '/populations'
+      fullPath: '/admin/populations'
+      preLoaderRoute: typeof LayoutAdminPopulationsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/lines': {
+      id: '/_layout/admin/lines'
+      path: '/lines'
+      fullPath: '/admin/lines'
+      preLoaderRoute: typeof LayoutAdminLinesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/dataset-types': {
+      id: '/_layout/admin/dataset-types'
+      path: '/dataset-types'
+      fullPath: '/admin/dataset-types'
+      preLoaderRoute: typeof LayoutAdminDatasetTypesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/data-types': {
+      id: '/_layout/admin/data-types'
+      path: '/data-types'
+      fullPath: '/admin/data-types'
+      preLoaderRoute: typeof LayoutAdminDataTypesRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/data-formats': {
+      id: '/_layout/admin/data-formats'
+      path: '/data-formats'
+      fullPath: '/admin/data-formats'
+      preLoaderRoute: typeof LayoutAdminDataFormatsRouteImport
+      parentRoute: typeof LayoutAdminRoute
+    }
+    '/_layout/admin/accessions': {
+      id: '/_layout/admin/accessions'
+      path: '/accessions'
+      fullPath: '/admin/accessions'
+      preLoaderRoute: typeof LayoutAdminAccessionsRouteImport
+      parentRoute: typeof LayoutAdminRoute
     }
     '/_layout/process/$workspaceId/': {
       id: '/_layout/process/$workspaceId/'
@@ -374,6 +703,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/process/$workspaceId/'
       preLoaderRoute: typeof LayoutProcessWorkspaceIdIndexRouteImport
       parentRoute: typeof LayoutProcessWorkspaceIdRoute
+    }
+    '/_layout/process/jobs/$jobId': {
+      id: '/_layout/process/jobs/$jobId'
+      path: '/process/jobs/$jobId'
+      fullPath: '/process/jobs/$jobId'
+      preLoaderRoute: typeof LayoutProcessJobsJobIdRouteImport
+      parentRoute: typeof LayoutRoute
     }
     '/_layout/process/$workspaceId/tool': {
       id: '/_layout/process/$workspaceId/tool'
@@ -396,8 +732,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProcessWorkspaceIdRunRunIdRouteImport
       parentRoute: typeof LayoutProcessWorkspaceIdRoute
     }
+    '/_layout/genotyping/$studyId_/gwas/$jobId': {
+      id: '/_layout/genotyping/$studyId_/gwas/$jobId'
+      path: '/genotyping/$studyId/gwas/$jobId'
+      fullPath: '/genotyping/$studyId/gwas/$jobId'
+      preLoaderRoute: typeof LayoutGenotypingStudyIdGwasJobIdRouteImport
+      parentRoute: typeof LayoutRoute
+    }
   }
 }
+
+interface LayoutAdminRouteChildren {
+  LayoutAdminAccessionsRoute: typeof LayoutAdminAccessionsRoute
+  LayoutAdminDataFormatsRoute: typeof LayoutAdminDataFormatsRoute
+  LayoutAdminDataTypesRoute: typeof LayoutAdminDataTypesRoute
+  LayoutAdminDatasetTypesRoute: typeof LayoutAdminDatasetTypesRoute
+  LayoutAdminLinesRoute: typeof LayoutAdminLinesRoute
+  LayoutAdminPopulationsRoute: typeof LayoutAdminPopulationsRoute
+  LayoutAdminSeasonsRoute: typeof LayoutAdminSeasonsRoute
+  LayoutAdminSensorPlatformsRoute: typeof LayoutAdminSensorPlatformsRoute
+  LayoutAdminSensorTypesRoute: typeof LayoutAdminSensorTypesRoute
+  LayoutAdminSensorsRoute: typeof LayoutAdminSensorsRoute
+  LayoutAdminSitesRoute: typeof LayoutAdminSitesRoute
+  LayoutAdminTraitLevelsRoute: typeof LayoutAdminTraitLevelsRoute
+  LayoutAdminTraitsRoute: typeof LayoutAdminTraitsRoute
+  LayoutAdminIndexRoute: typeof LayoutAdminIndexRoute
+}
+
+const LayoutAdminRouteChildren: LayoutAdminRouteChildren = {
+  LayoutAdminAccessionsRoute: LayoutAdminAccessionsRoute,
+  LayoutAdminDataFormatsRoute: LayoutAdminDataFormatsRoute,
+  LayoutAdminDataTypesRoute: LayoutAdminDataTypesRoute,
+  LayoutAdminDatasetTypesRoute: LayoutAdminDatasetTypesRoute,
+  LayoutAdminLinesRoute: LayoutAdminLinesRoute,
+  LayoutAdminPopulationsRoute: LayoutAdminPopulationsRoute,
+  LayoutAdminSeasonsRoute: LayoutAdminSeasonsRoute,
+  LayoutAdminSensorPlatformsRoute: LayoutAdminSensorPlatformsRoute,
+  LayoutAdminSensorTypesRoute: LayoutAdminSensorTypesRoute,
+  LayoutAdminSensorsRoute: LayoutAdminSensorsRoute,
+  LayoutAdminSitesRoute: LayoutAdminSitesRoute,
+  LayoutAdminTraitLevelsRoute: LayoutAdminTraitLevelsRoute,
+  LayoutAdminTraitsRoute: LayoutAdminTraitsRoute,
+  LayoutAdminIndexRoute: LayoutAdminIndexRoute,
+}
+
+const LayoutAdminRouteWithChildren = LayoutAdminRoute._addFileChildren(
+  LayoutAdminRouteChildren,
+)
 
 interface LayoutProcessWorkspaceIdRouteChildren {
   LayoutProcessWorkspaceIdPipelineRoute: typeof LayoutProcessWorkspaceIdPipelineRoute
@@ -422,29 +803,35 @@ const LayoutProcessWorkspaceIdRouteWithChildren =
   )
 
 interface LayoutRouteChildren {
-  LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutAdminRoute: typeof LayoutAdminRouteWithChildren
   LayoutConsoleRoute: typeof LayoutConsoleRoute
-  LayoutItemsRoute: typeof LayoutItemsRoute
+  LayoutDashboardRoute: typeof LayoutDashboardRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
   LayoutIndexRoute: typeof LayoutIndexRoute
-  LayoutAnalyzeRunIdRoute: typeof LayoutAnalyzeRunIdRoute
+  LayoutGenotypingStudyIdRoute: typeof LayoutGenotypingStudyIdRoute
   LayoutProcessWorkspaceIdRoute: typeof LayoutProcessWorkspaceIdRouteWithChildren
   LayoutAnalyzeIndexRoute: typeof LayoutAnalyzeIndexRoute
   LayoutFilesIndexRoute: typeof LayoutFilesIndexRoute
+  LayoutGenotypingIndexRoute: typeof LayoutGenotypingIndexRoute
   LayoutProcessIndexRoute: typeof LayoutProcessIndexRoute
+  LayoutProcessJobsJobIdRoute: typeof LayoutProcessJobsJobIdRoute
+  LayoutGenotypingStudyIdGwasJobIdRoute: typeof LayoutGenotypingStudyIdGwasJobIdRoute
 }
 
 const LayoutRouteChildren: LayoutRouteChildren = {
-  LayoutAdminRoute: LayoutAdminRoute,
+  LayoutAdminRoute: LayoutAdminRouteWithChildren,
   LayoutConsoleRoute: LayoutConsoleRoute,
-  LayoutItemsRoute: LayoutItemsRoute,
+  LayoutDashboardRoute: LayoutDashboardRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
   LayoutIndexRoute: LayoutIndexRoute,
-  LayoutAnalyzeRunIdRoute: LayoutAnalyzeRunIdRoute,
+  LayoutGenotypingStudyIdRoute: LayoutGenotypingStudyIdRoute,
   LayoutProcessWorkspaceIdRoute: LayoutProcessWorkspaceIdRouteWithChildren,
   LayoutAnalyzeIndexRoute: LayoutAnalyzeIndexRoute,
   LayoutFilesIndexRoute: LayoutFilesIndexRoute,
+  LayoutGenotypingIndexRoute: LayoutGenotypingIndexRoute,
   LayoutProcessIndexRoute: LayoutProcessIndexRoute,
+  LayoutProcessJobsJobIdRoute: LayoutProcessJobsJobIdRoute,
+  LayoutGenotypingStudyIdGwasJobIdRoute: LayoutGenotypingStudyIdGwasJobIdRoute,
 }
 
 const LayoutRouteWithChildren =
@@ -455,6 +842,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SetupRoute: SetupRoute,
   SignupRoute: SignupRoute,
 }
 export const routeTree = rootRouteImport

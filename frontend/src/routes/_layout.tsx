@@ -1,71 +1,177 @@
-import { useCallback, useState } from "react"
-import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Outlet,
+  redirect,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router"
 import { CircleHelp } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-
 import { Footer } from "@/components/Common/Footer"
 import { HelpSidebar, OnboardingTour } from "@/components/Help"
+import {
+  appTour,
+  getTourSection,
+  type TourStep,
+} from "@/components/Help/tourSteps"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
+import { ConnectionNotice } from "@/components/System/ConnectionNotice"
+import { WorkersNotice } from "@/components/System/WorkersNotice"
+import { Button } from "@/components/ui/button"
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { openUrl } from "@/lib/platform"
+import { BatchRunner } from "@/features/process/components/BatchRunner"
+import { hydrateRunStore } from "@/features/process/lib/runStore"
+import { isLoggedIn } from "@/hooks/useAuth"
 import { useUpdateChecker } from "@/hooks/useUpdateChecker"
-import { getTourSection, type TourStep } from "@/components/Help/tourSteps"
+import { onLogout } from "@/lib/auth"
+import { autoSignIn } from "@/lib/autoSignIn"
+import { checkBackend } from "@/lib/connection"
+import { useCredentials } from "@/lib/credentials"
+import { openUrl } from "@/lib/platform"
+
+/** Loads the person's saved keys once, so job submissions can use them. */
+function CredentialsLoader() {
+  useCredentials()
+  return null
+}
 
 export const Route = createFileRoute("/_layout")({
   component: Layout,
+  // Unauthenticated visitors land on /login. Any child route under
+  // /_layout inherits this guard, so the sidebar, dashboards, and all
+  // feature pages are gated behind a valid JWT. When auth is disabled
+  // on the backend (GEMINI_JWT_SECRET empty) we still redirect only when
+  // the caller has no stored token — which is the same condition as
+  // "never logged in," so the flow stays consistent.
+  //
+  // By default there is no login step: the app signs in with this
+  // computer's own account (lib/autoSignIn.ts). The login page is only
+  // reached when that is switched off in Settings, or is not available.
+  //
+  // With no processing stack reachable there is nothing to sign in to: the
+  // app opens anyway (home page, compute, model settings work) and the
+  // ConnectionNotice says what to do.
+  beforeLoad: async () => {
+    if (!isLoggedIn() && !(await autoSignIn())) {
+      if (!(await checkBackend())) return
+      throw redirect({ to: "/login" })
+    }
+  },
 })
 
 function Layout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const FULL_HEIGHT_PREFIXES = ["/files", "/analyze", "/settings", "/process"]
   const isFullHeight =
     location.pathname === "/" ||
     FULL_HEIGHT_PREFIXES.some((p) => location.pathname.startsWith(p))
 
+  // Follow the 401 interceptor's logout event out of this layout. Without
+  // this the user would remain on a data-dependent page after the token
+  // was cleared, trying to re-render against stale React Query caches.
+  // Process workspaces / runs live on the server; load them (and start
+  // syncing) once we're inside the signed-in shell.
+  useEffect(() => {
+    void hydrateRunStore()
+  }, [])
+
+  useEffect(() => {
+    const off = onLogout(() => {
+      // An expired session signs straight back in; only a deliberate
+      // sign-out (or required sign-in) shows the login page.
+      void autoSignIn().then(async (ok) => {
+        if (ok) window.location.reload()
+        // Stack unreachable: there is no login to go to; stay, the notice explains.
+        else if (await checkBackend()) navigate({ to: "/login" })
+      })
+    })
+    return off
+  }, [navigate])
+
   const [helpOpen, setHelpOpen] = useState(false)
   const [tourSteps, setTourSteps] = useState<TourStep[] | null>(null)
   const [tourStep, setTourStep] = useState<number>(0)
 
-  const startTour = useCallback(() => {
-    const section = getTourSection(location.pathname, (location.search as any)?.step)
-    setTourSteps(section.steps)
-    setTourStep(0)
-  }, [location.pathname, location.search])
+  // The page's own tour, or (whole) the tour of every stage of the app.
+  const startTour = useCallback(
+    (whole?: boolean) => {
+      const section =
+        whole === true
+          ? appTour()
+          : getTourSection(location.pathname, (location.search as any)?.step)
+      setTourSteps(section.steps)
+      setTourStep(0)
+    },
+    [location.pathname, location.search],
+  )
   const closeTour = useCallback(() => setTourSteps(null), [])
-  const nextTourStep = useCallback(() =>
-    setTourStep((s) => (tourSteps !== null && s < tourSteps.length - 1 ? s + 1 : s)), [tourSteps])
-  const prevTourStep = useCallback(() =>
-    setTourStep((s) => (s > 0 ? s - 1 : s)), [])
+  // First open: offer the guided tour once (it also stays under Help).
+  const TOUR_OFFERED = "gemini.tour.offered"
+  const [tourInvite, setTourInvite] = useState(() => {
+    try {
+      return localStorage.getItem(TOUR_OFFERED) !== "1"
+    } catch {
+      return false
+    }
+  })
+  const answerInvite = (take: boolean) => {
+    try {
+      localStorage.setItem(TOUR_OFFERED, "1")
+    } catch {
+      // no storage: it is offered again next time
+    }
+    setTourInvite(false)
+    if (take) startTour(true)
+  }
+  const nextTourStep = useCallback(
+    () =>
+      setTourStep((s) =>
+        tourSteps !== null && s < tourSteps.length - 1 ? s + 1 : s,
+      ),
+    [tourSteps],
+  )
+  const prevTourStep = useCallback(
+    () => setTourStep((s) => (s > 0 ? s - 1 : s)),
+    [],
+  )
 
-  const handleUpdateAvailable = useCallback((version: string, downloadUrl: string) => {
-    toast.info(`GEMI ${version} is available`, {
-      description: "Download the latest release from GitHub for your platform (macOS, Windows, Linux).",
-      duration: Infinity,
-      action: {
-        label: "Download",
-        onClick: () => {
-          localStorage.setItem("gemi_dismissed_version", version)
-          openUrl(downloadUrl)
+  const handleUpdateAvailable = useCallback(
+    (version: string, downloadUrl: string) => {
+      toast.info(`GEMI ${version} is available`, {
+        description:
+          "Download the latest release from GitHub for your platform (macOS, Windows, Linux).",
+        duration: Infinity,
+        action: {
+          label: "Download",
+          onClick: () => {
+            localStorage.setItem("gemi_dismissed_version", version)
+            openUrl(downloadUrl)
+          },
         },
-      },
-      onDismiss: () => {
-        localStorage.setItem("gemi_dismissed_version", version)
-      },
-    })
-  }, [])
+        onDismiss: () => {
+          localStorage.setItem("gemi_dismissed_version", version)
+        },
+      })
+    },
+    [],
+  )
 
   useUpdateChecker({ onUpdateAvailable: handleUpdateAvailable })
 
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
-        <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 border-b px-4">
+      {/* The window never scrolls: the frame is the window's height and each
+          page scrolls (if at all) inside its own area. */}
+      <SidebarInset className="h-svh min-w-0 overflow-hidden">
+        <header className="bg-background z-10 flex h-11 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1 text-muted-foreground" />
           <div className="ml-auto">
             <button
@@ -80,26 +186,59 @@ function Layout() {
         </header>
         {isFullHeight ? (
           // Dashboard: no padding, no max-width — fills remaining height exactly
-          <main className="flex flex-col flex-1 overflow-hidden">
+          <main className="flex flex-col flex-1 min-h-0 overflow-y-auto">
             <Outlet />
           </main>
         ) : (
-          // All other pages: standard padded + centered layout
-          <main className="flex-1 p-6 md:p-8">
-            <div className="mx-auto max-w-7xl">
+          // All other pages: standard padded + centered layout. The extra
+          // bottom padding lets a page's last controls scroll clear of the
+          // fixed process panel / its pill in the bottom-right corner.
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6 pb-24 md:p-8 md:pb-24">
+            <div className="mx-auto max-w-7xl min-w-0">
               <Outlet />
             </div>
+            <Footer />
           </main>
         )}
-        {!isFullHeight && <Footer />}
       </SidebarInset>
       <ProcessPanel />
+      <BatchRunner />
+      <CredentialsLoader />
+      <ConnectionNotice />
+      <WorkersNotice />
 
       <HelpSidebar
         open={helpOpen}
         onClose={() => setHelpOpen(false)}
         onStartTour={startTour}
       />
+
+      {tourInvite && tourSteps === null && (
+        <div
+          className="bg-background fixed right-6 bottom-20 z-50 w-80 rounded-lg border p-4 shadow-lg"
+          data-testid="tour-invite"
+          role="dialog"
+          aria-label="Take the tour"
+        >
+          <p className="font-medium">New to GEMI?</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            A short tour shows where things are on this page. It is always under
+            Help (?) later.
+          </p>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => answerInvite(false)}
+            >
+              Not now
+            </Button>
+            <Button size="sm" onClick={() => answerInvite(true)}>
+              Take the tour
+            </Button>
+          </div>
+        </div>
+      )}
 
       {tourSteps !== null && (
         <OnboardingTour

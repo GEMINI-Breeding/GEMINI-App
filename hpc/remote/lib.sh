@@ -1,0 +1,313 @@
+# Sourced by every remote script. Needs GEMI_HPC_ROOT.
+: "${GEMI_HPC_ROOT:?GEMI_HPC_ROOT not set}"
+
+IMAGES=$GEMI_HPC_ROOT/images
+SRC=$GEMI_HPC_ROOT/src/backend          # current backend source, mounted over image code
+DATA=$GEMI_HPC_ROOT/data                # postgres/ minio/ redis/ nodeodm/ models/
+RUN=$GEMI_HPC_ROOT/run                  # secrets.env, session.env (owner-only)
+LOGS=$GEMI_HPC_ROOT/logs
+HPC=$GEMI_HPC_ROOT/hpc                  # these scripts
+JOB_PREFIX=gemi                         # every job this tooling submits is named gemi-*
+
+# Online storage (Box, Google Drive, S3, …) copied straight to the cluster with rclone.
+# The connections (their tokens) live in RUN, owner-only; copies land in INCOMING.
+RCLONE=$GEMI_HPC_ROOT/bin/rclone
+RCLONE_CONF=$RUN/rclone.conf
+INCOMING=$GEMI_HPC_ROOT/incoming
+RCLONE_VERSION=v1.68.2
+RCLONE_SHA256=0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c   # linux-amd64 zip
+
+# Home directories on clusters are small (a few GB): keep Apptainer's cache and temp files out of it.
+export APPTAINER_CACHEDIR=$GEMI_HPC_ROOT/apptainer_cache
+export APPTAINER_TMPDIR=${TMPDIR:-/tmp}
+
+mkdir -p "$IMAGES" "$DATA" "$RUN" "$LOGS"
+# A shared session (the owner's `share on`) lets the GEMI folder's group join it: the owner
+# keeps owning everything; members run the gate as themselves, their own workers on their own
+# allocation, and read what that needs. Otherwise the run and data folders are owner-only.
+SHARE_CONF=$RUN/share.conf
+OWNER=$(stat -c %U "$RUN" 2>/dev/null || echo "$USER")
+is_owner() { [ "$USER" = "$OWNER" ]; }
+shared() { [ -r "$SHARE_CONF" ] && grep -qx 'SHARE=1' "$SHARE_CONF"; }
+share_flag() { [ -r "$SHARE_CONF" ] && grep -qx "$1=1" "$SHARE_CONF"; }
+if is_owner && ! shared; then chmod 700 "$RUN" "$DATA" 2>/dev/null || true; fi   # group dir is setgid group-writable
+
+# share_perms: what the group needs to join the session, and nothing for anyone else.
+# The service settings (stack.env) are what workers sign in with: a member who runs workers
+# can use the session's database and storage, and signs in as the workers' account. The
+# owner's secrets (api.env, secrets.env: the JWT secret, the owner's sign-in, the storage's
+# root login; storage connections, the agent model's key) stay owner-only.
+share_perms() {
+  is_owner || return 0
+  if shared; then
+    mkdir -p "$RUN/share" "$DATA/models" "$DATA/members" "$INCOMING"
+    # Group permissions only help files that belong to the group: the owner's own files may
+    # carry the owner's personal group (a folder without setgid). Give them the GEMI folder's.
+    local grp; grp=$(stat -c %G "$GEMI_HPC_ROOT")
+    chgrp "$grp" "$RUN" "$DATA" "$RUN/share" "$LOGS" "$DATA/models" "$DATA/members" "$INCOMING" \
+      "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
+    chgrp -R "$grp" "$IMAGES" "$HPC" "$SRC" "$DATA/models" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
+    chmod 750 "$RUN" "$DATA"
+    chmod 640 "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
+    chmod 600 "$RUN/secrets.env" "$RUN/api.env" "$RUN/rclone.conf" "$RUN/llm.env" 2>/dev/null
+    chmod 2770 "$RUN/share" "$LOGS" "$INCOMING"
+    # The owner's model cache: the group may read it, never write it. Model weights can run code
+    # when loaded, so the owner's ML worker must load only what the owner's jobs put there. A
+    # member's worker keeps its own cache under data/members/<user> (sticky: theirs alone).
+    chmod 2750 "$DATA/models"; chmod 3770 "$DATA/members"
+    touch "$LOGS/gate.log"; chgrp "$grp" "$LOGS/gate.log" 2>/dev/null; chmod 660 "$LOGS/gate.log"
+    chmod -R g-w,g+rX "$DATA/models" 2>/dev/null
+    chmod -R g+rX "$IMAGES" "$HPC" "$SRC" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
+    chmod o-rwx "$GEMI_HPC_ROOT"
+  else
+    chmod 700 "$RUN" "$DATA"
+    chmod 600 "$RUN/session.env" "$RUN/stack.env" "$RUN/api.env" 2>/dev/null
+  fi
+  true
+}
+
+log() { echo "[$(date +%H:%M:%S)] $*"; }
+
+# Apptainer, or on clusters that still have only Singularity (3.6 or newer), a stand-in that
+# runs it: the same commands and flags, with APPTAINERENV_* passed on as SINGULARITYENV_*.
+load_apptainer() {
+  command -v apptainer >/dev/null 2>&1 && return 0
+  module load apptainer >/dev/null 2>&1 && command -v apptainer >/dev/null 2>&1 && return 0
+  if command -v singularity >/dev/null 2>&1 || { module load singularity >/dev/null 2>&1 && command -v singularity >/dev/null 2>&1; }; then
+    apptainer() {
+      local v
+      for v in $(compgen -e | grep '^APPTAINERENV_' || true); do export "SINGULARITYENV_${v#APPTAINERENV_}=${!v}"; done
+      singularity "$@"
+    }
+    return 0
+  fi
+  log "neither apptainer nor singularity found (module load apptainer failed too)"; return 1
+}
+
+# A TCP port nobody is listening on (nodes are shared with other users).
+free_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket(); s.bind(("0.0.0.0", 0)); print(s.getsockname()[1]); s.close()
+PY
+}
+
+# Apptainer flags for a private IPC namespace and /dev/shm.
+# By default a container shares the node's /dev/shm, and systemd-logind
+# (RemoveIPC) deletes a user's shared-memory files and SysV IPC there whenever
+# one of that user's sessions on the node ends — e.g. another of their jobs
+# finishing. Postgres then fails with "could not open shared memory segment".
+# A directory on local disk bound over /dev/shm is outside logind's reach.
+private_ipc() {  # private_ipc <dir>
+  mkdir -p "$1"; echo "--ipc -B $1:/dev/shm"
+}
+
+# Address other nodes can reach this one on.
+node_ip() { hostname -I | awk '{print $1}'; }
+
+wait_for() {  # wait_for <seconds> <description> <command...>
+  local timeout=$1 what=$2; shift 2
+  local t=0
+  until "$@" >/dev/null 2>&1; do
+    sleep 2; t=$((t + 2))
+    if [ "$t" -ge "$timeout" ]; then log "timed out waiting for $what"; return 1; fi
+  done
+  log "$what ready (${t}s)"
+}
+
+# ── limits ───────────────────────────────────────────────────────────────────
+# The cluster is shared: no GEMI job may ask for more than this, and all of this tooling's jobs
+# together no more than the totals, whatever a launch.conf, the app or an agent says.
+# launch.conf can only LOWER these (it is written by tools and synced from a computer). Raising
+# them, or GEMI_ALLOW_UNSAFE=1 (no checks), is read only from <GEMI folder>/limits.conf: a file
+# on the cluster that sync never touches, for a person to write there by hand.
+GEMI_DEFAULT_LIMITS="GEMI_MAX_CPUS=32 GEMI_MAX_MEM_GB=128 GEMI_MAX_GPUS=1 GEMI_MAX_TIME=2-00:00:00 GEMI_MAX_JOBS=10 GEMI_MAX_TOTAL_CPUS=128 GEMI_MAX_TOTAL_MEM_GB=512 GEMI_MAX_TOTAL_GPUS=4"
+
+_mem_gb() {  # 56G | 16000M | 1T -> whole GB, rounded up
+  local v=${1%[bB]}; local n=${v%[kKmMgGtT]} u=${v: -1}
+  case "$u" in [tT]) echo $(( n * 1024 )) ;; [gG]) echo "$n" ;; [mM]) echo $(( (n + 1023) / 1024 )) ;;
+               [kK]) echo 1 ;; *) echo $(( (v + 1023) / 1024 )) ;; esac
+}
+_seconds() {  # [D-]HH:MM:SS | MM:SS | minutes -> seconds
+  local t=$1 d=0 h=0 m=0 s=0
+  case "$t" in *-*) d=${t%%-*}; t=${t#*-} ;; esac
+  IFS=: read -r a b c <<< "$t"
+  if [ -n "${c:-}" ]; then h=$a m=$b s=$c; elif [ -n "${b:-}" ]; then [ "$d" -gt 0 ] && { h=$a; m=$b; } || { m=$a; s=$b; }; else m=$a; fi
+  echo $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
+}
+
+# effective_limits: sets L_<NAME> for each limit: launch.conf's value where it is lower than the
+# default, the default otherwise; limits.conf's values (a person's, on the cluster) over both.
+# L_UNSAFE=1 only from limits.conf.
+effective_limits() {
+  local kv name def cur
+  for kv in $GEMI_DEFAULT_LIMITS; do
+    name=${kv%%=*}; def=${kv#*=}; cur=${!name:-$def}
+    case "$name" in
+      GEMI_MAX_TIME) [ "$(_seconds "$cur")" -le "$(_seconds "$def")" ] || cur=$def ;;
+      *) [[ "$cur" =~ ^[0-9]+$ ]] && [ "$cur" -le "$def" ] || cur=$def ;;
+    esac
+    printf -v "L_${name#GEMI_}" '%s' "$cur"
+  done
+  L_UNSAFE=0
+  local f="$GEMI_HPC_ROOT/limits.conf" line k v
+  if [ -f "$f" ] && [ "$(stat -c %U "$f")" = "$OWNER" ]; then
+    while IFS= read -r line; do
+      [[ "$line" =~ ^(GEMI_MAX_[A-Z_]+|GEMI_ALLOW_UNSAFE)=([0-9:-]+)$ ]] || continue
+      k=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+      if [ "$k" = GEMI_ALLOW_UNSAFE ]; then L_UNSAFE=$v; else printf -v "L_${k#GEMI_}" '%s' "$v"; fi
+    done < "$f"
+  fi
+}
+
+# gemi_usage: CPUs, GB of memory and GPUs held or asked for by this user's gemi-* jobs.
+gemi_usage() {
+  squeue -h -u "$USER" -o '%j|%C|%m|%b|%D' 2>/dev/null | awk -F'|' '
+    $1 ~ /^gemi-/ {
+      c += $2
+      m = $3; mult = 1
+      if (m ~ /[Tt]$/) mult = 1024; else if (m ~ /[Mm]$/) mult = 1/1024; else if (m ~ /[Kk]$/) mult = 1/1048576
+      gsub(/[^0-9.]/, "", m); mem += m * mult * ($5 > 0 ? $5 : 1)
+      if (match($4, /gpu[^,]*:[0-9]+/)) { g = substr($4, RSTART, RLENGTH); sub(/.*:/, "", g); gpus += g }
+    }
+    END { printf "%d %d %d\n", c, mem + 0.999, gpus }'
+}
+
+# check_job <cpus> <mem> <gpus> <time>: non-zero (with the reason on stderr) if over a limit.
+check_job() {
+  effective_limits
+  [ "$L_UNSAFE" = 1 ] && return 0
+  local why="" mem_gb; mem_gb=$(_mem_gb "$2")
+  [ "$1" -le "$L_MAX_CPUS" ] || why="$why cpus $1 > $L_MAX_CPUS;"
+  [ "$mem_gb" -le "$L_MAX_MEM_GB" ] || why="$why mem $2 > ${L_MAX_MEM_GB}G;"
+  [ "$3" -le "$L_MAX_GPUS" ] || why="$why gpus $3 > $L_MAX_GPUS;"
+  [ "$(_seconds "$4")" -le "$(_seconds "$L_MAX_TIME")" ] || why="$why time $4 > $L_MAX_TIME;"
+  local n; n=$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c '^gemi-')
+  [ "$n" -lt "$L_MAX_JOBS" ] || why="$why $n GEMI jobs already queued or running (limit $L_MAX_JOBS);"
+  local uc um ug; read -r uc um ug <<< "$(gemi_usage)"
+  [ $(( ${uc:-0} + $1 )) -le "$L_MAX_TOTAL_CPUS" ] || why="$why GEMI jobs would hold $(( ${uc:-0} + $1 )) CPUs in all (limit $L_MAX_TOTAL_CPUS);"
+  [ $(( ${um:-0} + mem_gb )) -le "$L_MAX_TOTAL_MEM_GB" ] || why="$why GEMI jobs would hold $(( ${um:-0} + mem_gb ))G in all (limit ${L_MAX_TOTAL_MEM_GB}G);"
+  [ $(( ${ug:-0} + $3 )) -le "$L_MAX_TOTAL_GPUS" ] || why="$why GEMI jobs would hold $(( ${ug:-0} + $3 )) GPUs in all (limit $L_MAX_TOTAL_GPUS);"
+  [ -z "$why" ] && return 0
+  echo "refused by the job limits:$why lower values in launch.conf, or a person raises them in $GEMI_HPC_ROOT/limits.conf on the cluster" >&2
+  return 1
+}
+
+# Placements ("partition:account[:gres]") this cluster's launch.conf names.
+places() {
+  { echo "${CORE_PARTITION:-}:${CORE_ACCOUNT:-}"; tr ' ' '\n' <<< "${WORKER_TRY:-} ${LLM_TRY:-} ${GEMI_EXTRA_PLACES:-}"
+    # A member of a shared session also has their own accounts (one partition:account per line).
+    is_owner || grep -E '^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(:[A-Za-z0-9_.:-]+)?$' "$HOME/.gemi/places" 2>/dev/null; } \
+    | grep -E '^[^:]+:[^:]+' | sort -u
+}
+# The same placements without their GPU part, each once: for jobs that need no GPU.
+light_places() { places | cut -d: -f1,2 | awk '!seen[$0]++' | tr '\n' ' '; }
+# sbatch_soonest "<partition:account …>" <sbatch options…> <script>: submit where Slurm says
+# the job starts soonest (a copy or an upload need not wait in the core's queue).
+sbatch_soonest() {
+  local try=$1; shift
+  local best="" best_wait=999999999 now entry part acct est start w
+  now=$(date +%s)
+  # Slurm's start estimate ignores an account's group limits (QOSGrp*): a place where this
+  # user's jobs already wait on one is full, whatever the estimate says. Skipped while
+  # another place is left to try.
+  local blocked="" e2 p2 a2
+  for e2 in $try; do
+    p2=${e2%%:*}; a2=${e2#*:}; a2=${a2%%:*}
+    if squeue -h -u "$USER" -p "$p2" -A "$a2" -t PENDING -o %r 2>/dev/null | grep -q '^QOSGrp'; then
+      blocked="$blocked $p2:$a2"
+    fi
+  done
+  for entry in $try; do
+    part=${entry%%:*}; acct=${entry#*:}; acct=${acct%%:*}
+    if [[ " $blocked " == *" $part:$acct "* ]] && [ "$(wc -w <<< "$try")" -gt "$(wc -w <<< "$blocked")" ]; then
+      continue
+    fi
+    est=$(sbatch --test-only --partition="$part" --account="$acct" "$@" 2>&1)
+    start=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}' <<< "$est" | head -1)
+    [ -n "$start" ] || continue
+    w=$(( $(date -d "$start" +%s) - now ))
+    if [ "$w" -lt "$best_wait" ]; then best="$part:$acct" best_wait=$w; fi
+    [ "$w" -le 60 ] && break
+  done
+  [ -n "$best" ] || best="${try%% *}"
+  part=${best%%:*}; acct=${best#*:}; acct=${acct%%:*}
+  sbatch --partition="$part" --account="$acct" "$@" | sed "s/$/ (on $part, account $acct)/"
+}
+# allowed_place <partition:account[:gres] ...>: every entry must be one of them (gres aside).
+allowed_place() {
+  local e pa
+  for e in $1; do
+    pa=$(cut -d: -f1,2 <<< "$e")
+    places | cut -d: -f1,2 | grep -qxF "$pa" || return 1
+  done
+}
+
+# ── stop when idle ───────────────────────────────────────────────────────────
+# Workers and the model hold a node (often a GPU) for as long as their job
+# runs, whether or not there is work. These watch for work from inside the job
+# and end it after a quiet spell, so nothing waits on an allocation it does
+# not use, whether or not the app or the agent is open to stop it.
+
+# Job types each worker claims (same table as the agent's compute.py).
+worker_job_types() {
+  case "$1" in
+    amiga) echo "EXTRACT_BINARY" ;;
+    stitch) echo "RUN_STITCH ASSOCIATE_BOUNDARIES" ;;
+    odm) echo "RUN_ODM" ;;
+    geo) echo "SPLIT_ORTHOMOSAIC CREATE_COG DATA_SYNC GROUND_PLOT_FRAMES" ;;
+    ml) echo "LOCATE_PLANTS EXTRACT_TRAITS" ;;
+    gwas) echo "RUN_GWAS" ;;
+    *) echo "" ;;
+  esac
+}
+
+# open_jobs <api base> <job types...>: number of PENDING + RUNNING jobs of
+# those types, or "?" when the API cannot be asked (then nothing is stopped).
+open_jobs() {
+  local base=$1; shift
+  GEMI_BASE="$base" GEMI_TYPES="$*" GEMI_SELF="${GEMI_SELF:-}" python3 - <<'PY' 2>/dev/null || echo "?"
+import json, os, urllib.request
+base, types = os.environ["GEMI_BASE"], os.environ["GEMI_TYPES"].split()
+def call(path, body=None, token=None):
+    req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body else None,
+                                 headers={"Content-Type": "application/json",
+                                          **({"Authorization": "Bearer " + token} if token else {})})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)
+tok = call("/api/users/login/access-token", {"email": os.environ["GEMINI_FIRST_SUPERUSER_EMAIL"],
+                                             "password": os.environ["GEMINI_FIRST_SUPERUSER_PASSWORD"]})["access_token"]
+# With GEMI_SELF (one of several copies of a worker): only waiting jobs and
+# this copy's own running ones count, so a spare copy stops while another
+# copy is still busy.
+me = os.environ.get("GEMI_SELF", "")
+n = 0
+for status in ("PENDING", "RUNNING"):
+    for t in types:
+        rows = call(f"/api/jobs/all?limit=1000&status={status}&job_type={t}", token=tok) or []
+        n += sum(1 for j in rows if status == "PENDING" or not me or j.get("worker_id") in (me, None))
+print(n)
+PY
+}
+
+# worker_idle_watch <worker pid> <minutes> <job types...>: end the worker after
+# <minutes> in a row with no job of its types waiting or running. 0 = never.
+worker_idle_watch() {
+  local pid=$1 minutes=$2; shift 2
+  [ "${minutes:-0}" -gt 0 ] && [ -n "$*" ] || return 0
+  command -v python3 >/dev/null 2>&1 || { log "idle watch off: no python3 on this node"; return 0; }
+  # stack.env (the workers' login), which a member of a shared session can read too: with
+  # secrets.env (owner-only) a member's worker could never ask, and so never stopped.
+  ( set -a; source "$RUN/stack.env" 2>/dev/null; set +a
+    local quiet=0 n
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep 60
+      n=$(open_jobs "http://$CORE_IP:$API_PORT" "$@")
+      if [ "$n" = "0" ]; then quiet=$((quiet + 1)); else quiet=0; fi
+      if [ "$quiet" -ge "$minutes" ]; then
+        log "idle for $minutes min (no $* waiting or running): stopping, to free the allocation"
+        kill -TERM "$pid" 2>/dev/null
+        return 0
+      fi
+    done ) &
+}

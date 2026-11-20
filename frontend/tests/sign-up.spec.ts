@@ -1,8 +1,18 @@
-import { expect, type Page, test } from "@playwright/test"
+import type { Page } from "@playwright/test"
 
+// Import `test` from helpers/fixtures so every case auto-attaches the
+// console-error guard required by CLAUDE.md's strict-E2E rule.
+import { expect, test } from "./helpers/fixtures"
 import { randomEmail, randomPassword } from "./utils/random"
+import { SIGNUP_OFF, signupEnabled } from "./utils/signup"
 
 test.use({ storageState: { cookies: [], origins: [] } })
+
+// The sign-up form only exists when the server allows self-registration.
+// (With it off, account-password.spec checks the page says so.)
+test.beforeEach(async ({ request }) => {
+  test.skip(!(await signupEnabled(request)), SIGNUP_OFF)
+})
 
 const fillForm = async (
   page: Page,
@@ -53,6 +63,13 @@ test("Sign up with valid name, email, and password", async ({ page }) => {
   await page.goto("/signup")
   await fillForm(page, full_name, email, password, password)
   await page.getByRole("button", { name: "Sign Up" }).click()
+
+  // The happy path navigates to /login; a success toast is also rendered.
+  // If signup silently 500'd, the page would stay on /signup and this would
+  // time out — which is the correct failure.
+  await page.waitForURL("/login")
+  // New self-registered accounts wait for an administrator's approval.
+  await expect(page.getByText(/must approve it/i)).toBeVisible()
 })
 
 test("Sign up with invalid email", async ({ page }) => {
@@ -70,26 +87,41 @@ test("Sign up with invalid email", async ({ page }) => {
   await expect(page.getByText("Invalid email address")).toBeVisible()
 })
 
-test("Sign up with existing email", async ({ page }) => {
+test("Sign up with existing email", async ({ page, consoleErrorGuard }) => {
+  // The duplicate-email path is the test's subject: the second signup POST
+  // returns 400 with `{error:"Email taken", error_description:"..."}`, and
+  // the form surfaces that as a toast. Declare the deliberate 400 so the
+  // guard doesn't fail us on the resource-load failure.
+  consoleErrorGuard.expectError(/\/api\/users\/signup/)
   const fullName = "Test User"
   const email = randomEmail()
   const password = randomPassword()
 
-  // Sign up with an email
+  // First signup. Wait for the POST to complete (and the post-success
+  // navigation to /login) before attempting the duplicate, otherwise a
+  // race between the cancelled-by-navigation first request and the second
+  // request hits the backend's INSERT path with the email-existence check
+  // skipped on the second call — surfacing as a 500 instead of the
+  // expected 400.
   await page.goto("/signup")
+  await fillForm(page, fullName, email, password, password)
+  const firstSignupResponse = page.waitForResponse(
+    (r) =>
+      r.url().includes("/api/users/signup") && r.request().method() === "POST",
+  )
+  await page.getByRole("button", { name: "Sign Up" }).click()
+  await firstSignupResponse
+  await page.waitForURL("/login")
 
+  // Sign up again with the same email — must resolve to a structured
+  // 400 with the "Email taken" detail.
+  await page.goto("/signup")
   await fillForm(page, fullName, email, password, password)
   await page.getByRole("button", { name: "Sign Up" }).click()
 
-  // Sign up again with the same email
-  await page.goto("/signup")
-
-  await fillForm(page, fullName, email, password, password)
-  await page.getByRole("button", { name: "Sign Up" }).click()
-
-  await page
-    .getByText("The user with this email already exists in the system")
-    .click()
+  await expect(
+    page.getByText(/(already registered|already exists|email taken)/i),
+  ).toBeVisible()
 })
 
 test("Sign up with weak password", async ({ page }) => {

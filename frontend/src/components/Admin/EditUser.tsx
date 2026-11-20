@@ -5,7 +5,7 @@ import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 
-import { type UserPublic, UsersService } from "@/client"
+import { type UserOutput, UsersService } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -52,7 +52,7 @@ const formSchema = z
 type FormData = z.infer<typeof formSchema>
 
 interface EditUserProps {
-  user: UserPublic
+  user: UserOutput
   onSuccess: () => void
 }
 
@@ -66,16 +66,19 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
     mode: "onBlur",
     criteriaMode: "all",
     defaultValues: {
-      email: user.email,
+      email: user.email ?? "",
       full_name: user.full_name ?? undefined,
-      is_superuser: user.is_superuser,
-      is_active: user.is_active,
+      is_superuser: user.is_superuser ?? false,
+      is_active: user.is_active ?? true,
     },
   })
 
   const mutation = useMutation({
     mutationFn: (data: FormData) =>
-      UsersService.updateUser({ userId: user.id, requestBody: data }),
+      UsersService.apiUsersIdUserIdUpdateUser({
+        userId: String(user.id),
+        requestBody: data,
+      }),
     onSuccess: () => {
       showSuccessToast("User updated successfully")
       setIsOpen(false)

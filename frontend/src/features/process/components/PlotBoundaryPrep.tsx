@@ -1,40 +1,36 @@
 /**
- * PlotBoundaryPrep — shared interactive step for both ground and aerial pipelines.
+ * PlotBoundaryPrep — wizard tool for drawing/saving plot boundaries.
  *
- * Flow
- * ----
- * 1. Check for field design CSV → if missing, show inline upload dialog.
- * 2. Show map with mosaic (ground: combined mosaic, aerial: orthomosaic) as background.
- *    User draws ONE outer population boundary polygon.
- * 3. Grid settings panel (width, length, rows, cols, spacing, angle).
- *    Grid is recomputed in real-time on the frontend.
- * 4. Preview the generated plot rectangles on the map → Save.
+ * R5a MVP: AerialScope is owned by the parent run (scope passed in as a
+ * prop, no in-component picker). Polygon drawing via leaflet+geoman in
+ * lng/lat — no pixel↔geo glue needed because Geoman emits EPSG:4326
+ * GeoJSON directly. Save/load goes through PlotGeometryService versions.
+ *
+ * Lost vs main (deferred to future passes):
+ *   - Auto-boundary estimation from TIF georeferencing (no GEMINIbase
+ *     endpoint).
+ *   - Stitch-version selection (ground-pipeline territory; R6).
+ *
+ * Step completion: when the user clicks "Save & complete step", we save
+ * a new version, activate it, and flip the run's plot_boundary_prep
+ * step to completed. Trait extraction's boundary-version picker reads
+ * the active version from the same directory.
  */
 
-import "leaflet/dist/leaflet.css";
-import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css";
+import { useQueries, useQuery } from "@tanstack/react-query"
+import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import L from "leaflet";
+import { type FileMetadata, FilesService } from "@/client"
+import { Button } from "@/components/ui/button"
 import {
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  Eye,
-  EyeOff,
-  Loader2,
-  MousePointer,
-  Move,
-  Redo2,
-  Undo2,
-  Upload,
-} from "lucide-react";
-
-import { ProcessingService } from "@/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -42,2317 +38,2828 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import useCustomToast from "@/hooks/useCustomToast";
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { NumberField } from "@/components/ui/number-field"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { agentApi } from "@/features/agent/lib/agentApi"
+import { BoundaryImportPicker } from "@/features/process/components/BoundaryImportPicker"
+import type { OrthoLayer } from "@/features/process/components/BoundaryMap"
+import { BoundaryMap } from "@/features/process/components/BoundaryMap"
+import { MarkedFromDroneNote } from "@/features/process/components/DroneMarkingPanel"
+import { FieldDesignUploadDialog } from "@/features/process/components/FieldDesignUploadDialog"
+import { FieldMapPanel } from "@/features/process/components/FieldMapPanel"
+import { QuickSave } from "@/features/process/components/QuickSave"
+import { SelectionActionBar } from "@/features/process/components/SelectionActionBar"
+import {
+  StitchPlacementPanel,
+  useStitchPlacement,
+} from "@/features/process/components/StitchPlacement"
+import { VersionPicker } from "@/features/process/components/VersionPicker"
+import { useDraftPersistence } from "@/features/process/hooks/useDraftPersistence"
+import { useHistory } from "@/features/process/hooks/useHistory"
+import {
+  type PlotGeometryStateSnapshot,
+  useActivatePlotGeometryVersion,
+  useLoadPlotGeometryVersion,
+  usePlotGeometryVersions,
+  useSavePlotGeometryVersion,
+} from "@/features/process/hooks/usePlotGeometry"
+import {
+  buildTitilerTileUrl,
+  resolveActiveOrtho,
+  s3UrlForOrtho,
+  tilejsonBoundsToLeaflet,
+} from "@/features/process/lib/activeOrtho"
+import { outerFromOrthoBounds } from "@/features/process/lib/autoBoundary"
+import {
+  applyLabelsToFeatures,
+  describeFacts,
+  designFromFeatures,
+  designPlotChecker,
+  dimensionsFromDesign,
+  type FdTransform,
+  type FieldDesign,
+  mergeLabelsIntoExisting,
+  transformFromFacts,
+} from "@/features/process/lib/fieldDesign"
+import { plotsFromGeojson } from "@/features/process/lib/geojsonImport"
+import {
+  type FillPattern,
+  generateGridFeatures,
+} from "@/features/process/lib/grid"
+import {
+  mirrorFeatures,
+  rotateFeatures,
+  translateFeaturesMeters,
+} from "@/features/process/lib/groupTransform"
+import {
+  currentOrthoJobIds,
+  folderOrthos,
+  nearestRegions,
+} from "@/features/process/lib/multiOrtho"
+import type { AerialScope } from "@/features/process/lib/paths"
+import {
+  inFolder,
+  processedPrefix,
+  uploadedOrthosPrefix,
+} from "@/features/process/lib/paths"
+import {
+  type BlockParams,
+  DEFAULT_BLOCK_PARAMS,
+  INITIAL_EDITOR_STATE,
+  type PlotBoundaryEditorState,
+} from "@/features/process/lib/plotBoundaryEditorState"
+import {
+  type Run,
+  setStepState,
+  useAllRuns,
+} from "@/features/process/lib/runStore"
+import useCustomToast from "@/hooks/useCustomToast"
+import { titilerBase } from "@/lib/stack"
 
-function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? "";
-  return base ? `${base}${path}` : path;
+const DEFAULT_BUCKET = "gemini"
+
+function nextSelection(
+  prev: ReadonlyArray<string>,
+  id: string,
+  mode: "replace" | "toggle" | "add",
+): string[] {
+  if (mode === "replace") return [id]
+  if (mode === "add") return prev.includes(id) ? [...prev] : [...prev, id]
+  return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
 }
 
-// Fix Leaflet default icon
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-});
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface OrthoInfo {
-  available: boolean;
-  path: string | null;
-  bounds: [[number, number], [number, number]] | null;
-  existing_geojson: GeoJSON.FeatureCollection | null;
-  existing_pop_boundary: GeoJSON.Feature | GeoJSON.FeatureCollection | null;
-  existing_grid_settings: {
-    options: GridOptions;
-    offset: { lon: number; lat: number };
-  } | null;
-  active_ortho_version?: number | null;
-  plot_boundary_ortho_version?: number | null;
-  ortho_versions?: { version: number; name: string | null }[];
-  plot_boundary_versions?: { version: number; name: string | null; created_at: string | null }[];
-  active_plot_boundary_version?: number | null;
-  stitch_versions?: { version: number; name: string | null }[];
-  active_stitch_version?: number | null;
-}
-
-interface FieldDesignInfo {
-  available: boolean;
-  rows: Record<string, string>[];
-  row_count: number;
-  col_count: number;
-}
-
-interface GridOptions {
-  width: number;
-  length: number;
-  rows: number;
-  columns: number;
-  verticalSpacing: number;
-  horizontalSpacing: number;
-  angle: number;
-}
-
-interface PlotBoundaryPrepProps {
-  runId: string;
-  pipelineType?: "aerial" | "ground";
-  onSaved: () => void;
-  onCancel: () => void;
-}
-
-type InteractionMode = "view" | "select" | "move";
-
-// ── Field design upload dialog ────────────────────────────────────────────────
-
-/** Pipeline-expected column names and their metadata. */
-const TARGET_COLS = [
-  {
-    key: "row",
-    label: "Row",
-    required: true,
-    hint: "Grid row number (1, 2, 3…)",
-  },
-  {
-    key: "col",
-    label: "Column",
-    required: true,
-    hint: "Grid column number (1, 2, 3…)",
-  },
-  {
-    key: "plot",
-    label: "Plot ID",
-    required: false,
-    hint: "Plot label or identifier",
-  },
-  {
-    key: "accession",
-    label: "Accession",
-    required: false,
-    hint: "Entry / variety name",
-  },
-] as const;
-
-type TargetKey = (typeof TARGET_COLS)[number]["key"];
-
-/** Very small CSV parser — handles quoted fields, trims whitespace from headers. */
-function parseCSV(text: string): {
-  headers: string[];
-  rows: Record<string, string>[];
-} {
-  const lines = text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .filter(Boolean);
-  if (lines.length === 0) return { headers: [], rows: [] };
-
-  function parseLine(line: string): string[] {
-    const fields: string[] = [];
-    let cur = "";
-    let inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQ && line[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else inQ = !inQ;
-      } else if (ch === "," && !inQ) {
-        fields.push(cur);
-        cur = "";
-      } else cur += ch;
+function bboxOuterFromFeatures(
+  fs: GeoJSON.Feature[],
+): GeoJSON.Feature<GeoJSON.Polygon> | null {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  let any = false
+  for (const f of fs) {
+    if (f.geometry?.type !== "Polygon") continue
+    for (const [x, y] of (f.geometry as GeoJSON.Polygon).coordinates[0] as [
+      number,
+      number,
+    ][]) {
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x > maxX) maxX = x
+      if (y > maxY) maxY = y
+      any = true
     }
-    fields.push(cur);
-    return fields;
   }
-
-  const headers = parseLine(lines[0]).map((h) => h.trim());
-  const rows = lines.slice(1).map((line) => {
-    const vals = parseLine(line);
-    return Object.fromEntries(
-      headers.map((h, i) => [h, (vals[i] ?? "").trim()])
-    );
-  });
-  return { headers, rows };
-}
-
-/** Remap rows using mapping {targetCol → sourceCol}, pass other cols through unchanged. */
-function remapAndSerialize(
-  rows: Record<string, string>[],
-  mapping: Partial<Record<TargetKey, string>>
-): string {
-  if (rows.length === 0) return "";
-
-  const usedSources = new Set(
-    Object.values(mapping).filter(Boolean) as string[]
-  );
-  const firstRow = rows[0];
-  const passthroughCols = Object.keys(firstRow).filter(
-    (c) => !usedSources.has(c)
-  );
-  const newHeaders: string[] = [
-    ...Object.entries(mapping)
-      .filter(([, src]) => src)
-      .map(([tgt]) => tgt),
-    ...passthroughCols,
-  ];
-
-  const lines = [newHeaders.join(",")];
-  for (const row of rows) {
-    const vals = newHeaders.map((h) => {
-      const sourceKey = (mapping as Record<string, string>)[h] ?? h;
-      const val = row[sourceKey] ?? "";
-      return val.includes(",") || val.includes('"')
-        ? `"${val.replace(/"/g, '""')}"`
-        : val;
-    });
-    lines.push(vals.join(","));
-  }
-  return lines.join("\n");
-}
-
-/** Auto-detect best source column for a target key (case-insensitive fuzzy match). */
-function autoDetect(headers: string[], key: TargetKey): string {
-  const aliases: Record<TargetKey, string[]> = {
-    row: ["row", "row_num", "row_number", "range"],
-    col: ["col", "column", "col_num", "column_number", "bed"],
-    plot: ["plot", "plot_id", "plotid", "plot_no", "plot_number"],
-    accession: [
-      "accession",
-      "acc",
-      "entry",
-      "variety",
-      "genotype",
-      "label",
-      "treatment",
-    ],
-  };
-  const lower = headers.map((h) => h.toLowerCase());
-  for (const alias of aliases[key]) {
-    const idx = lower.findIndex((h) => h === alias || h.startsWith(alias));
-    if (idx !== -1) return headers[idx];
-  }
-  return "";
-}
-
-function FieldDesignUploadDialog({
-  open,
-  onClose,
-  onSaved,
-  runId,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSaved: (info: { row_count: number; col_count: number }) => void;
-  runId: string;
-}) {
-  const [step, setStep] = useState<"upload" | "map">("upload");
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [parsedRows, setParsedRows] = useState<Record<string, string>[]>([]);
-  const [mapping, setMapping] = useState<Partial<Record<TargetKey, string>>>(
-    {}
-  );
-  const { showErrorToast } = useCustomToast();
-
-  function handleClose() {
-    setStep("upload");
-    setHeaders([]);
-    setParsedRows([]);
-    setMapping({});
-    onClose();
-  }
-
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const { headers: h, rows } = parseCSV(text);
-      setHeaders(h);
-      setParsedRows(rows);
-      const auto: Partial<Record<TargetKey, string>> = {};
-      for (const t of TARGET_COLS) auto[t.key] = autoDetect(h, t.key);
-      setMapping(auto);
-      setStep("map");
-    };
-    reader.readAsText(file);
-  }
-
-  const saveMutation = useMutation({
-    mutationFn: () => {
-      const csvText = remapAndSerialize(parsedRows, mapping);
-      return fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/field-design`), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-        body: JSON.stringify({ csv_text: csvText }),
-      }).then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json();
-      });
+  if (!any) return null
+  return {
+    type: "Feature",
+    properties: { role: "outer" },
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [minX, minY],
+          [maxX, minY],
+          [maxX, maxY],
+          [minX, maxY],
+          [minX, minY],
+        ],
+      ],
     },
-    onSuccess: (data) => {
-      onSaved({ row_count: data.row_count, col_count: data.col_count });
-      handleClose();
-    },
-    onError: () => showErrorToast("Failed to save field design"),
-  });
-
-  const requiredMapped = TARGET_COLS.filter((t) => t.required).every(
-    (t) => mapping[t.key]
-  );
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
-            {step === "upload" ? "Upload Field Design" : "Map Columns"}
-          </DialogTitle>
-          <DialogDescription>
-            {step === "upload"
-              ? "Select a CSV file. You'll map your columns to the required pipeline fields in the next step."
-              : `Match your file's columns to the pipeline fields. ${parsedRows.length} rows detected.`}
-          </DialogDescription>
-        </DialogHeader>
-
-        {step === "upload" && (
-          <div className="space-y-3">
-            <Label>Select CSV file</Label>
-            <Input
-              type="file"
-              accept=".csv"
-              className="mt-1"
-              onChange={handleFileChange}
-            />
-          </div>
-        )}
-
-        {step === "map" && (
-          <div className="space-y-4">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-muted-foreground border-b text-left">
-                  <th className="w-1/3 pb-2 font-medium">Pipeline field</th>
-                  <th className="pb-2 font-medium">Your column</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {TARGET_COLS.map((t) => (
-                  <tr key={t.key}>
-                    <td className="py-2 pr-4">
-                      <div className="flex items-center gap-1.5">
-                        <code className="bg-muted rounded px-1 py-0.5 text-xs">
-                          {t.key}
-                        </code>
-                        {t.required && (
-                          <span className="text-xs text-red-500">*</span>
-                        )}
-                      </div>
-                      <div className="text-muted-foreground mt-0.5 text-xs">
-                        {t.hint}
-                      </div>
-                    </td>
-                    <td className="py-2">
-                      <select
-                        className="bg-background w-full rounded border px-2 py-1 text-sm"
-                        value={mapping[t.key] ?? ""}
-                        onChange={(e) =>
-                          setMapping((m) => ({ ...m, [t.key]: e.target.value }))
-                        }
-                      >
-                        {!t.required && <option value="">— skip —</option>}
-                        {t.required && (
-                          <option value="">— select column —</option>
-                        )}
-                        {headers.map((h) => (
-                          <option key={h} value={h}>
-                            {h}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {!requiredMapped && (
-              <p className="text-xs text-red-500">
-                Row and Column fields are required.
-              </p>
-            )}
-
-            <div>
-              <p className="text-muted-foreground mb-1 text-xs">
-                Preview (first 4 rows after mapping):
-              </p>
-              <div className="bg-muted/40 overflow-x-auto rounded border">
-                <table className="w-full font-mono text-xs">
-                  <thead>
-                    <tr className="bg-muted border-b">
-                      {TARGET_COLS.filter((t) => mapping[t.key]).map((t) => (
-                        <th
-                          key={t.key}
-                          className="px-2 py-1 text-left font-medium"
-                        >
-                          {t.key}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parsedRows.slice(0, 4).map((row, i) => (
-                      <tr key={i} className="border-b last:border-0">
-                        {TARGET_COLS.filter((t) => mapping[t.key]).map((t) => (
-                          <td key={t.key} className="px-2 py-1">
-                            {row[mapping[t.key]!] ?? ""}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <DialogFooter>
-          {step === "map" && (
-            <Button variant="outline" onClick={() => setStep("upload")}>
-              Back
-            </Button>
-          )}
-          <Button variant="outline" onClick={handleClose}>
-            Cancel
-          </Button>
-          {step === "map" && (
-            <Button
-              disabled={!requiredMapped || saveMutation.isPending}
-              onClick={() => saveMutation.mutate()}
-            >
-              {saveMutation.isPending ? "Saving…" : "Save Field Design"}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+  }
 }
 
-// ── Client-side grid computation (ported from plot_boundary.py) ───────────────
-
-function degScale(latDeg: number): number {
-  return 1.0 / (111_320 * Math.cos((latDeg * Math.PI) / 180));
+export interface PlotBoundaryPrepProps {
+  run: Run
+  scope: AerialScope
+  onSaved?: () => void
+  onCancel?: () => void
+  /** The page's title, shown on the map card (the page has no header above it). */
+  title?: string
+  /** Back to the run; an arrow beside the title. */
+  onBack?: () => void
 }
 
-function rotatePoint(
-  px: number,
-  py: number,
-  cx: number,
-  cy: number,
-  angleDeg: number
+const PANEL_KEY = "gemi.boundaryPrep.panel"
+
+/** A move on screen (right, up) as a move on the ground (east, north), for a
+ *  view turned `bearing` degrees clockwise. */
+export function screenToGround(
+  right: number,
+  up: number,
+  bearing: number,
 ): [number, number] {
-  const rad = (angleDeg * Math.PI) / 180;
-  const cos = Math.cos(rad),
-    sin = Math.sin(rad);
-  const dx = px - cx,
-    dy = py - cy;
-  return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
-}
-
-function rotateRing(
-  coords: number[][],
-  cx: number,
-  cy: number,
-  angleDeg: number
-): number[][] {
-  return coords.map(([lon, lat]) => {
-    const [rlon, rlat] = rotatePoint(lon, lat, cx, cy, angleDeg);
-    return [rlon, rlat];
-  });
-}
-
-function polygonCentroid(geom: GeoJSON.Polygon): [number, number] {
-  const ring = geom.coordinates[0].slice(0, -1);
+  const t = (bearing * Math.PI) / 180
+  const r = (v: number) => Math.round(v * 1e9) / 1e9
   return [
-    ring.reduce((s, p) => s + p[0], 0) / ring.length,
-    ring.reduce((s, p) => s + p[1], 0) / ring.length,
-  ];
+    r(right * Math.cos(t) - up * Math.sin(t)),
+    r(right * Math.sin(t) + up * Math.cos(t)),
+  ]
 }
 
-function computeGrid(
-  boundary: GeoJSON.Feature,
-  options: GridOptions,
-  offset: { lon: number; lat: number },
-  fdRows?: Record<string, string>[]
-): GeoJSON.FeatureCollection {
-  const geom = boundary.geometry as GeoJSON.Polygon;
-  const [cx, cy] = polygonCentroid(geom);
-  const scale = degScale(cy);
+/** A bearing in (-180, 180]. */
+export function normBearing(deg: number): number {
+  const d = ((((deg + 180) % 360) + 360) % 360) - 180
+  return d === -180 ? 180 : Math.round(d * 10) / 10
+}
 
-  const widthDeg = options.width * scale;
-  const lengthDeg = options.length * scale;
-  const vspaceDeg = options.verticalSpacing * scale;
-  const hspaceDeg = options.horizontalSpacing * scale;
-  const rows = Math.max(1, Math.round(options.rows));
-  const cols = Math.max(1, Math.round(options.columns));
-  const angle = options.angle;
+/**
+ * How far the plots' long side is turned from east, degrees counter-clockwise
+ * (from the first plot of the active block, in metres): the view turned by it
+ * puts the plots' rows across the screen. Null without plots.
+ */
+export function plotsAngleOf(
+  features: GeoJSON.Feature[],
+  blockId: string | null,
+): number | null {
+  const plot = features.find(
+    (f) =>
+      f.geometry?.type === "Polygon" &&
+      f.properties?.role !== "outer" &&
+      f.properties?.border !== true &&
+      (!blockId || f.properties?.blockId === blockId),
+  )
+  if (!plot) return null
+  const ring = (plot.geometry as GeoJSON.Polygon).coordinates[0]
+  if (ring.length < 4) return null
+  const k = Math.cos((ring[0][1] * Math.PI) / 180)
+  // The longer of the first two sides.
+  const side = (a: number[], b: number[]) => ({
+    dx: (b[0] - a[0]) * k,
+    dy: b[1] - a[1],
+  })
+  const s1 = side(ring[0], ring[1])
+  const s2 = side(ring[1], ring[2])
+  const s = Math.hypot(s1.dx, s1.dy) >= Math.hypot(s2.dx, s2.dy) ? s1 : s2
+  let a = (Math.atan2(s.dy, s.dx) * 180) / Math.PI
+  // A side's direction either way round: the smaller turn.
+  if (a > 90) a -= 180
+  if (a <= -90) a += 180
+  return Math.round(a * 10) / 10
+}
 
-  const ring0 = geom.coordinates[0];
-  const minLon = Math.min(...ring0.map((p) => p[0])) + offset.lon;
-  const maxLat = Math.max(...ring0.map((p) => p[1])) + offset.lat;
+/** The name a plot added by hand gets: one after the highest plot number
+ *  (or "added-N" when plots are not numbered). It can be renamed. */
+export function nextPlotName(features: GeoJSON.Feature[]): string {
+  let max = 0
+  let plots = 0
+  for (const f of features) {
+    const p = (f.properties ?? {}) as Record<string, unknown>
+    if (p.role === "outer" || p.border === true) continue
+    plots += 1
+    const n = Number(p.plot)
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  return max > 0 ? String(Math.trunc(max) + 1) : `added-${plots + 1}`
+}
 
-  const features: GeoJSON.Feature[] = [];
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      const x = minLon + j * (widthDeg + hspaceDeg);
-      const y = maxLat - i * (lengthDeg + vspaceDeg) - lengthDeg;
+export function PlotBoundaryPrep({
+  run,
+  scope,
+  onSaved,
+  onCancel,
+  title = "Map",
+  onBack,
+}: PlotBoundaryPrepProps) {
+  const directory = useMemo(() => processedPrefix(scope), [scope])
+  // The grid side panel can be hidden so the map gets the full width;
+  // remembered across visits.
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try {
+      return localStorage.getItem(PANEL_KEY) !== "closed"
+    } catch {
+      return true
+    }
+  })
+  const togglePanel = () =>
+    setPanelOpen((open) => {
+      try {
+        localStorage.setItem(PANEL_KEY, open ? "closed" : "open")
+      } catch {
+        // remembered for this visit only
+      }
+      return !open
+    })
 
-      let ring: number[][] = [
-        [x, y],
-        [x + widthDeg, y],
-        [x + widthDeg, y + lengthDeg],
-        [x, y + lengthDeg],
-        [x, y],
-      ];
-      if (angle !== 0)
-        ring = rotateRing(ring, cx + offset.lon, cy + offset.lat, angle);
+  const history = useHistory<PlotBoundaryEditorState>(INITIAL_EDITOR_STATE, {
+    limit: 50,
+  })
+  const {
+    features,
+    blocks,
+    activeBlockId,
+    pendingDefaultParams,
+    gridMode,
+    fieldDesign,
+  } = history.state
 
-      const rowStr = String(i + 1),
-        colStr = String(j + 1);
-      const fd = fdRows?.find((r) => r.row === rowStr && r.col === colStr);
-      const props: Record<string, any> = { row: i + 1, column: j + 1, ...fd };
-      if (!props.plot) props.plot = `${i + 1}_${j + 1}`;
+  // UI-only state — not part of editor history.
+  // What the editor last loaded: one of this directory's versions, or one
+  // imported from another directory (another date / sensor / experiment).
+  const [loadSource, setLoadSource] = useState<{
+    directory: string
+    version: number
+  } | null>(null)
+  // Boundaries brought from another date and moved onto this map (not saved yet).
+  const [importedSnapshot, setImportedSnapshot] =
+    useState<PlotGeometryStateSnapshot | null>(null)
+  const [versionName, setVersionName] = useState("")
+  // Bumped when boundaries are loaded or imported: the map zooms to them.
+  const [fitSignal, setFitSignal] = useState(0)
+  const [fdDialogOpen, setFdDialogOpen] = useState(false)
+  // How the design dialog opens: on the field's known design, or on a field map sheet.
+  const [fdDialogStart, setFdDialogStart] = useState<
+    "upload" | "preset" | "fieldmap"
+  >("upload")
+  // Map view: plots shown and how strongly, border positions, box select.
+  const [showPlots, setShowPlots] = useState(true)
+  const [plotOpacity, setPlotOpacity] = useState(1)
+  const [showBorders, setShowBorders] = useState(true)
+  const [boxSelect, setBoxSelect] = useState(false)
+  // Move step for the selection, metres (buttons and arrow keys).
+  const [nudgeStep, setNudgeStep] = useState(0.1)
+  const nudgeStepRef = useRef(nudgeStep)
+  nudgeStepRef.current = nudgeStep
+  const [fieldMapOpen, setFieldMapOpen] = useState(false)
+  // The map view's rotation (degrees clockwise; 0 = north up).
+  const [bearing, setBearing] = useState(0)
+  const bearingRef = useRef(bearing)
+  bearingRef.current = bearing
+  const plotsAngle = useMemo(
+    () => plotsAngleOf(history.state.features, history.state.activeBlockId),
+    [history.state.features, history.state.activeBlockId],
+  )
+  // "Add a plot": the next shape drawn becomes a plot (not a new outline).
+  const [addPlot, setAddPlotState] = useState(false)
+  const addPlotRef = useRef(false)
+  const addedRef = useRef(false)
+  const setAddPlot = (on: boolean) => {
+    addPlotRef.current = on
+    setAddPlotState(on)
+  }
+  // The design this field already has (recorded with the agent for this run or
+  // another date of the same field) and the orientation its facts give.
+  const fieldInfo = useQuery({
+    queryKey: ["agent", "field_designs", run.id],
+    queryFn: () => agentApi.fieldDesigns(run.id),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const fieldPreset = useMemo(() => {
+    const facts = fieldInfo.data?.facts ?? {}
+    const path = facts.design_path ?? fieldInfo.data?.suggested?.path
+    if (!path || path === "stand-in") return null
+    return {
+      path,
+      name: path.split(/[\\/]/).pop() ?? path,
+      transform: transformFromFacts(facts),
+      described: describeFacts(facts),
+    }
+  }, [fieldInfo.data])
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const [draftBanner, setDraftBanner] = useState<{
+    visible: boolean
+    lastModifiedAt?: string
+  }>({ visible: false })
 
-      features.push({
-        type: "Feature",
-        geometry: { type: "Polygon", coordinates: [ring] },
-        properties: props,
-      });
+  // Auto-save the editor state to localStorage on every change, with a
+  // mount-time restore banner. Survives refresh, back button, and tab
+  // close as long as the user hasn't explicitly discarded.
+  const draftStorageKey = `gemini.plotBoundaryPrep.draft.v1::${directory}`
+  const draftApi = useDraftPersistence<PlotBoundaryEditorState>({
+    storageKey: draftStorageKey,
+    state: history.state,
+    runId: run.id,
+    directory,
+    isDirty: (s) =>
+      s.features.length > 0 ||
+      Object.keys(s.blocks).length > 0 ||
+      s.fieldDesign !== null,
+  })
+
+  // Derived active-block params. Falls back to pending defaults (set
+  // when a field design is loaded before any boundary is drawn), then
+  // to global defaults, so the inputs always render something sensible.
+  const activeParams: BlockParams =
+    activeBlockId && blocks[activeBlockId]
+      ? // Spread defaults under the stored block so blocks persisted
+        // before rowOffset/colOffset/fillPattern existed still render
+        // sensible values (undefined → default) instead of NaN inputs.
+        // `blocks[activeBlockId]` is BlockParams, so its label is present.
+        { ...DEFAULT_BLOCK_PARAMS, ...blocks[activeBlockId] }
+      : {
+          label: "",
+          ...DEFAULT_BLOCK_PARAMS,
+          ...(pendingDefaultParams ?? {}),
+        }
+  const { rows, cols, angle, gapMeters, rowOffset, colOffset, fillPattern } =
+    activeParams
+  const gapColMeters = activeParams.gapColMeters ?? gapMeters
+
+  // History.state can change after a setter runs in this render; use a
+  // ref to get the latest state inside callbacks without re-binding.
+  const stateRef = useRef(history.state)
+  stateRef.current = history.state
+
+  function updateActiveParams(patch: Partial<BlockParams>) {
+    const s = stateRef.current
+    if (s.activeBlockId) {
+      const prev = s.blocks[s.activeBlockId] ?? {
+        label: s.blocks[s.activeBlockId]?.label ?? "",
+        ...DEFAULT_BLOCK_PARAMS,
+        ...(s.pendingDefaultParams ?? {}),
+      }
+      history.set(
+        {
+          ...s,
+          blocks: {
+            ...s.blocks,
+            [s.activeBlockId]: { ...prev, ...patch },
+          },
+        },
+        { tag: "params" },
+      )
+      return
+    }
+    // No active block yet: keep every setting (rows, cols, angle, gaps, plot
+    // size, borders) for the first block drawn. Only rows and cols were kept
+    // before, so an angle or gap typed before drawing the boundary was lost.
+    history.set(
+      {
+        ...s,
+        pendingDefaultParams: { ...(s.pendingDefaultParams ?? {}), ...patch },
+      },
+      { tag: "params" },
+    )
+  }
+  const setRows = (v: number) => updateActiveParams({ rows: v })
+  const setCols = (v: number) => updateActiveParams({ cols: v })
+  const setAngle = (v: number) => updateActiveParams({ angle: v })
+  const setGapMeters = (v: number) => updateActiveParams({ gapMeters: v })
+  const setGapColMeters = (v: number) => updateActiveParams({ gapColMeters: v })
+  const setRowOffset = (v: number) => updateActiveParams({ rowOffset: v })
+  const setColOffset = (v: number) => updateActiveParams({ colOffset: v })
+  const setFillPattern = (v: FillPattern) =>
+    updateActiveParams({ fillPattern: v })
+
+  // Reconcile an incoming feature list (from the map or grid generation)
+  // with per-block state, returning the next EditorState. Mirrors the
+  // three concerns of the original setFeatures: stamp fresh outers, drop
+  // dead blocks, auto-select most-recently added outer.
+  const buildNextStateForFeatures = useCallback(
+    (
+      base: PlotBoundaryEditorState,
+      next: GeoJSON.Feature[],
+    ): PlotBoundaryEditorState => {
+      let nextActive: string | null = base.activeBlockId
+      let newBlocks: Record<string, BlockParams> | null = null
+      let highestNum = 0
+      for (const id of Object.keys(base.blocks)) {
+        const m = id.match(/^block-(\d+)$/)
+        if (m) highestNum = Math.max(highestNum, Number(m[1]))
+      }
+      // Pass 1: stamp fresh outers.
+      const stamped = next.map((f) => {
+        if (f.geometry?.type !== "Polygon") return f
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        if (props.role === "outer" || typeof props.blockId === "string")
+          return f
+        if (props.row !== undefined || props.col !== undefined) return f
+        // "Add a plot": the shape just drawn is a plot of the selected block,
+        // named after the highest plot number (renamed in the selection bar).
+        if (addPlotRef.current && base.activeBlockId) {
+          addPlotRef.current = false
+          addedRef.current = true
+          return {
+            ...f,
+            properties: {
+              ...(f.properties ?? {}),
+              blockId: base.activeBlockId,
+              block:
+                base.blocks[base.activeBlockId]?.label ?? base.activeBlockId,
+              plot: nextPlotName(base.features),
+              added: true,
+            },
+          }
+        }
+        highestNum += 1
+        const newId = `block-${highestNum}`
+        const label = `Block ${highestNum}`
+        if (!newBlocks) newBlocks = { ...base.blocks }
+        newBlocks[newId] = {
+          label,
+          ...DEFAULT_BLOCK_PARAMS,
+          ...(base.pendingDefaultParams ?? {}),
+        }
+        nextActive = newId
+        return {
+          ...f,
+          properties: {
+            ...(f.properties ?? {}),
+            role: "outer",
+            blockId: newId,
+            label,
+          },
+        }
+      })
+      // Pass 2: surviving block ids.
+      const surviving = new Set<string>()
+      for (const f of stamped) {
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        if (props.role === "outer" && typeof props.blockId === "string") {
+          surviving.add(props.blockId as string)
+        }
+      }
+      // Pass 3: drop cells whose parent block is gone, then stamp a
+      // stable cellId on every surviving cell so the selection state in
+      // EditorState can reference cells by identity across edits. Prefer
+      // a deterministic `${blockId}:${row}:${col}` so snapshots stay
+      // diffable; fall back to a UUID when row/col are missing (legacy
+      // imports / hand-drawn cells).
+      const pruned = stamped
+        .filter((f) => {
+          const props = (f.properties ?? {}) as Record<string, unknown>
+          if (props.role === "outer") return true
+          const bid = typeof props.blockId === "string" ? props.blockId : null
+          if (!bid) return true
+          return surviving.has(bid)
+        })
+        .map((f) => {
+          const props = (f.properties ?? {}) as Record<string, unknown>
+          if (props.role === "outer") return f
+          if (typeof props.cellId === "string") return f
+          const bid = typeof props.blockId === "string" ? props.blockId : null
+          const r = props.row
+          const c = props.col
+          const stable =
+            bid &&
+            (typeof r === "number" || typeof r === "string") &&
+            (typeof c === "number" || typeof c === "string")
+              ? `${bid}:${r}:${c}`
+              : typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? (crypto as { randomUUID: () => string }).randomUUID()
+                : `cell-${Math.random().toString(36).slice(2, 10)}`
+          return {
+            ...f,
+            properties: { ...(f.properties ?? {}), cellId: stable },
+          }
+        })
+      // Reconcile blocks dict.
+      const baseBlocks = newBlocks ?? base.blocks
+      let prunedBlocks: Record<string, BlockParams> = baseBlocks
+      let blocksChanged = newBlocks !== null
+      for (const id of Object.keys(baseBlocks)) {
+        if (!surviving.has(id)) {
+          if (!blocksChanged) {
+            prunedBlocks = { ...baseBlocks }
+            blocksChanged = true
+          }
+          delete prunedBlocks[id]
+        }
+      }
+      if (nextActive && !surviving.has(nextActive)) {
+        nextActive = surviving.values().next().value ?? null
+      }
+      // Prune selection to cells that still exist.
+      const survivingCellIds = new Set<string>()
+      for (const f of pruned) {
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        if (typeof props.cellId === "string")
+          survivingCellIds.add(props.cellId as string)
+      }
+      const nextSelected = base.selectedCellIds.filter((id) =>
+        survivingCellIds.has(id),
+      )
+      return {
+        ...base,
+        features: pruned,
+        blocks: blocksChanged ? prunedBlocks : base.blocks,
+        activeBlockId: nextActive,
+        pendingDefaultParams: newBlocks ? null : base.pendingDefaultParams,
+        selectedCellIds:
+          nextSelected.length === base.selectedCellIds.length
+            ? base.selectedCellIds
+            : nextSelected,
+      }
+    },
+    [],
+  )
+
+  const setFeatures = useCallback(
+    (next: GeoJSON.Feature[]) => {
+      const nextState = buildNextStateForFeatures(stateRef.current, next)
+      history.set(nextState, { tag: "features" })
+    },
+    [buildNextStateForFeatures, history],
+  )
+
+  // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z (or Ctrl+Y) redo. The focus check
+  // is what keeps native text-undo working inside form inputs: when the
+  // user is typing in a textbox, this handler bails and the browser (or
+  // Tauri WebView) handles undo as a text-edit operation.
+  // Every plot (not the outer boundaries) selected: the "All" button and Cmd/Ctrl-A.
+  const selectAllRef = useRef<() => boolean>(() => false)
+  selectAllRef.current = () => {
+    const s = stateRef.current
+    const ids = s.features
+      .filter(
+        (f) => (f.properties as Record<string, unknown>)?.role !== "outer",
+      )
+      .map((f) => (f.properties as Record<string, unknown>)?.cellId)
+      .filter((id): id is string => typeof id === "string")
+    if (!ids.length) return false
+    history.set({ ...s, selectedCellIds: ids }, { tag: "select" })
+    return true
+  }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable ||
+          // Lists, menus, sliders and dialogs use the arrow keys themselves.
+          t.closest?.(
+            '[role="listbox"],[role="menu"],[role="slider"],[role="combobox"],[role="dialog"]',
+          ))
+      ) {
+        return
+      }
+      const mod = e.metaKey || e.ctrlKey
+      // Arrow keys move the selected plots by the move step (Shift: ten steps).
+      const arrows: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, 1],
+        ArrowDown: [0, -1],
+      }
+      if (!mod && arrows[e.key] && stateRef.current.selectedCellIds.length) {
+        e.preventDefault()
+        // Not also a pan of the map (its keyboard handler would take them).
+        e.stopPropagation()
+        const step = nudgeStepRef.current * (e.shiftKey ? 10 : 1)
+        const [ex, ny] = arrows[e.key]
+        nudgeRef.current(ex * step, ny * step)
+        return
+      }
+      if (!mod) return
+      const k = e.key.toLowerCase()
+      // Select all plots; with no plots yet, the browser's own select-all.
+      if (k === "a" && !e.shiftKey && !e.altKey) {
+        if (selectAllRef.current()) e.preventDefault()
+        return
+      }
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault()
+        history.undo()
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault()
+        history.redo()
+      }
+    }
+    // Capture: before the map, which takes the arrow keys once it has focus
+    // (a click on it) and stops them there.
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [history.undo, history.redo])
+
+  // Tauri Edit menu (when present): listen for editor:undo / editor:redo
+  // events emitted by the native menu. The menu items don't register
+  // accelerators, so Cmd-Z still flows through the window keydown above
+  // (and so native text-undo inside form inputs keeps working).
+  useEffect(() => {
+    const w = window as unknown as { __TAURI_INTERNALS__?: unknown }
+    if (!w.__TAURI_INTERNALS__) return
+    let unlistenUndo: (() => void) | undefined
+    let unlistenRedo: (() => void) | undefined
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event")
+        if (cancelled) return
+        unlistenUndo = await listen("editor:undo", () => history.undo())
+        unlistenRedo = await listen("editor:redo", () => history.redo())
+      } catch {
+        // Tauri APIs unavailable — fine, browser path covers it.
+      }
+    })()
+    return () => {
+      cancelled = true
+      unlistenUndo?.()
+      unlistenRedo?.()
+    }
+  }, [history.undo, history.redo])
+
+  // One-time draft restore. If localStorage holds an unsaved draft for
+  // this directory and the runId matches, hydrate the editor with it
+  // and surface a banner so the user can opt out. `initialDraft` is
+  // stable across renders (read once at mount), so an empty deps array
+  // is correct here.
+  const restoredRef = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only restore
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    const d = draftApi.initialDraft
+    if (d && d.runId === run.id) {
+      history.replace(d.state)
+      history.clearHistory(d.state)
+      setDraftBanner({ visible: true, lastModifiedAt: d.lastModifiedAt })
+    }
+  }, [])
+
+  // No draft: open on the boundaries this scope already uses (its active
+  // version), however they were made: by hand, imported, or by the agent.
+  // Otherwise saved boundaries only appeared after picking them in Versions,
+  // and the map stayed empty.
+  const versionsForOpen = usePlotGeometryVersions(directory)
+  const openedActiveRef = useRef(false)
+  useEffect(() => {
+    if (openedActiveRef.current || loadSource) return
+    if (draftApi.initialDraft?.runId === run.id) {
+      openedActiveRef.current = true
+      return
+    }
+    const rows = versionsForOpen.data
+    if (!rows) return
+    openedActiveRef.current = true
+    const active = rows.find((v) => v.is_active)
+    if (active) setLoadSource({ directory, version: active.version })
+  }, [
+    versionsForOpen.data,
+    loadSource,
+    directory,
+    run.id,
+    draftApi.initialDraft,
+  ])
+
+  const save = useSavePlotGeometryVersion()
+  const activate = useActivatePlotGeometryVersion()
+  const { showSuccessToast, showErrorToast } = useCustomToast()
+
+  // List the processed prefix so buildOrthoVersions can derive the version
+  // list. Same query key shape as OrthoVersionsPanel uses, so a delete from
+  // there invalidates this view.
+  const filesQuery = useQuery({
+    queryKey: ["files", "list", `${DEFAULT_BUCKET}/${directory}`],
+    queryFn: () =>
+      FilesService.apiFilesListFilePathListFiles({
+        filePath: `${DEFAULT_BUCKET}/${directory}`,
+      }),
+  })
+  // Imported orthos stay in Raw/…/Orthomosaic/; without this listing
+  // buildOrthoVersions drops them (it keeps only versions whose file it
+  // can see), and a run on an imported ortho had nothing to draw over.
+  // Same key as RunDetail's query, so they share the cache.
+  const uploadedOrthosQuery = useQuery({
+    queryKey: ["files", "list", scope ? uploadedOrthosPrefix(scope) : null],
+    queryFn: async () =>
+      scope
+        ? inFolder(
+            (await FilesService.apiFilesListFilePathListFiles({
+              filePath: `${DEFAULT_BUCKET}/${uploadedOrthosPrefix(scope)}`,
+            })) as FileMetadata[] | null,
+            uploadedOrthosPrefix(scope),
+          )
+        : [],
+    enabled: Boolean(scope),
+  })
+  const activeOrtho = useMemo(
+    () =>
+      resolveActiveOrtho(run, scope, [
+        ...((filesQuery.data as FileMetadata[] | null) ?? []),
+        ...(uploadedOrthosQuery.data ?? []),
+      ]),
+    [run, scope, filesQuery.data, uploadedOrthosQuery.data],
+  )
+  // Ground runs have no ortho; draw over the stitch version association
+  // uses (the fullest) — its georeferenced combined mosaic (main's ground
+  // underlay) — with its plots' outlines and GPS corrections on top.
+  const placement = useStitchPlacement(
+    (filesQuery.data as FileMetadata[] | null) ?? undefined,
+    scope,
+  )
+  const groundMosaic = placement.version?.combinedMosaic ?? null
+  const s3Url = activeOrtho
+    ? s3UrlForOrtho(activeOrtho)
+    : groundMosaic
+      ? `s3://${DEFAULT_BUCKET}/${groundMosaic}`
+      : null
+
+  // TiTiler 2.0.1 exposes tilejson under /cog/{TMS}/tilejson.json. Asking for
+  // WebMercatorQuad gives us a WGS84 `bounds` array (west, south, east, north)
+  // and a fully-qualified XYZ template in `tiles[0]`. We rewrite TiTiler's
+  // absolute URL onto our /titiler proxy so it works in both dev (vite proxy)
+  // and bundled deployments where TiTiler isn't reachable on :8091.
+  // Force tilesize=256 so the standard z/x/y maps to a 256px-equivalent
+  // geographic extent (matches Leaflet's default tileSize: 256). TiTiler
+  // 2.0.1 defaults to tilesize=512 in its tilejson template, which would
+  // require either tileSize: 512 + zoomOffset on the Leaflet side or
+  // result in tiles that depict the wrong geographic area for the slot.
+  const tilejsonQuery = useQuery({
+    queryKey: ["titiler", "tilejson", s3Url],
+    queryFn: async () => {
+      const res = await fetch(
+        `${titilerBase()}/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(s3Url!)}&tilesize=256`,
+      )
+      if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
+      return res.json() as Promise<{
+        tiles: string[]
+        bounds: [number, number, number, number]
+      }>
+    },
+    enabled: !!s3Url,
+    staleTime: 5 * 60_000,
+  })
+
+  const orthoTileUrl = useMemo(
+    () => (s3Url ? buildTitilerTileUrl(s3Url) : undefined),
+    [s3Url],
+  )
+
+  // Several orthomosaics in this date's folder (e.g. one flight per
+  // treatment): show them all, each where it is nearer than the others'
+  // centres, so one set of boundaries can be drawn across both.
+  const allRuns = useAllRuns()
+  const folderOrthoList = useMemo(() => {
+    const all = folderOrthos(
+      (filesQuery.data as FileMetadata[] | null) ?? [],
+      directory,
+    )
+    // A flight re-run leaves its older orthomosaic beside the new one: keep
+    // each run's latest (the runs on this date folder say which job that was).
+    const latest = new Set(
+      allRuns
+        .filter((r) => {
+          const u = r.uploadScope
+          return (
+            u &&
+            scope &&
+            u.date === scope.date &&
+            u.location === scope.location &&
+            u.population === scope.population &&
+            u.experiment === scope.experiment &&
+            u.platform === scope.platform
+          )
+        })
+        // A run of several treatments: its treatments' orthomosaics.
+        .flatMap((r) => currentOrthoJobIds(r))
+        .filter((j): j is string => Boolean(j)),
+    )
+    const kept = all.filter((o) => o.jobId && latest.has(o.jobId))
+    return kept.length ? kept : all
+  }, [filesQuery.data, directory, allRuns, scope])
+  const multi = folderOrthoList.length > 1
+  const orthoInfos = useQueries({
+    queries: (multi ? folderOrthoList : []).map((o) => ({
+      queryKey: [
+        "titiler",
+        "tilejson",
+        `s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`,
+      ],
+      queryFn: async () => {
+        const url = `s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`
+        const res = await fetch(
+          `${titilerBase()}/cog/WebMercatorQuad/tilejson.json?url=${encodeURIComponent(url)}&tilesize=256`,
+        )
+        if (!res.ok) throw new Error(`TiTiler tilejson failed: ${res.status}`)
+        return (await res.json()) as {
+          bounds: [number, number, number, number]
+        }
+      },
+      staleTime: 5 * 60_000,
+    })),
+  })
+  const boundsKey = orthoInfos
+    .map((q) => q.data?.bounds?.join(",") ?? "")
+    .join("|")
+  const orthoLayers = useMemo<OrthoLayer[] | undefined>(() => {
+    if (!multi) return undefined
+    const parts = boundsKey.split("|")
+    if (parts.some((b) => !b)) return undefined
+    const bs = parts.map(
+      (b) => b.split(",").map(Number) as [number, number, number, number],
+    )
+    const centres = bs.map(
+      (b) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] as [number, number],
+    )
+    const all: [number, number, number, number] = [
+      Math.min(...bs.map((b) => b[0])),
+      Math.min(...bs.map((b) => b[1])),
+      Math.max(...bs.map((b) => b[2])),
+      Math.max(...bs.map((b) => b[3])),
+    ]
+    const regions = nearestRegions(centres, all)
+    return folderOrthoList.map((o, i) => ({
+      id: o.path,
+      url: buildTitilerTileUrl(`s3://${DEFAULT_BUCKET}/${o.cogPath ?? o.path}`),
+      region: regions[i],
+    }))
+  }, [multi, folderOrthoList, boundsKey])
+  const orthoLabels = useMemo(
+    () =>
+      folderOrthoList.map((o) => {
+        const r = allRuns.find((x) =>
+          (x.steps.orthomosaic?.jobIds ?? []).includes(o.jobId ?? "—"),
+        )
+        const t = r?.uploadScope?.treatments?.find(
+          (x) => x.orthoJobId && x.orthoJobId === o.jobId,
+        )
+        return (
+          t?.label ||
+          r?.uploadScope?.batchLabel ||
+          o.jobId?.slice(0, 8) ||
+          "orthomosaic"
+        )
+      }),
+    [folderOrthoList, allRuns],
+  )
+
+  // tilejson bounds: [west, south, east, north] in WGS84.
+  // BoundaryMap wants [[south, west], [north, east]].
+  const orthoBounds = useMemo<
+    [[number, number], [number, number]] | undefined
+  >(() => {
+    if (multi) {
+      const bs = boundsKey
+        .split("|")
+        .filter(Boolean)
+        .map(
+          (b) => b.split(",").map(Number) as [number, number, number, number],
+        )
+      if (!bs.length) return undefined
+      return tilejsonBoundsToLeaflet([
+        Math.min(...bs.map((b) => b[0])),
+        Math.min(...bs.map((b) => b[1])),
+        Math.max(...bs.map((b) => b[2])),
+        Math.max(...bs.map((b) => b[3])),
+      ])
+    }
+    const b = tilejsonQuery.data?.bounds
+    return b ? tilejsonBoundsToLeaflet(b) : undefined
+  }, [tilejsonQuery.data, multi, boundsKey])
+
+  // Derived counts. The outer-boundary polygon is held in `features` (so
+  // it renders/edits on the map) but isn't a plot — keep it out of the
+  // count surfaced to the user and out of the save/clear gating.
+  const plotFeatureCount = useMemo(
+    () =>
+      features.filter(
+        (f) => f.properties?.role !== "outer" && f.properties?.border !== true,
+      ).length,
+    [features],
+  )
+  const borderCount = useMemo(
+    () => features.filter((f) => f.properties?.border === true).length,
+    [features],
+  )
+
+  const loaded = useLoadPlotGeometryVersion(
+    loadSource?.directory ?? null,
+    loadSource?.version ?? null,
+  )
+  // What was last put in the editor: a version is loaded when it is opened
+  // (or imported), not again when its query refetches (window focus, an
+  // invalidation), which replaced the person's unsaved edits with the
+  // saved plots ("the plots jump back after a drag").
+  const appliedRef = useRef<{ src: unknown; imp: unknown } | null>(null)
+  useEffect(() => {
+    const snapshot = importedSnapshot ?? loaded.data?.state_snapshot
+    if (!snapshot) return
+    if (
+      appliedRef.current &&
+      appliedRef.current.src === loadSource &&
+      appliedRef.current.imp === importedSnapshot
+    )
+      return
+    appliedRef.current = { src: loadSource, imp: importedSnapshot }
+    const fc = snapshot.boundaries
+    const grid = snapshot.grid
+    const fd = snapshot.field_design
+
+    let nextState: PlotBoundaryEditorState = stateRef.current
+    if (fc?.features) {
+      const loadedFeatures = fc.features as GeoJSON.Feature[]
+      // Group loaded cells by blockId. Snapshots saved before multi-block
+      // support don't carry blockId — bucket those into "block-1" so the
+      // UI presents them as a single legacy block.
+      const byBlock = new Map<string, GeoJSON.Feature[]>()
+      for (const f of loadedFeatures) {
+        const props = (f.properties ?? {}) as Record<string, unknown>
+        const bid =
+          typeof props.blockId === "string" ? (props.blockId as string) : null
+        const key = bid ?? "block-1"
+        const arr = byBlock.get(key) ?? []
+        arr.push(f)
+        byBlock.set(key, arr)
+      }
+      const outers: GeoJSON.Feature[] = []
+      const taggedCells: GeoJSON.Feature[] = []
+      const blockEntries: Record<string, BlockParams> = {}
+      let blockNum = 0
+      for (const [bid, cells] of byBlock.entries()) {
+        blockNum += 1
+        const numericMatch = bid.match(/^block-(\d+)$/)
+        const n = numericMatch ? Number(numericMatch[1]) : blockNum
+        const label = `Block ${n}`
+        const outer = bboxOuterFromFeatures(cells)
+        if (outer) {
+          outer.properties = {
+            ...(outer.properties ?? {}),
+            role: "outer",
+            blockId: bid,
+            label,
+          }
+          outers.push(outer)
+        }
+        for (const c of cells) {
+          taggedCells.push({
+            ...c,
+            properties: { ...(c.properties ?? {}), blockId: bid, block: label },
+          })
+        }
+        blockEntries[bid] = {
+          label,
+          rows: grid?.rows ?? DEFAULT_BLOCK_PARAMS.rows,
+          cols: grid?.cols ?? DEFAULT_BLOCK_PARAMS.cols,
+          angle: grid?.angle_deg ?? DEFAULT_BLOCK_PARAMS.angle,
+          gapMeters: grid?.spacing_m ?? DEFAULT_BLOCK_PARAMS.gapMeters,
+          gapColMeters: grid?.spacing_col_m ?? undefined,
+          rowOffset: grid?.row_offset ?? DEFAULT_BLOCK_PARAMS.rowOffset,
+          colOffset: grid?.col_offset ?? DEFAULT_BLOCK_PARAMS.colOffset,
+          fillPattern: grid?.fill_pattern ?? DEFAULT_BLOCK_PARAMS.fillPattern,
+        }
+      }
+      nextState = {
+        ...nextState,
+        features: [...outers, ...taggedCells],
+        blocks: blockEntries,
+        activeBlockId: Object.keys(blockEntries)[0] ?? null,
+        selectedCellIds: [],
+      }
+    }
+    // Only a field design the editor itself saved (its parsed rows and the
+    // row/column transform) can be reopened in the editor. A version made
+    // elsewhere (the agent, an import) may carry just a note of where the
+    // design came from: reopening that as a design crashed the page.
+    if (
+      fd &&
+      Array.isArray((fd as { rows?: unknown }).rows) &&
+      (fd as { transform?: unknown }).transform
+    ) {
+      nextState = { ...nextState, fieldDesign: fd, gridMode: "fd" }
+    } else if (fc?.features) {
+      // The agent notes which file its boundaries came from: keep that name.
+      const source = (fd as { source?: unknown } | undefined)?.source
+      // Boundaries saved without the editor's design (by the agent, or brought
+      // from another date) whose plots carry their design labels: the design is
+      // rebuilt from those, so the Field design panel opens filled in. Unflipped:
+      // each plot keeps exactly its own labels.
+      const rebuilt = designFromFeatures(nextState.features)
+      if (rebuilt)
+        nextState = {
+          ...nextState,
+          fieldDesign: {
+            ...rebuilt,
+            ...(typeof source === "string" && source !== "mock"
+              ? { source }
+              : {}),
+          },
+          gridMode: "fd",
+        }
+    }
+    // Run the reconciled features through buildNextStateForFeatures so
+    // cellIds get stamped on loaded cells (older snapshots predate the
+    // cellId convention; without this, loaded grids would be unselectable).
+    nextState = buildNextStateForFeatures(nextState, nextState.features)
+    // Loading a version is a fresh baseline — wipe past/future so the
+    // user can't undo back to "empty" through a load, and clear any
+    // stale draft (the loaded version supersedes it).
+    history.replace(nextState)
+    history.clearHistory(nextState)
+    draftApi.discardDraft()
+    setDraftBanner({ visible: false })
+    setFitSignal((n) => n + 1) // the map zooms to what was loaded
+  }, [
+    loaded.data,
+    loadSource,
+    importedSnapshot,
+    history.replace,
+    history.clearHistory,
+    draftApi.discardDraft,
+    buildNextStateForFeatures,
+  ])
+
+  // A plot was just added: leave "Add a plot" and select it, to rename it.
+  useEffect(() => {
+    if (!addedRef.current) return
+    addedRef.current = false
+    setAddPlotState(false)
+    const added = [...history.state.features]
+      .reverse()
+      .find(
+        (f) =>
+          f.properties?.added === true &&
+          typeof f.properties?.cellId === "string",
+      )
+    if (added) {
+      history.set(
+        {
+          ...history.state,
+          selectedCellIds: [added.properties?.cellId as string],
+        },
+        { tag: "select" },
+      )
+      showSuccessToast(
+        `Plot ${String(added.properties?.plot)} added. Rename it below, or keep the name.`,
+      )
+    }
+  }, [history.state, history.set, showSuccessToast])
+
+  // Field-design mode: the grid the design needs, and the active block's
+  // drawn grid when it differs (after a swap of axes, or one drawn in Manual).
+  const fdSize = fieldDesign ? dimensionsFromDesign(fieldDesign) : null
+  const fdMismatch = (() => {
+    if (!fdSize || !activeBlockId) return null
+    // The grid's span, as the design's size is measured: a design may number
+    // its plots from above 1 (tiers 2–26, beds 20–24), and plots brought from
+    // another date keep those numbers.
+    let minR = Number.POSITIVE_INFINITY
+    let maxR = 0
+    let minC = Number.POSITIVE_INFINITY
+    let maxC = 0
+    for (const f of features) {
+      const p = (f.properties ?? {}) as Record<string, unknown>
+      if (p.role === "outer" || p.blockId !== activeBlockId || p.border)
+        continue
+      const gr = Number(p._grid_row ?? p.row)
+      const gc = Number(p._grid_col ?? p.col)
+      if (!gr || !gc) continue
+      minR = Math.min(minR, gr)
+      maxR = Math.max(maxR, gr)
+      minC = Math.min(minC, gc)
+      maxC = Math.max(maxC, gc)
+    }
+    if (!maxR || !maxC) return null
+    const r = maxR - minR + 1
+    const c = maxC - minC + 1
+    if (r === fdSize.rows && c === fdSize.cols) return null
+    return { rows: r, cols: c }
+  })()
+
+  // The arrow keys (a mount-time listener) call the latest version through this.
+  const nudgeRef = useRef<(eastM: number, northM: number) => void>(() => {})
+  nudgeRef.current = nudgeSelection
+  /** Move the selection by metres as the arrows point on screen (right, up),
+   *  whatever the view's rotation. */
+  function nudgeSelection(rightM: number, upM: number) {
+    const s = stateRef.current
+    const sel = new Set(s.selectedCellIds)
+    if (!sel.size) return
+    const [eastM, northM] = screenToGround(rightM, upM, bearingRef.current)
+    history.set(
+      {
+        ...s,
+        features: translateFeaturesMeters(s.features, sel, eastM, northM),
+      },
+      { tag: "nudge", coalesce: true },
+    )
+  }
+
+  /** Every plot removed; the outer boundaries (blocks) stay, to generate again. */
+  function clearPlotsKeepOutlines() {
+    const s = stateRef.current
+    history.set(
+      {
+        ...s,
+        features: s.features.filter((f) => f.properties?.role === "outer"),
+        selectedCellIds: [],
+      },
+      { tag: "clear-plots" },
+    )
+  }
+
+  /** Plots from a GeoJSON file made elsewhere: a new block (its outline drawn
+   *  around them), each plot keeping its properties. */
+  const geojsonInputRef = useRef<HTMLInputElement | null>(null)
+  async function importGeojson(file: File) {
+    let plots: GeoJSON.Feature<GeoJSON.Polygon>[]
+    try {
+      plots = plotsFromGeojson(await file.text())
+    } catch (e) {
+      showErrorToast(e instanceof Error ? e.message : String(e))
+      return
+    }
+    const s = stateRef.current
+    const outer = bboxOuterFromFeatures(plots)
+    if (!outer) return
+    let n = 0
+    for (const id of Object.keys(s.blocks)) {
+      const m = id.match(/^block-(\d+)$/)
+      if (m) n = Math.max(n, Number(m[1]))
+    }
+    const blockId = `block-${n + 1}`
+    const label = `Block ${n + 1}`
+    const features = [
+      ...s.features,
+      { ...outer, properties: { role: "outer", blockId, label } },
+      ...plots.map((f) => ({
+        ...f,
+        properties: { ...f.properties, blockId, block: label },
+      })),
+    ]
+    const next = buildNextStateForFeatures(
+      {
+        ...s,
+        blocks: { ...s.blocks, [blockId]: { label, ...DEFAULT_BLOCK_PARAMS } },
+        activeBlockId: blockId,
+        selectedCellIds: [],
+      },
+      features,
+    )
+    history.set(next, { tag: "import-geojson" })
+    setFitSignal((k) => k + 1)
+    showSuccessToast(
+      `Imported ${plots.length} plots from ${file.name} as ${label}. Check the fit, then save to keep them.`,
+    )
+  }
+
+  /** The plots as a GeoJSON file (no outer boundaries, no border positions). */
+  function downloadGeojson() {
+    const plots = stateRef.current.features
+      .filter(
+        (f) => f.properties?.role !== "outer" && f.properties?.border !== true,
+      )
+      .map((f) => ({
+        type: "Feature" as const,
+        geometry: f.geometry,
+        properties: Object.fromEntries(
+          Object.entries(f.properties ?? {}).filter(
+            ([k]) => !k.startsWith("_") && k !== "cellId" && k !== "blockId",
+          ),
+        ),
+      }))
+    const blob = new Blob(
+      [JSON.stringify({ type: "FeatureCollection", features: plots }, null, 1)],
+      { type: "application/geo+json" },
+    )
+    const name = `${directory
+      .replace(/^Processed\//, "")
+      .replace(/\/+$/, "")
+      .replace(/[^A-Za-z0-9._-]+/g, "_")}_plot_boundaries.geojson`
+    const a = document.createElement("a")
+    a.href = URL.createObjectURL(blob)
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+  }
+
+  function regenerateGrid() {
+    // Everything from the editor's latest state, not this render's values:
+    // a setting committed on the way to this button (blur) is already in it.
+    const st = stateRef.current
+    const blockId = st.activeBlockId
+    if (!blockId) {
+      showErrorToast("Draw a boundary first, then generate the grid.")
+      return
+    }
+    const outer = st.features.find(
+      (f): f is GeoJSON.Feature<GeoJSON.Polygon> =>
+        f.geometry?.type === "Polygon" &&
+        f.properties?.role === "outer" &&
+        f.properties?.blockId === blockId,
+    )
+    if (!outer) {
+      showErrorToast(
+        "Active block has no outer boundary — draw one or select another block.",
+      )
+      return
+    }
+    const p: BlockParams = {
+      ...DEFAULT_BLOCK_PARAMS,
+      ...(st.pendingDefaultParams ?? {}),
+      ...(st.blocks[blockId] ?? {}),
+      label: st.blocks[blockId]?.label ?? "",
+    }
+    const design =
+      st.gridMode === "fd" && st.fieldDesign ? st.fieldDesign : null
+    // Field-design mode draws the grid the design needs, with border positions
+    // around it when asked; Manual mode its own rows and columns.
+    const span = design ? dimensionsFromDesign(design) : null
+    const br = design ? Math.max(0, Math.trunc(p.borderRows ?? 0)) : 0
+    const bc = design ? Math.max(0, Math.trunc(p.borderCols ?? 0)) : 0
+    const size = span
+      ? { rows: span.rows + 2 * br, cols: span.cols + 2 * bc }
+      : { rows: p.rows, cols: p.cols }
+    const grid = generateGridFeatures(outer.geometry, {
+      rows: size.rows,
+      cols: size.cols,
+      angleDeg: p.angle,
+      gapXMeters: p.gapColMeters ?? p.gapMeters,
+      gapYMeters: p.gapMeters,
+      plotWidthMeters: p.plotWidthM,
+      plotLengthMeters: p.plotLengthM,
+      // Field-coordinate offsets + plot-number order. In field-design
+      // mode the CSV is authoritative for plot/row/col, so don't apply
+      // the manual offsets/fill-pattern (they'd double-shift the labels).
+      ...(design
+        ? {}
+        : {
+            rowOffset: p.rowOffset,
+            colOffset: p.colOffset,
+            fillPattern: p.fillPattern,
+          }),
+    })
+    let cells = grid
+    if (design && span) {
+      // Grid positions in the design's own frame (the border rows and columns
+      // fall outside it), labelled from the design. A position with no plot in
+      // the design (outside it, or a gap in it) is a border: drawn to help
+      // place the grid, never saved as a plot.
+      const shifted = grid.map((f) => {
+        const pr = (f.properties ?? {}) as Record<string, unknown>
+        const r = Number(pr.row) - br
+        const c = Number(pr.col) - bc
+        const inside = r >= 1 && r <= span.rows && c >= 1 && c <= span.cols
+        return {
+          ...f,
+          properties: {
+            ...pr,
+            row: r,
+            col: c,
+            ...(inside ? {} : { border: true }),
+          },
+        }
+      })
+      const inside = shifted.filter((f) => !f.properties.border)
+      const hasPlot = designPlotChecker(design)
+      const labeled = applyLabelsToFeatures(inside, design).map((f) =>
+        hasPlot(f)
+          ? f
+          : { ...f, properties: { ...(f.properties ?? {}), border: true } },
+      )
+      cells = [...labeled, ...shifted.filter((f) => f.properties.border)]
+    }
+    const blockLabel = st.blocks[blockId]?.label ?? blockId
+    const tagged = cells.map((f) => ({
+      ...f,
+      properties: {
+        ...(f.properties ?? {}),
+        blockId,
+        block: blockLabel,
+      },
+    }))
+    // Replace only the *active* block's existing cells. Other blocks'
+    // outers and cells are preserved so the user can iterate per-block.
+    const keep = st.features.filter((f) => {
+      const props = (f.properties ?? {}) as Record<string, unknown>
+      if (props.role === "outer") return true
+      // A plot added by hand stays: generating the grid again would lose it.
+      if (props.added === true) return true
+      return props.blockId !== blockId
+    })
+    // Run through the reconciler so each fresh cell picks up a stable
+    // `cellId` (deterministic `${blockId}:${row}:${col}` when row/col
+    // exist, UUID otherwise). Selection / group ops in the UI reference
+    // cells by cellId, so skipping the reconciler would leave the new
+    // grid unselectable.
+    const reconciled = buildNextStateForFeatures(st, [...keep, ...tagged])
+    history.set(reconciled, { tag: "grid-regenerate" })
+  }
+
+  function setFdTransform(transform: FdTransform) {
+    const s = stateRef.current
+    if (!s.fieldDesign) return
+    const next: FieldDesign = { ...s.fieldDesign, transform }
+    // Re-label the existing geometry live without redrawing. The outer
+    // boundary (role="outer") is excluded — it isn't a plot and would
+    // otherwise get spurious CSV row/col props bootstrapped onto it.
+    const plotFeatures = s.features.filter(
+      (f) => f.properties?.role !== "outer",
+    )
+    if (plotFeatures.length > 0) {
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: plotFeatures,
+      }
+      const merged = mergeLabelsIntoExisting(fc, next)
+      const outerFeatures = s.features.filter(
+        (f) => f.properties?.role === "outer",
+      )
+      const nextFeatures = [
+        ...outerFeatures,
+        ...(merged.features as GeoJSON.Feature[]),
+      ]
+      const reconciled = buildNextStateForFeatures(
+        { ...s, fieldDesign: next },
+        nextFeatures,
+      )
+      history.set(reconciled, { tag: "fd-transform" })
+    } else {
+      history.set({ ...s, fieldDesign: next }, { tag: "fd-transform" })
     }
   }
-  return { type: "FeatureCollection", features };
-}
 
-/** Derive GridOptions from a saved FeatureCollection when no grid_settings were stored. */
-function deriveGridOptionsFromGeojson(
-  fc: GeoJSON.FeatureCollection
-): Partial<GridOptions> {
-  const features = fc.features;
-  if (features.length === 0) return {};
-
-  const f11 = features.find(
-    (f) => f.properties?.row === 1 && f.properties?.column === 1
-  ) as GeoJSON.Feature<GeoJSON.Polygon> | undefined;
-  if (!f11) return {};
-
-  const ring = f11.geometry.coordinates[0];
-
-  // Edge lengths in degrees — correct even for rotated rectangles
-  const widthDeg = Math.hypot(ring[1][0] - ring[0][0], ring[1][1] - ring[0][1]);
-  const lengthDeg = Math.hypot(
-    ring[2][0] - ring[1][0],
-    ring[2][1] - ring[1][1]
-  );
-
-  // Average centroid latitude for metre conversion
-  const allPts = features.flatMap((f) =>
-    (f.geometry as GeoJSON.Polygon).coordinates[0].slice(0, -1)
-  );
-  const avgLat = allPts.reduce((s, p) => s + p[1], 0) / allPts.length;
-  const scale = degScale(avgLat);
-
-  const width = Math.round((widthDeg / scale) * 10) / 10;
-  const length = Math.round((lengthDeg / scale) * 10) / 10;
-
-  // Centre of f11
-  const cx11 = ring.slice(0, -1).reduce((s, p) => s + p[0], 0) / 4;
-  const cy11 = ring.slice(0, -1).reduce((s, p) => s + p[1], 0) / 4;
-
-  let horizontalSpacing = 0;
-  const f12 = features.find(
-    (f) => f.properties?.row === 1 && f.properties?.column === 2
-  ) as GeoJSON.Feature<GeoJSON.Polygon> | undefined;
-  if (f12) {
-    const r12 = f12.geometry.coordinates[0];
-    const cx12 = r12.slice(0, -1).reduce((s, p) => s + p[0], 0) / 4;
-    const cy12 = r12.slice(0, -1).reduce((s, p) => s + p[1], 0) / 4;
-    horizontalSpacing = Math.max(
-      0,
-      Math.round(
-        ((Math.hypot(cx12 - cx11, cy12 - cy11) - widthDeg) / scale) * 10
-      ) / 10
-    );
+  function handleFieldDesignSaved(fd: FieldDesign) {
+    setFdDialogOpen(false)
+    const s = stateRef.current
+    const dims = dimensionsFromDesign(fd)
+    // The design sets the grid's size in field-design mode; the Manual tab's
+    // rows and columns are its own and stay as they were.
+    const next: PlotBoundaryEditorState = {
+      ...s,
+      fieldDesign: fd,
+      gridMode: "fd",
+    }
+    const plotFeatures = next.features.filter(
+      (f) => f.properties?.role !== "outer",
+    )
+    if (plotFeatures.length === 0) {
+      history.set(next, { tag: "field-design" })
+      showSuccessToast(
+        `Field design loaded — ${fd.rows.length} plots (${dims.rows} × ${dims.cols}).`,
+      )
+    } else {
+      const fc: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: plotFeatures,
+      }
+      const merged = mergeLabelsIntoExisting(fc, fd)
+      const outerFeatures = next.features.filter(
+        (f) => f.properties?.role === "outer",
+      )
+      const nextFeatures = [
+        ...outerFeatures,
+        ...(merged.features as GeoJSON.Feature[]),
+      ]
+      const reconciled = buildNextStateForFeatures(next, nextFeatures)
+      history.set(reconciled, { tag: "field-design" })
+      showSuccessToast(
+        `Field design loaded — ${fd.rows.length} plots applied to existing geometry.`,
+      )
+    }
   }
 
-  let verticalSpacing = 0;
-  const f21 = features.find(
-    (f) => f.properties?.row === 2 && f.properties?.column === 1
-  ) as GeoJSON.Feature<GeoJSON.Polygon> | undefined;
-  if (f21) {
-    const r21 = f21.geometry.coordinates[0];
-    const cx21 = r21.slice(0, -1).reduce((s, p) => s + p[0], 0) / 4;
-    const cy21 = r21.slice(0, -1).reduce((s, p) => s + p[1], 0) / 4;
-    verticalSpacing = Math.max(
-      0,
-      Math.round(
-        ((Math.hypot(cx21 - cx11, cy21 - cy11) - lengthDeg) / scale) * 10
-      ) / 10
-    );
+  async function handleSaveOnly() {
+    try {
+      await saveCurrent()
+      showSuccessToast("Saved plot-geometry version")
+    } catch (err) {
+      showErrorToast(
+        err instanceof Error ? err.message : "Failed to save version",
+      )
+    }
   }
 
-  // Angle: direction of the bottom edge from horizontal
-  const angleRad = Math.atan2(ring[1][1] - ring[0][1], ring[1][0] - ring[0][0]);
-  const angle =
-    Math.round((((angleRad * 180) / Math.PI + 360) % 360) * 10) / 10;
-
-  return { width, length, horizontalSpacing, verticalSpacing, angle };
-}
-
-// ── Grid settings panel ───────────────────────────────────────────────────────
-
-interface FdTransform {
-  flipRows: boolean;
-  flipCols: boolean;
-  swapAxes: boolean;
-}
-
-/** Re-apply field-design labels onto an existing FeatureCollection without touching geometries. */
-function mergeLabelsIntoExisting(
-  existing: GeoJSON.FeatureCollection,
-  fdRows: Record<string, string>[],
-  transform: FdTransform,
-): GeoJSON.FeatureCollection {
-  // Ground pipeline features only have `plot_id` (sequential: "1","2",...), not row/column.
-  // Assign row/column from the fd before applying the transform.
-  const hasRowCol = existing.features.some(
-    (f) => f.properties?.row != null && f.properties?.column != null,
-  );
-
-  let source = existing;
-  if (!hasRowCol && fdRows.length > 0) {
-    const assigned = existing.features.map((feature, idx) => {
-      const plotId = String(feature.properties?.plot_id ?? idx + 1);
-      // Try matching by plot_id column in fd, then fall back to sequential order.
-      const fd =
-        fdRows.find((r) => r.plot_id === plotId) ??
-        fdRows.find((r) => r.plot === plotId) ??
-        fdRows[idx];
-      if (!fd) return feature;
-      const r = parseInt(fd.row) || idx + 1;
-      const c = parseInt(fd.col) || 1;
-      return { ...feature, properties: { ...feature.properties, row: r, column: c } };
-    });
-    source = { ...existing, features: assigned };
+  async function handleSaveAndComplete(
+    opts: { name?: string; version?: number } = {},
+  ): Promise<boolean> {
+    try {
+      const v = await saveCurrent(opts)
+      // Activate immediately so trait_extraction picks it up.
+      await activate.mutateAsync({ directory, version: v.version })
+      // Flip the wizard step to completed and stash the version on the
+      // step's outputs so the trait dialog can read it directly.
+      setStepState(
+        run.id,
+        "plot_boundary_prep",
+        {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          outputs: {
+            ...(run.steps.plot_boundary_prep?.outputs ?? {}),
+            activeVersion: v.version,
+            activeVersionName: v.name ?? null,
+          },
+        },
+        "person",
+      )
+      // Saved + activated — clear the in-flight draft so the recovery
+      // banner doesn't reappear on the next mount.
+      draftApi.discardDraft()
+      setDraftBanner({ visible: false })
+      showSuccessToast(`Saved + activated v${v.version}`)
+      onSaved?.()
+      return true
+    } catch (err) {
+      showErrorToast(
+        err instanceof Error ? err.message : "Failed to save and activate",
+      )
+      return false
+    }
   }
 
-  const maxRow = Math.max(...source.features.map((f) => (f.properties?.row as number) ?? 1));
-  const maxCol = Math.max(...source.features.map((f) => (f.properties?.column as number) ?? 1));
-  const newFeatures = source.features.map((feature) => {
-    let r = (feature.properties?.row as number) ?? 1;
-    let c = (feature.properties?.column as number) ?? 1;
-    if (transform.flipRows) r = maxRow - r + 1;
-    if (transform.flipCols) c = maxCol - c + 1;
-    if (transform.swapAxes) [r, c] = [c, r];
-    const fd = fdRows.find((row) => row.row === String(r) && row.col === String(c));
-    const props: Record<string, any> = { ...feature.properties, ...(fd ?? {}) };
-    if (!props.plot) props.plot = `${r}_${c}`;
-    return { ...feature, properties: props };
-  });
-  return { ...existing, features: newFeatures };
-}
-
-function GridSettingsPanel({
-  options,
-  onChange,
-  interactionMode,
-  onModeChange,
-  onSelectAll,
-  onClearSelection,
-  onDeleteSelected,
-  featureCount,
-  selectedCount,
-  hideGridInputs = false,
-  onGenerateGrid,
-  gridGenerated,
-  gridVisible,
-  onToggleGrid,
-  pipelineType: _pipelineType,
-  fdAvailable: _fdAvailable,
-  fdTransform: _fdTransform,
-  onFdTransformChange: _onFdTransformChange,
-  canUndo,
-  canRedo,
-  onUndo,
-  onRedo,
-  onClearAll,
-  onFlipVertical,
-  onFlipHorizontal,
-}: {
-  options: GridOptions;
-  onChange: (opts: GridOptions) => void;
-  interactionMode: InteractionMode;
-  onModeChange: (mode: InteractionMode) => void;
-  onSelectAll: () => void;
-  onClearSelection: () => void;
-  onDeleteSelected: () => void;
-  featureCount: number;
-  selectedCount: number;
-  hideGridInputs?: boolean;
-  onGenerateGrid?: () => void;
-  gridGenerated?: boolean;
-  gridVisible?: boolean;
-  onToggleGrid?: () => void;
-  pipelineType?: "aerial" | "ground";
-  fdAvailable?: boolean;
-  fdTransform?: FdTransform;
-  onFdTransformChange?: (t: FdTransform) => void;
-  canUndo?: boolean;
-  canRedo?: boolean;
-  onUndo?: () => void;
-  onRedo?: () => void;
-  onClearAll?: () => void;
-  onFlipVertical?: () => void;
-  onFlipHorizontal?: () => void;
-}) {
-  const [minimized, setMinimized] = useState(false);
-  const [dangerOpen, setDangerOpen] = useState(false);
-
-  function field(label: string, key: keyof GridOptions, step = 0.1) {
-    return (
-      <div>
-        <Label className="text-xs text-muted-foreground">{label}</Label>
-        <Input
-          type="number"
-          step={step}
-          value={options[key]}
-          onChange={(e) =>
-            onChange({ ...options, [key]: parseFloat(e.target.value) || 0 })
-          }
-          className="mt-0.5 h-7 text-xs"
-        />
-      </div>
-    );
+  async function saveCurrent(opts: { name?: string; version?: number } = {}) {
+    // Strip the role="outer" feature: SPLIT_ORTHOMOSAIC and EXTRACT_TRAITS
+    // treat every feature in the saved FeatureCollection as a distinct
+    // plot, so an enclosing rectangle would create a junk plot covering
+    // the whole field.
+    // Border positions (around or between the design's plots) help placing
+    // the grid; they are not plots.
+    const plotFeatures = features.filter(
+      (f) => f.properties?.role !== "outer" && f.properties?.border !== true,
+    )
+    if (plotFeatures.length === 0) {
+      throw new Error("Draw at least one polygon first")
+    }
+    const snapshot: PlotGeometryStateSnapshot = {
+      boundaries: { type: "FeatureCollection", features: plotFeatures },
+      grid: {
+        rows,
+        cols,
+        spacing_m: gapMeters,
+        spacing_col_m: gapColMeters,
+        angle_deg: angle,
+        row_offset: rowOffset,
+        col_offset: colOffset,
+        fill_pattern: fillPattern,
+      },
+      created_from: plotFeatures.length > 1 ? "grid" : "draw",
+      // Only persist the field design when the user is on the field-
+      // design tab. Otherwise toggling to Manual + saving would still
+      // carry hidden CSV state on the snapshot.
+      ...(gridMode === "fd" && fieldDesign
+        ? { field_design: fieldDesign }
+        : {}),
+    }
+    const v = await save.mutateAsync({
+      directory,
+      stateSnapshot: snapshot,
+      name: opts.name ?? (versionName.trim() || undefined),
+      ...(opts.version !== undefined ? { version: opts.version } : {}),
+    })
+    setVersionName("")
+    return v
   }
 
-  return (
-    <div className="bg-background/95 absolute bottom-4 right-4 z-[1000] w-60 rounded-lg border shadow-lg" data-onboarding="pbp-settings-panel">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-1.5">
-        <p className="text-xs font-semibold">Plot Settings</p>
-        <div className="flex items-center gap-0.5">
-          {onUndo && (
-            <button
-              onClick={onUndo}
-              disabled={!canUndo}
-              title="Undo (Ctrl+Z)"
-              data-onboarding="pbp-undo"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {onRedo && (
-            <button
-              onClick={onRedo}
-              disabled={!canRedo}
-              title="Redo (Ctrl+Y)"
-              data-onboarding="pbp-redo"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-            >
-              <Redo2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {onToggleGrid && gridGenerated && (
-            <button
-              onClick={onToggleGrid}
-              title={gridVisible ? "Hide grid" : "Show grid"}
-              data-onboarding="pbp-toggle-grid"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-            >
-              {gridVisible ? (
-                <Eye className="h-3.5 w-3.5" />
-              ) : (
-                <EyeOff className="h-3.5 w-3.5" />
-              )}
-            </button>
-          )}
-          <button
-            onClick={() => setMinimized((m) => !m)}
-            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-          >
-            {minimized ? (
-              <ChevronUp className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5" />
-            )}
-          </button>
+  // The quick save's name: the version being edited, else the plot count.
+  const quickSaveDefault =
+    (loadSource?.directory === directory &&
+      versionsForOpen.data?.find((v) => v.version === loadSource.version)
+        ?.name) ||
+    `${plotFeatureCount} plots`
+
+  // Plot length the field facts give (one number), offered for the grid.
+  const factsPlotLength = (() => {
+    const v = (fieldInfo.data?.facts as Record<string, unknown> | undefined)
+      ?.plot_length_m
+    const n =
+      typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  })()
+  const plotSizeInputs = (
+    <div className="space-y-1.5" data-testid="boundary-plot-size">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="grid-plot-width" className="mb-1.5 text-xs">
+            Plot width (m)
+          </Label>
+          <NumberField
+            id="grid-plot-width"
+            data-testid="boundary-plot-width"
+            min={0}
+            step={0.1}
+            value={activeParams.plotWidthM ?? 0}
+            onCommit={(v) => updateActiveParams({ plotWidthM: v })}
+          />
+        </div>
+        <div>
+          <Label htmlFor="grid-plot-length" className="mb-1.5 text-xs">
+            Plot length (m)
+          </Label>
+          <NumberField
+            id="grid-plot-length"
+            data-testid="boundary-plot-length"
+            min={0}
+            step={0.1}
+            value={activeParams.plotLengthM ?? 0}
+            onCommit={(v) => updateActiveParams({ plotLengthM: v })}
+          />
         </div>
       </div>
-
-      {!minimized && (
-        <div className="space-y-2 p-3">
-          {!hideGridInputs && (
-            <div className="grid grid-cols-2 gap-1.5" data-onboarding="pbp-grid-inputs">
-              {field("Width (m)", "width")}
-              {field("Length (m)", "length")}
-              {field("Rows", "rows", 1)}
-              {field("Columns", "columns", 1)}
-              {field("V. Spacing", "verticalSpacing")}
-              {field("H. Spacing", "horizontalSpacing")}
-            </div>
-          )}
-          <div data-onboarding="pbp-angle">
-            <Label className="text-xs text-muted-foreground">Angle (°)</Label>
-            <div className="mt-0.5 flex items-center gap-1.5">
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                step={0.5}
-                value={options.angle}
-                onChange={(e) =>
-                  onChange({ ...options, angle: parseFloat(e.target.value) })
-                }
-                className="flex-1"
-              />
-              <Input
-                type="number"
-                min={-180}
-                max={180}
-                step={0.5}
-                value={options.angle}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  if (!isNaN(v)) onChange({ ...options, angle: Math.max(-180, Math.min(180, v)) });
-                }}
-                className="h-7 w-14 text-xs"
-              />
-            </div>
-          </div>
-
-          {/* TODO: Label orientation — WILL NEED TO REFINE LATER */}
-          {/* {pipelineType === "ground" && fdAvailable && fdTransform && onFdTransformChange && (
-            <div>
-              <Label className="text-xs text-muted-foreground">Label Orientation</Label>
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                {(
-                  [
-                    { key: "flipRows", label: "Flip Rows" },
-                    { key: "flipCols", label: "Flip Cols" },
-                    { key: "swapAxes", label: "Swap" },
-                  ] as { key: keyof FdTransform; label: string }[]
-                ).map(({ key, label }) => (
-                  <label key={key} className="flex cursor-pointer items-center gap-1 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={fdTransform[key]}
-                      onChange={(e) =>
-                        onFdTransformChange({ ...fdTransform, [key]: e.target.checked })
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )} */}
-
-          {/* Mode buttons */}
-          <div className="grid grid-cols-2 gap-1.5" data-onboarding="pbp-mode-buttons">
-            <Button
-              size="sm"
-              variant={interactionMode === "select" ? "default" : "outline"}
-              className="h-7 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
-              onClick={() => onModeChange("select")}
+      <p className="text-muted-foreground text-[11px]">
+        Width across the columns, length along the rows. 0: plots fill the outer
+        boundary; with a size, plots are exactly that size, centred in it.
+        {factsPlotLength && !activeParams.plotLengthM ? (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="text-primary underline underline-offset-2"
+              data-testid="boundary-plot-length-from-facts"
+              onClick={() =>
+                updateActiveParams({ plotLengthM: factsPlotLength })
+              }
             >
-              <MousePointer className="mr-1 h-3 w-3" />
-              Select
-            </Button>
-            <Button
-              size="sm"
-              variant={interactionMode === "move" ? "default" : "outline"}
-              className="h-7 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
-              onClick={() => onModeChange("move")}
-            >
-              <Move className="mr-1 h-3 w-3" />
-              Move
-            </Button>
-          </div>
+              Use the field facts' length ({factsPlotLength} m)
+            </button>
+          </>
+        ) : null}
+      </p>
+    </div>
+  )
 
-          {/* Flip buttons — shown when a grid exists */}
-          {featureCount > 0 && (onFlipVertical || onFlipHorizontal) && (
-            <div className="grid grid-cols-2 gap-1.5">
-              {onFlipVertical && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  title="Flip across horizontal axis (top ↔ bottom)"
-                  onClick={onFlipVertical}
-                >
-                  Flip ↕
-                </Button>
-              )}
-              {onFlipHorizontal && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  title="Flip across vertical axis (left ↔ right)"
-                  onClick={onFlipHorizontal}
-                >
-                  Flip ↔
-                </Button>
-              )}
-            </div>
-          )}
-
-          {/* Select all / clear / delete — shown in select mode when plots exist */}
-          {interactionMode === "select" && featureCount > 0 && (
-            <div className="flex flex-col gap-1.5" data-onboarding="pbp-select-tools">
-              <div className="grid grid-cols-2 gap-1.5">
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onSelectAll}>
-                  All
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  onClick={onClearSelection}
-                  disabled={selectedCount === 0}
-                >
-                  Clear
-                </Button>
-              </div>
-              {selectedCount > 0 && (
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="h-7 w-full text-xs"
-                  onClick={onDeleteSelected}
-                >
-                  Delete {selectedCount} plot{selectedCount !== 1 ? "s" : ""}
-                </Button>
-              )}
-            </div>
-          )}
-
-          {onGenerateGrid && (
-            <div className="flex items-center gap-1.5" data-onboarding="pbp-generate-grid">
+  return (
+    <div className="space-y-4">
+      {draftBanner.visible ? (
+        <Card
+          className="border-amber-300 bg-amber-50/40 dark:bg-amber-950/20"
+          data-testid="draft-banner"
+        >
+          <CardContent className="flex flex-wrap items-center gap-3 py-3">
+            <span className="text-sm">
+              Restored unsaved changes
+              {draftBanner.lastModifiedAt ? (
+                <>
+                  {" "}
+                  from{" "}
+                  <span className="font-medium">
+                    {new Date(draftBanner.lastModifiedAt).toLocaleString()}
+                  </span>
+                </>
+              ) : null}
+              . Save now to keep them, or discard to return to the active
+              version.
+            </span>
+            <div className="ml-auto flex gap-2">
               <Button
                 size="sm"
-                className="h-7 flex-1 text-xs"
-                variant={gridGenerated ? "outline" : "default"}
-                onClick={onGenerateGrid}
+                variant="outline"
+                data-testid="draft-discard"
+                onClick={() => {
+                  draftApi.discardDraft()
+                  history.replace(INITIAL_EDITOR_STATE)
+                  history.clearHistory(INITIAL_EDITOR_STATE)
+                  setDraftBanner({ visible: false })
+                }}
               >
-                {gridGenerated ? "Regenerate Grid" : "Generate Grid"}
+                Discard
               </Button>
-              {featureCount > 0 && (
-                <span className="text-muted-foreground text-xs whitespace-nowrap">
-                  {featureCount} plots
+              <Button
+                size="sm"
+                variant="ghost"
+                data-testid="draft-dismiss"
+                onClick={() => setDraftBanner({ visible: false })}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+      {/* The map (its grid settings under it) and, beside it, versions and
+          saving: hidable for a full-width map. */}
+      <div
+        className={`grid grid-cols-1 items-start gap-4 ${panelOpen ? "lg:grid-cols-[minmax(0,1fr)_22rem]" : ""}`}
+      >
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+            <div className="flex min-w-0 items-start gap-2">
+              {onBack && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="-ml-2 size-8 shrink-0"
+                  aria-label="Back to run"
+                  data-testid="boundary-back"
+                  onClick={onBack}
+                >
+                  <ArrowLeft className="size-4" />
+                </Button>
+              )}
+              <div className="min-w-0">
+                <CardTitle className="text-base" data-testid="boundary-title">
+                  {title}
+                </CardTitle>
+                <CardDescription>
+                  Draw or import the plots on the orthomosaic, adjust them, then
+                  save a version. Help (?) at the top right shows how.
+                </CardDescription>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => togglePanel()}
+              data-testid="boundary-panel-toggle"
+              title={
+                panelOpen
+                  ? "Hide versions and saving so the map uses the full width"
+                  : "Show versions and saving beside the map"
+              }
+            >
+              {panelOpen ? (
+                <>
+                  <PanelRightClose className="mr-1.5 h-4 w-4" /> Hide version
+                  menu
+                </>
+              ) : (
+                <>
+                  <PanelRightOpen className="mr-1.5 h-4 w-4" /> Version menu
+                </>
+              )}
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div
+              className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs"
+              data-testid="boundary-map-toolbar"
+            >
+              <Button
+                size="sm"
+                variant={boxSelect ? "default" : "outline"}
+                className="h-7"
+                data-testid="boundary-box-select"
+                title="Drag a box on the map to select the plots inside it (Shift: add to the selection); then move or rotate them"
+                onClick={() => setBoxSelect((v) => !v)}
+              >
+                {/* About the same width either way: the toolbar does not re-wrap. */}
+                {boxSelect ? "Stop selecting" : "Select an area"}
+              </Button>
+              <Button
+                size="sm"
+                variant={addPlot ? "default" : "outline"}
+                className="h-7"
+                data-testid="boundary-add-plot"
+                disabled={!activeBlockId}
+                title={
+                  activeBlockId
+                    ? "Draw one more plot (rectangle or polygon tool, top left of the map); it joins the selected block"
+                    : "Draw or select an outer boundary first: an added plot joins its block"
+                }
+                onClick={() => setAddPlot(!addPlot)}
+              >
+                {addPlot ? "Draw the plot… (click to cancel)" : "Add a plot"}
+              </Button>
+              <span className="flex items-center gap-1.5">
+                <Checkbox
+                  id="boundary-show-plots"
+                  checked={showPlots}
+                  onCheckedChange={(v) => setShowPlots(v === true)}
+                  data-testid="boundary-show-plots"
+                />
+                <label htmlFor="boundary-show-plots">Plots</label>
+              </span>
+              <label className="flex items-center gap-1.5">
+                Opacity
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={plotOpacity}
+                  disabled={!showPlots}
+                  onChange={(e) => setPlotOpacity(Number(e.target.value))}
+                  className="w-24"
+                  aria-label="Plot overlay opacity"
+                  data-testid="boundary-plot-opacity"
+                />
+              </label>
+              <span
+                className="flex items-center gap-1"
+                data-testid="boundary-view-rotation"
+                title="Turn the view (also Shift + drag on the map). The compass on the map shows north; click it to go back to north up."
+              >
+                View
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  aria-label="Turn the view 15° left"
+                  onClick={() => setBearing((b) => normBearing(b - 15))}
+                >
+                  ⟲
+                </Button>
+                <NumberField
+                  className="h-7 w-16 text-xs"
+                  allowNegative
+                  step={1}
+                  value={Math.round(bearing)}
+                  onCommit={(v) => setBearing(normBearing(v))}
+                  aria-label="View rotation in degrees"
+                  data-testid="boundary-bearing"
+                />
+                °
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  aria-label="Turn the view 15° right"
+                  onClick={() => setBearing((b) => normBearing(b + 15))}
+                >
+                  ⟳
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  data-testid="boundary-bearing-align"
+                  disabled={plotsAngle === null}
+                  title="Turn the view so the plots' rows run across the screen"
+                  onClick={() =>
+                    plotsAngle !== null && setBearing(normBearing(plotsAngle))
+                  }
+                >
+                  Align with plots
+                </Button>
+                {/* Always there (greyed out when north is up), so turning the
+                    view does not change the toolbar's width and wrap it. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  data-testid="boundary-bearing-north"
+                  disabled={bearing === 0}
+                  onClick={() => setBearing(0)}
+                >
+                  North up
+                </Button>
+              </span>
+              <Button
+                size="sm"
+                variant={fieldMapOpen ? "default" : "outline"}
+                className="h-7"
+                data-testid="boundary-field-map"
+                title="The field design laid out by rows and columns, or a field map sheet, to look at while placing plots (e.g. how many border plots)"
+                onClick={() => setFieldMapOpen((v) => !v)}
+              >
+                Field map
+              </Button>
+              {features.some((f) => f.properties?.border === true) && (
+                <span className="flex items-center gap-1.5">
+                  <Checkbox
+                    id="boundary-show-borders"
+                    checked={showBorders}
+                    onCheckedChange={(v) => setShowBorders(v === true)}
+                    data-testid="boundary-show-borders"
+                  />
+                  <label htmlFor="boundary-show-borders">
+                    Border positions (not saved)
+                  </label>
                 </span>
               )}
             </div>
-          )}
-          {!onGenerateGrid && featureCount > 0 && (
-            <p className="text-muted-foreground text-center text-xs">
-              {featureCount} plots
-              {selectedCount > 0 && ` · ${selectedCount} selected`}
-            </p>
-          )}
+            {/* The map's own height: its wrapper is h-full, which in this card
+                (as tall as the settings beside it) pushed everything after the
+                map out below the card. */}
+            <div className="relative h-[min(70vh,680px)]">
+              <QuickSave
+                defaultName={quickSaveDefault}
+                versions={versionsForOpen.data ?? []}
+                busy={save.isPending || activate.isPending}
+                disabled={plotFeatureCount === 0}
+                onSave={(opts) => handleSaveAndComplete(opts)}
+              />
+              <BoundaryMap
+                className="isolate h-full w-full rounded-md border"
+                bearing={bearing}
+                onBearingChange={setBearing}
+                showPlots={showPlots}
+                plotOpacity={plotOpacity}
+                hideBorders={!showBorders}
+                boxSelect={boxSelect}
+                onBoxSelect={(ids, add) => {
+                  history.set(
+                    {
+                      ...stateRef.current,
+                      selectedCellIds: add
+                        ? [
+                            ...new Set([
+                              ...stateRef.current.selectedCellIds,
+                              ...ids,
+                            ]),
+                          ]
+                        : ids,
+                    },
+                    { tag: "select" },
+                  )
+                  // Plots selected: the next drag moves them (as the bar
+                  // under the map says), not another box. Shift keeps
+                  // selecting, to add more areas.
+                  if (ids.length && !add) setBoxSelect(false)
+                }}
+                features={features}
+                fitSignal={fitSignal}
+                onFeaturesChange={setFeatures}
+                orthoTileUrl={multi ? undefined : orthoTileUrl}
+                orthoLayers={orthoLayers}
+                orthoBounds={orthoBounds}
+                selectedBlockId={activeBlockId}
+                onSelectBlock={(id) =>
+                  history.set(
+                    {
+                      ...stateRef.current,
+                      activeBlockId: id,
+                      selectedCellIds: [],
+                    },
+                    { tag: "select-block" },
+                  )
+                }
+                selectedCellIds={history.state.selectedCellIds}
+                onCellSelect={(id, mode) =>
+                  history.set(
+                    {
+                      ...stateRef.current,
+                      selectedCellIds: nextSelection(
+                        stateRef.current.selectedCellIds,
+                        id,
+                        mode,
+                      ),
+                    },
+                    { tag: "select", coalesce: true },
+                  )
+                }
+                overlays={placement.overlays}
+                onOverlayClick={(bed) => placement.setSelectedBed(bed)}
+                onSelectionClear={() =>
+                  history.set(
+                    { ...stateRef.current, selectedCellIds: [] },
+                    { tag: "select", coalesce: true },
+                  )
+                }
+              />
+            </div>
+            {fieldMapOpen && (
+              <div className="mt-3 rounded-md border p-3">
+                <FieldMapPanel fieldDesign={fieldDesign} />
+              </div>
+            )}
+            {history.state.selectedCellIds.length > 0 ? (
+              <div className="mt-3">
+                <SelectionActionBar
+                  count={history.state.selectedCellIds.length}
+                  selectingArea={boxSelect}
+                  onStopSelectingArea={() => setBoxSelect(false)}
+                  onNudge={nudgeSelection}
+                  plotName={
+                    history.state.selectedCellIds.length === 1
+                      ? (() => {
+                          const f = features.find(
+                            (x) =>
+                              x.properties?.cellId ===
+                              history.state.selectedCellIds[0],
+                          )
+                          return f
+                            ? String(f.properties?.plot ?? "")
+                            : undefined
+                        })()
+                      : undefined
+                  }
+                  onRenamePlot={(name) => {
+                    const s = stateRef.current
+                    const id = s.selectedCellIds[0]
+                    history.set(
+                      {
+                        ...s,
+                        features: s.features.map((f) =>
+                          f.properties?.cellId === id
+                            ? {
+                                ...f,
+                                properties: { ...f.properties, plot: name },
+                              }
+                            : f,
+                        ),
+                      },
+                      { tag: "rename" },
+                    )
+                  }}
+                  nudgeStep={nudgeStep}
+                  onNudgeStepChange={setNudgeStep}
+                  hasActiveBlock={activeBlockId != null}
+                  onRotate={(deg) => {
+                    const sel = new Set(stateRef.current.selectedCellIds)
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        features: rotateFeatures(
+                          stateRef.current.features,
+                          sel,
+                          deg,
+                        ),
+                      },
+                      { tag: "rotate" },
+                    )
+                  }}
+                  onFlip={(axis) => {
+                    const sel = new Set(stateRef.current.selectedCellIds)
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        features: mirrorFeatures(
+                          stateRef.current.features,
+                          sel,
+                          axis,
+                        ),
+                      },
+                      { tag: "flip" },
+                    )
+                  }}
+                  onDelete={() => {
+                    const sel = new Set(stateRef.current.selectedCellIds)
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        features: stateRef.current.features.filter((f) => {
+                          const id = (f.properties as Record<string, unknown>)
+                            ?.cellId
+                          return typeof id !== "string" || !sel.has(id)
+                        }),
+                        selectedCellIds: [],
+                      },
+                      { tag: "delete" },
+                    )
+                  }}
+                  onClear={() =>
+                    history.set(
+                      { ...stateRef.current, selectedCellIds: [] },
+                      { tag: "select" },
+                    )
+                  }
+                  onSelectAllInBlock={() => {
+                    const s = stateRef.current
+                    if (!s.activeBlockId) return
+                    const ids = s.features
+                      .filter(
+                        (f) =>
+                          (f.properties as Record<string, unknown>)?.blockId ===
+                            s.activeBlockId &&
+                          (f.properties as Record<string, unknown>)?.role !==
+                            "outer",
+                      )
+                      .map(
+                        (f) =>
+                          (f.properties as Record<string, unknown>)?.cellId as
+                            | string
+                            | undefined,
+                      )
+                      .filter((id): id is string => typeof id === "string")
+                    history.set(
+                      { ...s, selectedCellIds: ids },
+                      { tag: "select" },
+                    )
+                  }}
+                  onSelectAll={() => selectAllRef.current()}
+                />
+              </div>
+            ) : null}
+            <div className="mt-2 flex items-center justify-between text-xs">
+              {multi && (
+                <p
+                  className="text-muted-foreground"
+                  data-testid="boundary-orthos"
+                  title="Where the flights overlap, each point shows the orthomosaic whose centre it is nearer; plot images and traits are taken from the same one."
+                >
+                  {folderOrthoList.length} orthomosaics:{" "}
+                  {orthoLabels.join(", ")} · each shown where it is nearest its
+                  centre
+                </p>
+              )}
+              <p className="text-muted-foreground">
+                {plotFeatureCount} plot{plotFeatureCount === 1 ? "" : "s"}{" "}
+                {borderCount
+                  ? `(and ${borderCount} border positions, not saved) `
+                  : ""}
+                across {Object.keys(blocks).length} block
+                {Object.keys(blocks).length === 1 ? "" : "s"}
+              </p>
+              {s3Url && tilejsonQuery.isError && (
+                <p className="text-muted-foreground italic">
+                  Couldn't read ortho metadata — drawing on basemap.
+                </p>
+              )}
+            </div>
+            {/* The grid settings: part of the map, under it, at its width. */}
+            <section
+              className="mt-4 border-t pt-4"
+              data-testid="boundary-grid-settings"
+            >
+              <CardHeader className="px-0">
+                <CardTitle className="text-base">
+                  Grid
+                  {activeBlockId && blocks[activeBlockId] ? (
+                    <span
+                      className="ml-2 text-sm font-normal text-muted-foreground"
+                      data-testid="active-block-label"
+                    >
+                      — {blocks[activeBlockId].label} active
+                    </span>
+                  ) : null}
+                </CardTitle>
+                <CardDescription>
+                  {Object.keys(blocks).length > 1
+                    ? "Click a boundary on the map to switch which block the grid panel targets."
+                    : "Generate plot rectangles inscribed in the outer polygon."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {Object.keys(blocks).length > 1 ? (
+                  <div
+                    className="flex flex-wrap gap-1.5"
+                    data-testid="block-switcher"
+                  >
+                    {Object.entries(blocks).map(([id, p]) => (
+                      <Button
+                        key={id}
+                        size="sm"
+                        variant={id === activeBlockId ? "default" : "outline"}
+                        onClick={() =>
+                          history.set(
+                            {
+                              ...stateRef.current,
+                              activeBlockId: id,
+                              selectedCellIds: [],
+                            },
+                            { tag: "select-block" },
+                          )
+                        }
+                        data-testid={`block-switch-${id}`}
+                      >
+                        {p.label}
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
+                <Tabs
+                  value={gridMode}
+                  onValueChange={(v) =>
+                    history.set(
+                      {
+                        ...stateRef.current,
+                        gridMode: v as "manual" | "fd",
+                      },
+                      { tag: "grid-mode" },
+                    )
+                  }
+                >
+                  <TabsList className="w-full">
+                    <TabsTrigger value="manual" data-testid="grid-mode-manual">
+                      Manual
+                    </TabsTrigger>
+                    <TabsTrigger value="fd" data-testid="grid-mode-fd">
+                      Field design CSV
+                    </TabsTrigger>
+                  </TabsList>
 
-          {/* Danger zone — collapsible */}
-          {onClearAll && featureCount > 0 && (
-            <div className="border-t pt-2">
-              <button
-                onClick={() => setDangerOpen((v) => !v)}
-                className="flex w-full items-center justify-between text-xs text-muted-foreground hover:text-foreground"
-              >
-                <span>Danger zone</span>
-                {dangerOpen ? (
-                  <ChevronUp className="h-3 w-3" />
-                ) : (
-                  <ChevronDown className="h-3 w-3" />
-                )}
-              </button>
-              {dangerOpen && (
-                <div className="mt-1.5">
+                  <TabsContent
+                    value="manual"
+                    className="grid gap-3 pt-3 lg:grid-cols-2 lg:gap-x-6 [&>*]:min-w-0"
+                  >
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label htmlFor="grid-rows" className="mb-1.5 text-xs">
+                          Rows
+                        </Label>
+                        <NumberField
+                          id="grid-rows"
+                          data-testid="boundary-rows"
+                          integer
+                          min={1}
+                          step={1}
+                          value={rows}
+                          onCommit={setRows}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-cols" className="mb-1.5 text-xs">
+                          Cols
+                        </Label>
+                        <NumberField
+                          id="grid-cols"
+                          data-testid="boundary-cols"
+                          integer
+                          min={1}
+                          step={1}
+                          value={cols}
+                          onCommit={setCols}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-angle" className="mb-1.5 text-xs">
+                          Angle (°)
+                        </Label>
+                        <NumberField
+                          id="grid-angle"
+                          data-testid="boundary-angle"
+                          allowNegative
+                          step={1}
+                          value={angle}
+                          onCommit={setAngle}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-gap" className="mb-1.5 text-xs">
+                          Gap between rows (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap"
+                          data-testid="boundary-gap"
+                          min={0}
+                          step={0.1}
+                          value={gapMeters}
+                          onCommit={setGapMeters}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-gap-cols"
+                          className="mb-1.5 text-xs"
+                        >
+                          Gap between columns (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap-cols"
+                          data-testid="boundary-gap-cols"
+                          min={0}
+                          step={0.1}
+                          value={gapColMeters}
+                          onCommit={setGapColMeters}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-row-offset"
+                          className="mb-1.5 text-xs"
+                        >
+                          Row offset
+                        </Label>
+                        <NumberField
+                          id="grid-row-offset"
+                          data-testid="boundary-row-offset"
+                          integer
+                          min={0}
+                          step={1}
+                          value={rowOffset}
+                          onCommit={setRowOffset}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-col-offset"
+                          className="mb-1.5 text-xs"
+                        >
+                          Col offset
+                        </Label>
+                        <NumberField
+                          id="grid-col-offset"
+                          data-testid="boundary-col-offset"
+                          integer
+                          min={0}
+                          step={1}
+                          value={colOffset}
+                          onCommit={setColOffset}
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Label
+                          htmlFor="grid-fill-pattern"
+                          className="mb-1.5 text-xs"
+                        >
+                          Plot numbering
+                        </Label>
+                        <Select
+                          value={fillPattern}
+                          onValueChange={(v) =>
+                            setFillPattern(v as FillPattern)
+                          }
+                        >
+                          <SelectTrigger
+                            id="grid-fill-pattern"
+                            data-testid="boundary-fill-pattern"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="row-major">
+                              Row by row (1,2,3 / 4,5,6)
+                            </SelectItem>
+                            <SelectItem value="snake">
+                              Snake (1,2,3 / 6,5,4)
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Offsets place this block within the full field (0 = field
+                      origin). Irregular numbering that fits neither pattern →
+                      use a field-design CSV.
+                    </p>
+                    {plotSizeInputs}
+                  </TabsContent>
+
+                  <TabsContent
+                    value="fd"
+                    className="grid gap-3 pt-3 lg:grid-cols-2 lg:gap-x-6 [&>*]:min-w-0"
+                  >
+                    <div
+                      className="rounded border bg-muted/30 p-2 text-xs"
+                      data-testid="field-design-banner"
+                    >
+                      {fieldDesign ? (
+                        <>
+                          <p className="mb-1.5">
+                            Field design
+                            {fieldDesign.source ? (
+                              <>
+                                {" "}
+                                <strong data-testid="field-design-source">
+                                  {fieldDesign.source}
+                                </strong>
+                              </>
+                            ) : null}
+                            : <strong>{fieldDesign.rows.length}</strong> plots
+                            on a {fdSize?.rows} × {fdSize?.cols} grid (rows ×
+                            columns, from the design)
+                          </p>
+                          {fdMismatch && (
+                            <p
+                              className="mb-1.5 text-amber-600"
+                              data-testid="field-design-mismatch"
+                            >
+                              The drawn grid is {fdMismatch.rows} ×{" "}
+                              {fdMismatch.cols}: Generate plot grid again to
+                              match the design.
+                            </p>
+                          )}
+                          <div className="mb-2 flex items-center gap-3">
+                            <Label
+                              htmlFor="fd-flip-rows"
+                              className="flex items-center gap-1.5 font-normal"
+                            >
+                              <Checkbox
+                                id="fd-flip-rows"
+                                data-testid="fd-flip-rows"
+                                checked={fieldDesign.transform.flipRows}
+                                onCheckedChange={(v) =>
+                                  setFdTransform({
+                                    ...fieldDesign.transform,
+                                    flipRows: v === true,
+                                  })
+                                }
+                              />
+                              Flip rows
+                            </Label>
+                            <Label
+                              htmlFor="fd-flip-cols"
+                              className="flex items-center gap-1.5 font-normal"
+                            >
+                              <Checkbox
+                                id="fd-flip-cols"
+                                data-testid="fd-flip-cols"
+                                checked={fieldDesign.transform.flipCols}
+                                onCheckedChange={(v) =>
+                                  setFdTransform({
+                                    ...fieldDesign.transform,
+                                    flipCols: v === true,
+                                  })
+                                }
+                              />
+                              Flip cols
+                            </Label>
+                            <Label
+                              htmlFor="fd-swap-axes"
+                              className="flex items-center gap-1.5 font-normal"
+                            >
+                              <Checkbox
+                                id="fd-swap-axes"
+                                data-testid="fd-swap-axes"
+                                checked={fieldDesign.transform.swapAxes}
+                                onCheckedChange={(v) =>
+                                  setFdTransform({
+                                    ...fieldDesign.transform,
+                                    swapAxes: v === true,
+                                  })
+                                }
+                              />
+                              Swap axes
+                            </Label>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            data-testid="field-design-replace"
+                            onClick={() => {
+                              setFdDialogStart("upload")
+                              setFdDialogOpen(true)
+                            }}
+                          >
+                            Replace field design
+                          </Button>
+                          {fieldPreset &&
+                          fieldPreset.name !== fieldDesign.source ? (
+                            // The field facts name another design (saved there since).
+                            <p
+                              className="mt-1.5 text-sky-700 dark:text-sky-400"
+                              data-testid="field-design-facts-differ"
+                            >
+                              The field facts give{" "}
+                              <strong>{fieldPreset.name}</strong>.{" "}
+                              <button
+                                type="button"
+                                className="underline underline-offset-2"
+                                onClick={() => {
+                                  setFdDialogStart("preset")
+                                  setFdDialogOpen(true)
+                                }}
+                              >
+                                Use it instead
+                              </button>
+                            </p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          {fieldPreset ? (
+                            <p
+                              className="mb-1.5"
+                              data-testid="field-design-known"
+                            >
+                              This field's design is{" "}
+                              <strong>{fieldPreset.name}</strong>
+                              {fieldPreset.described
+                                ? ` (${fieldPreset.described})`
+                                : ""}
+                              . Use it, then draw the outer boundary around the
+                              design's plots and generate the grid.
+                            </p>
+                          ) : (
+                            <p className="text-muted-foreground mb-1.5">
+                              Upload a CSV mapping (row, col) coordinates to
+                              plot metadata. Rows/cols come from the design.
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant={fieldPreset ? "default" : "outline"}
+                              data-testid="field-design-upload"
+                              onClick={() => {
+                                setFdDialogStart(
+                                  fieldPreset ? "preset" : "upload",
+                                )
+                                setFdDialogOpen(true)
+                              }}
+                            >
+                              {fieldPreset
+                                ? `Use ${fieldPreset.name}`
+                                : "Upload field design"}
+                            </Button>
+                            {fieldPreset && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setFdDialogStart("upload")
+                                  setFdDialogOpen(true)
+                                }}
+                              >
+                                Another file
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              data-testid="field-design-from-map"
+                              title="A sheet with the plot numbers laid out as the plots lie in the field: click two opposite corners of this field"
+                              onClick={() => {
+                                setFdDialogStart("fieldmap")
+                                setFdDialogOpen(true)
+                              }}
+                            >
+                              From a field map sheet
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label
+                          htmlFor="grid-angle-fd"
+                          className="mb-1.5 text-xs"
+                        >
+                          Angle (°)
+                        </Label>
+                        <NumberField
+                          id="grid-angle-fd"
+                          data-testid="boundary-angle-fd"
+                          allowNegative
+                          step={1}
+                          value={angle}
+                          onCommit={setAngle}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="grid-gap-fd" className="mb-1.5 text-xs">
+                          Gap between rows (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap-fd"
+                          data-testid="boundary-gap-fd"
+                          min={0}
+                          step={0.1}
+                          value={gapMeters}
+                          onCommit={setGapMeters}
+                        />
+                      </div>
+                      <div>
+                        <Label
+                          htmlFor="grid-gap-cols-fd"
+                          className="mb-1.5 text-xs"
+                        >
+                          Gap between columns (m)
+                        </Label>
+                        <NumberField
+                          id="grid-gap-cols-fd"
+                          data-testid="boundary-gap-fd-cols"
+                          min={0}
+                          step={0.1}
+                          value={gapColMeters}
+                          onCommit={setGapColMeters}
+                        />
+                      </div>
+                    </div>
+                    {plotSizeInputs}
+                    <div className="space-y-1.5" data-testid="boundary-borders">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label
+                            htmlFor="grid-border-rows"
+                            className="mb-1.5 text-xs"
+                          >
+                            Border rows (each end)
+                          </Label>
+                          <NumberField
+                            id="grid-border-rows"
+                            data-testid="boundary-border-rows"
+                            min={0}
+                            step={1}
+                            value={activeParams.borderRows ?? 0}
+                            onCommit={(v) =>
+                              updateActiveParams({
+                                borderRows: Math.max(0, Math.trunc(v)),
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label
+                            htmlFor="grid-border-cols"
+                            className="mb-1.5 text-xs"
+                          >
+                            Border columns (each side)
+                          </Label>
+                          <NumberField
+                            id="grid-border-cols"
+                            data-testid="boundary-border-cols"
+                            min={0}
+                            step={1}
+                            value={activeParams.borderCols ?? 0}
+                            onCommit={(v) =>
+                              updateActiveParams({
+                                borderCols: Math.max(0, Math.trunc(v)),
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                      <p className="text-muted-foreground text-[11px]">
+                        Positions around the design, and gaps in it, are drawn
+                        as dashed border plots to help place the grid (the field
+                        map shows how many); they are not saved. Hide them with
+                        "Border positions" above the map.
+                      </p>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+
+                {features.length === 0 ? (
+                  <p className="text-amber-700 dark:text-amber-400 text-xs">
+                    Draw an outer boundary on the map
+                    {orthoBounds ? " (or use the ortho's extent)" : ""}, then
+                    click <strong>Generate plot grid</strong>.
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {orthoBounds && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-testid="boundary-auto-from-ortho"
+                      title="Outer boundary = the orthomosaic's extent, inset 2.5% to trim its ragged edge"
+                      onClick={() =>
+                        setFeatures([
+                          ...stateRef.current.features,
+                          outerFromOrthoBounds(orthoBounds),
+                        ])
+                      }
+                    >
+                      Boundary from ortho extent
+                    </Button>
+                  )}
                   <Button
                     size="sm"
-                    variant="destructive"
-                    data-onboarding="pbp-clear-all"
-                    className="h-7 w-full text-xs"
-                    onClick={onClearAll}
+                    variant="outline"
+                    onClick={regenerateGrid}
+                    disabled={
+                      !activeBlockId || (gridMode === "fd" && !fieldDesign)
+                    }
                   >
-                    Clear All Plots
+                    Generate plot grid
                   </Button>
-                  <p className="mt-1 text-center text-[10px] text-muted-foreground">
-                    Removes all plots — draw a new boundary to start fresh.
-                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-clear-plots"
+                    title="Remove the plots; the outer boundaries stay, to generate the grid again"
+                    onClick={clearPlotsKeepOutlines}
+                    disabled={
+                      !features.some((f) => f.properties?.role !== "outer")
+                    }
+                  >
+                    Clear plots (keep outlines)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-import-geojson"
+                    title="Plot boundaries from a GeoJSON file made elsewhere (QGIS, another tool): added as a new block"
+                    onClick={() => geojsonInputRef.current?.click()}
+                  >
+                    Import GeoJSON…
+                  </Button>
+                  <input
+                    ref={geojsonInputRef}
+                    type="file"
+                    accept=".geojson,.json,application/geo+json,application/json"
+                    className="hidden"
+                    data-testid="boundary-import-geojson-file"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ""
+                      if (f) void importGeojson(f)
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-download-geojson"
+                    title="The plots as a GeoJSON file (no outer boundaries or border positions)"
+                    onClick={downloadGeojson}
+                    disabled={
+                      !features.some(
+                        (f) =>
+                          f.properties?.role !== "outer" &&
+                          f.properties?.border !== true,
+                      )
+                    }
+                  >
+                    Download GeoJSON
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="boundary-clear-all"
+                    onClick={() => setClearConfirmOpen(true)}
+                    disabled={features.length === 0}
+                  >
+                    Clear all polygons
+                  </Button>
                 </div>
-              )}
-            </div>
+              </CardContent>
+            </section>
+          </CardContent>
+        </Card>
+
+        {/* Kept mounted when hidden so the panel's settings survive. */}
+        <div className={panelOpen ? "space-y-4" : "hidden"}>
+          {scope && placement.version && (
+            <MarkedFromDroneNote
+              scope={scope}
+              loaded={loadSource}
+              onUse={(src) => {
+                setImportedSnapshot(null)
+                setLoadSource(src)
+                showSuccessToast(
+                  "Loaded the drone plot boundaries. Save them here, then associate.",
+                )
+              }}
+            />
           )}
+          <StitchPlacementPanel state={placement} />
+          <Card data-testid="boundary-versions-save">
+            <CardHeader>
+              <CardTitle className="text-base">Versions &amp; saving</CardTitle>
+              <CardDescription>
+                Save this layout, or load or import another. Hide this to give
+                the map the full width.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="version-name" className="mb-1.5 text-xs">
+                  Version name (optional)
+                </Label>
+                <Input
+                  id="version-name"
+                  data-testid="boundary-version-name"
+                  placeholder="e.g. v1 grid 4×10"
+                  value={versionName}
+                  onChange={(e) => setVersionName(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  data-testid="boundary-save-and-complete"
+                  onClick={() => void handleSaveAndComplete()}
+                  disabled={
+                    plotFeatureCount === 0 ||
+                    save.isPending ||
+                    activate.isPending
+                  }
+                >
+                  {save.isPending || activate.isPending
+                    ? "Saving…"
+                    : "Save & complete step"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleSaveOnly}
+                  disabled={plotFeatureCount === 0 || save.isPending}
+                >
+                  Save without activating
+                </Button>
+                {onCancel && (
+                  <Button variant="ghost" onClick={onCancel}>
+                    Cancel
+                  </Button>
+                )}
+              </div>
+              <div className="min-w-0 overflow-x-auto border-t pt-3">
+                <Tabs defaultValue="versions">
+                  <TabsList>
+                    <TabsTrigger value="versions">Versions</TabsTrigger>
+                    <TabsTrigger
+                      value="import"
+                      data-testid="boundary-import-tab"
+                    >
+                      Import from…
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="versions" className="pt-3">
+                    <VersionPicker
+                      directory={directory}
+                      activeVersion={
+                        loadSource?.directory === directory
+                          ? loadSource.version
+                          : null
+                      }
+                      onLoad={(v) => {
+                        setImportedSnapshot(null)
+                        setLoadSource({ directory, version: v })
+                      }}
+                    />
+                  </TabsContent>
+                  <TabsContent value="import" className="pt-3">
+                    <BoundaryImportPicker
+                      directory={directory}
+                      onImportSnapshot={(snap, note) => {
+                        setImportedSnapshot(
+                          snap as unknown as PlotGeometryStateSnapshot,
+                        )
+                        showSuccessToast(
+                          `${note} Check the fit, then save to keep them here.`,
+                        )
+                      }}
+                      onImport={(dir, version, plotCount) => {
+                        setImportedSnapshot(null)
+                        setLoadSource({ directory: dir, version })
+                        showSuccessToast(
+                          `Imported ${plotCount} plots. Check the fit, then save to keep them here.`,
+                        )
+                      }}
+                    />
+                  </TabsContent>
+                </Tabs>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
-
-export function PlotBoundaryPrep({ runId, pipelineType = "aerial", onCancel, onSaved }: PlotBoundaryPrepProps) {
-  const { showErrorToast, showSuccessToast } = useCustomToast();
-  const queryClient = useQueryClient();
-
-  // Map refs
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const popLayerRef = useRef<L.FeatureGroup | null>(null);
-  const plotLayerRef = useRef<L.FeatureGroup | null>(null);
-  const imageOverlayRef = useRef<L.ImageOverlay | null>(null);
-  // Index-based layer array — parallel to previewGeoJson.features
-  const plotLayersRef = useRef<L.Path[]>([]);
-  const dragRef = useRef<{ startLng: number; startLat: number } | null>(null);
-
-  // Stable refs (avoid stale closures in Leaflet event handlers)
-  const interactionModeRef = useRef<InteractionMode>("select");
-  const handlePlotClickRef = useRef<(idx: number, shiftKey: boolean) => void>(
-    () => {}
-  );
-  const selectedIndexesRef = useRef<number[]>([]);
-
-  const [showUploadDialog, setShowUploadDialog] = useState(false);
-  const [gridOptions, setGridOptions] = useState<GridOptions>({
-    width: 1.5,
-    length: 10,
-    rows: 1,
-    columns: 1,
-    verticalSpacing: 0.5,
-    horizontalSpacing: 0.5,
-    angle: 0,
-  });
-  const [popBoundary, setPopBoundary] = useState<GeoJSON.Feature | null>(null);
-  const [gridOffset, setGridOffset] = useState({ lon: 0, lat: 0 });
-  const [previewGeoJson, setPreviewGeoJson] =
-    useState<GeoJSON.FeatureCollection | null>(null);
-  // Index-based selection — array of feature indexes into previewGeoJson.features
-  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
-  const [interactionMode, setInteractionMode] =
-    useState<InteractionMode>("view");
-  const [gridGenerated, setGridGenerated] = useState(false);
-  const [gridVisible, setGridVisible] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [pendingSaveAs, setPendingSaveAs] = useState(false);
-  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
-  const [saveAsName, setSaveAsName] = useState("");
-  const isDirtyRef = useRef(false);
-  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
-  const [hasBoundary, setHasBoundary] = useState(false);
-  const [selectedOrthoVersion, setSelectedOrthoVersion] = useState<
-    number | null
-  >(null);
-  const [selectedBoundaryVersion, setSelectedBoundaryVersion] = useState<number | null>(null);
-  const [boundaryVersionLoading, setBoundaryVersionLoading] = useState(false);
-  const [selectedStitchVersion, setSelectedStitchVersion] = useState<number | null>(null);
-  const [mapInitialized, setMapInitialized] = useState(false);
-  const [noFdWarningOpen, setNoFdWarningOpen] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [fdTransform, setFdTransform] = useState<FdTransform>({ flipRows: false, flipCols: false, swapAxes: false });
-
-  // ── Undo / redo history ──────────────────────────────────────────────────
-  const historyRef = useRef<GeoJSON.FeatureCollection[]>([]);
-  const historyIndexRef = useRef<number>(-1);
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
-
-  function pushHistory(fc: GeoJSON.FeatureCollection) {
-    isDirtyRef.current = true;
-    // Discard any redo states beyond current position
-    historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
-    historyRef.current.push(fc);
-    historyIndexRef.current = historyRef.current.length - 1;
-    setCanUndo(historyIndexRef.current > 0);
-    setCanRedo(false);
-  }
-
-  function undo() {
-    if (historyIndexRef.current <= 0) return;
-    isDirtyRef.current = true;
-    historyIndexRef.current -= 1;
-    const fc = historyRef.current[historyIndexRef.current];
-    setPreviewGeoJson(fc);
-    setSelectedIndexes([]);
-    setCanUndo(historyIndexRef.current > 0);
-    setCanRedo(true);
-  }
-
-  function redo() {
-    if (historyIndexRef.current >= historyRef.current.length - 1) return;
-    isDirtyRef.current = true;
-    historyIndexRef.current += 1;
-    const fc = historyRef.current[historyIndexRef.current];
-    setPreviewGeoJson(fc);
-    setSelectedIndexes([]);
-    setCanUndo(true);
-    setCanRedo(historyIndexRef.current < historyRef.current.length - 1);
-  }
-
-  // Fetch mosaic/orthomosaic info (serves as background + provides existing boundaries)
-  const { data: orthoInfo, isLoading: orthoLoading } = useQuery<OrthoInfo>({
-    queryKey: ["orthomosaic-info", runId],
-    queryFn: () =>
-      ProcessingService.orthomosaicInfo({
-        id: runId,
-      }) as unknown as Promise<OrthoInfo>,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-  });
-
-  // Check for field design
-  const { data: fdInfo, refetch: refetchFd } = useQuery<FieldDesignInfo>({
-    queryKey: ["field-design", runId],
-    queryFn: () =>
-      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/field-design`), {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-      }).then((r) => r.json()),
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-  });
-
-  // Ground only: estimate boundary + grid from georeferenced TIF extents (first visit)
-  const { data: autoBoundaryData } = useQuery<{
-    available: boolean;
-    pop_boundary?: GeoJSON.Feature;
-    grid_options?: GridOptions;
-  }>({
-    queryKey: ["auto-boundary", runId],
-    queryFn: () =>
-      fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/auto-boundary`), {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-      }).then((r) => r.json()),
-    enabled: !!orthoInfo?.available,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-  });
-
-  // When field design loads, populate rows/cols — but only if there is no existing saved grid.
-  // If a grid was already saved, its settings (or at minimum its feature count) take priority.
-  useEffect(() => {
-    if (
-      fdInfo?.available &&
-      fdInfo.row_count > 0 &&
-      !orthoInfo?.existing_geojson
-    ) {
-      setGridOptions((prev) => ({
-        ...prev,
-        rows: fdInfo.row_count,
-        columns: fdInfo.col_count,
-      }));
-    }
-  }, [fdInfo, orthoInfo?.existing_geojson]);
-
-  // Initialize selectedOrthoVersion from saved state or active version
-  useEffect(() => {
-    if (!orthoInfo) return;
-    const v =
-      orthoInfo.plot_boundary_ortho_version ?? orthoInfo.active_ortho_version;
-    if (v != null) setSelectedOrthoVersion(v);
-  }, [orthoInfo?.plot_boundary_ortho_version, orthoInfo?.active_ortho_version]);
-
-  // Initialize selectedBoundaryVersion from active version
-  useEffect(() => {
-    if (!orthoInfo) return;
-    if (orthoInfo.active_plot_boundary_version != null) {
-      setSelectedBoundaryVersion(orthoInfo.active_plot_boundary_version);
-    }
-  }, [orthoInfo?.active_plot_boundary_version]);
-
-  // Initialize selectedStitchVersion from active stitch version (ground only)
-  useEffect(() => {
-    if (!orthoInfo) return;
-    if (orthoInfo.active_stitch_version != null) {
-      setSelectedStitchVersion(orthoInfo.active_stitch_version);
-    }
-  }, [orthoInfo?.active_stitch_version]);
-
-  // Update image overlay URL when stitch version changes (ground only)
-  useEffect(() => {
-    if (!imageOverlayRef.current || selectedStitchVersion == null) return;
-    const url = apiUrl(
-      `/api/v1/pipeline-runs/${runId}/mosaic-preview?stitch_version=${selectedStitchVersion}`
-    );
-    imageOverlayRef.current.setUrl(url);
-  }, [selectedStitchVersion, runId]);
-
-  // Update image overlay URL when user switches ortho version
-  useEffect(() => {
-    if (!imageOverlayRef.current || selectedOrthoVersion == null) return;
-    const url = apiUrl(
-      `/api/v1/pipeline-runs/${runId}/orthomosaics/${selectedOrthoVersion}/preview?max_size=4096`
-    );
-    imageOverlayRef.current.setUrl(url);
-  }, [selectedOrthoVersion, runId]);
-
-  // Apply auto-boundary estimate to the map once both map and data are ready.
-  // Only used when there is no existing saved boundary — if one exists, its own
-  // grid_settings are authoritative and should not be overwritten.
-  useEffect(() => {
-    if (!mapInitialized || !autoBoundaryData?.available) return;
-    if (!autoBoundaryData.pop_boundary || !autoBoundaryData.grid_options) return;
-    if (popBoundary) return; // boundary already drawn (from existing save or previous effect run)
-    const popLayer = popLayerRef.current;
-    const map = mapRef.current;
-    if (!popLayer || !map) return;
-
-    L.geoJSON(autoBoundaryData.pop_boundary as GeoJSON.GeoJsonObject, {
-      style: { color: "#f59e0b", weight: 2, fillOpacity: 0.1 },
-    }).eachLayer((l) => popLayer.addLayer(l));
-
-    setPopBoundary(autoBoundaryData.pop_boundary);
-    setHasBoundary(true);
-    // Apply grid_options only on first-time setup (no existing geojson)
-    if (!orthoInfo?.existing_geojson) {
-      setGridOptions(autoBoundaryData.grid_options);
-      // Auto-generate the grid immediately — no need to click "Generate Grid"
-      const fc = computeGrid(
-        autoBoundaryData.pop_boundary as GeoJSON.Feature,
-        autoBoundaryData.grid_options,
-        gridOffset,
-        fdInfo?.rows,
-      );
-      setPreviewGeoJson(fc);
-      pushHistory(fc);
-      setGridGenerated(true);
-      setGridVisible(true);
-    }
-  }, [mapInitialized, autoBoundaryData]);
-
-  // Destroy map only on component unmount — separate from the init effect so that
-  // orthoInfo refetches (triggered by save/invalidate) don't tear down the map mid-session.
-  useEffect(() => {
-    return () => {
-      imageOverlayRef.current = null;
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    };
-  }, []);
-
-  // Initialise map once orthoInfo is available — runs whenever orthoInfo changes but
-  // the `if (mapRef.current) return` guard ensures setup only happens once.
-  useEffect(() => {
-    if (!orthoInfo?.available || !orthoInfo.bounds || !mapContainerRef.current)
-      return;
-    if (mapRef.current) return;
-
-    let cancelled = false;
-    const rawBounds = orthoInfo.bounds;
-
-    import("@geoman-io/leaflet-geoman-free").then(() => {
-      if (cancelled || !mapContainerRef.current) return;
-
-      const bounds = L.latLngBounds(rawBounds[0], rawBounds[1]);
-      const map = L.map(mapContainerRef.current, {
-        crs: L.CRS.EPSG3857,
-        center: bounds.getCenter(),
-        zoom: 17,
-        minZoom: 10,
-        maxZoom: 25,
-        boxZoom: false,
-      });
-      mapRef.current = map;
-
-      L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        {
-          attribution:
-            "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics",
-          maxNativeZoom: 19,
-          maxZoom: 25,
-          opacity: 0.6,
-        }
-      ).addTo(map);
-
-      const initVersion =
-        orthoInfo.plot_boundary_ortho_version ?? orthoInfo.active_ortho_version;
-      const imgSrc =
-        pipelineType === "ground" && orthoInfo.active_stitch_version != null
-          ? apiUrl(`/api/v1/pipeline-runs/${runId}/mosaic-preview?stitch_version=${orthoInfo.active_stitch_version}`)
-          : initVersion != null
-          ? apiUrl(
-              `/api/v1/pipeline-runs/${runId}/orthomosaics/${initVersion}/preview?max_size=4096`
-            )
-          : apiUrl(`/api/v1/pipeline-runs/${runId}/mosaic-preview`);
-      const overlay = L.imageOverlay(imgSrc, bounds, { opacity: 0.9 }).addTo(
-        map
-      );
-      imageOverlayRef.current = overlay;
-      map.fitBounds(bounds);
-
-      // Layer for population boundary (user draws ONE polygon)
-      const popLayer = new L.FeatureGroup();
-      popLayerRef.current = popLayer;
-      popLayer.addTo(map);
-
-      // Layer for plot grid preview (read-only — Geoman must not touch it)
-      const plotLayer = new L.FeatureGroup();
-      (plotLayer as any).options.pmIgnore = true;
-      plotLayerRef.current = plotLayer;
-      plotLayer.addTo(map);
-
-      // Load existing pop boundary if present
-      if (orthoInfo.existing_pop_boundary) {
-        L.geoJSON(orthoInfo.existing_pop_boundary as GeoJSON.GeoJsonObject, {
-          style: { color: "#f59e0b", weight: 2, fillOpacity: 0.1 },
-        }).eachLayer((l) => popLayer.addLayer(l));
-        setHasBoundary(true);
-      }
-
-      // Load existing plot grid if present — only when a population boundary also exists.
-      // If there is no pop boundary (new run reusing a canonical plot file), the user must
-      // draw a population boundary first before the grid is shown.
-      if (orthoInfo.existing_geojson && orthoInfo.existing_pop_boundary) {
-        setPreviewGeoJson(orthoInfo.existing_geojson);
-        setGridGenerated(true);
-        if (orthoInfo.existing_grid_settings) {
-          setGridOptions(orthoInfo.existing_grid_settings.options);
-          // Suppress the gridOffset→recompute effect so we keep the loaded geojson as-is
-          skipGridRecomputeRef.current = true;
-          setGridOffset(orthoInfo.existing_grid_settings.offset);
-        } else {
-          const features = orthoInfo.existing_geojson.features;
-          if (features.length > 0) {
-            const maxRow = Math.max(
-              ...features.map((f: any) => f.properties?.row ?? 1)
-            );
-            const maxCol = Math.max(
-              ...features.map((f: any) => f.properties?.column ?? 1)
-            );
-            const derived = deriveGridOptionsFromGeojson(
-              orthoInfo.existing_geojson
-            );
-            setGridOptions((prev) => ({
-              ...prev,
-              rows: maxRow,
-              columns: maxCol,
-              ...derived,
-            }));
-          }
-        }
-      }
-
-      // Geoman: allow drawing ONE polygon (population boundary)
-      const mapAny = map as any;
-      if (mapAny.pm) {
-        mapAny.pm.addControls({
-          position: "topleft",
-          drawMarker: false,
-          drawCircleMarker: false,
-          drawPolyline: false,
-          drawCircle: false,
-          drawText: false,
-          drawPolygon: true,
-          drawRectangle: false,
-          editMode: true,
-          dragMode: true,
-          cutPolygon: false,
-          removalMode: true,
-          rotateMode: false,
-        });
-        mapAny.pm.setGlobalOptions({
-          layerGroup: popLayer,
-          pathOptions: { color: "#f59e0b", weight: 2, fillOpacity: 0.1 },
-        });
-
-        const syncBoundary = () => {
-          const layers = popLayerRef.current?.getLayers() ?? [];
-          const hasAny = layers.length > 0;
-          setHasBoundary(hasAny);
-          if (hasAny)
-            setPopBoundary((layers[0] as any).toGeoJSON() as GeoJSON.Feature);
-          else setPopBoundary(null);
-        };
-        map.on("pm:create", syncBoundary);
-        map.on("pm:edit", syncBoundary);
-        map.on("pm:remove", syncBoundary);
-      }
-
-      // Seed popBoundary from existing boundary
-      if (orthoInfo.existing_pop_boundary) {
-        setPopBoundary(
-          orthoInfo.existing_pop_boundary.type === "Feature"
-            ? (orthoInfo.existing_pop_boundary as GeoJSON.Feature)
-            : (orthoInfo.existing_pop_boundary as GeoJSON.FeatureCollection)
-                .features[0]
-        );
-      }
-
-      setMapInitialized(true);
-    }); // end import().then()
-
-    return () => {
-      cancelled = true;
-    };
-  }, [orthoInfo]);
-
-  // Stable refs used by the drag-recompute effect to avoid stale closures
-  const popBoundaryRef = useRef(popBoundary);
-  popBoundaryRef.current = popBoundary;
-  const gridOptionsRef = useRef(gridOptions);
-  gridOptionsRef.current = gridOptions;
-  const fdRowsRef = useRef(fdInfo?.rows);
-  fdRowsRef.current = fdInfo?.rows;
-  const gridVisibleRef = useRef(gridVisible);
-  gridVisibleRef.current = gridVisible;
-  // When set, the next gridOffset effect run is a boundary-load (not a drag) — skip recompute
-  const skipGridRecomputeRef = useRef(false);
-
-  // Stable refs for keyboard shortcuts (avoid stale closures)
-  const interactionModeRef2 = useRef(interactionMode);
-  interactionModeRef2.current = interactionMode;
-  const previewGeoJsonRef = useRef(previewGeoJson);
-  previewGeoJsonRef.current = previewGeoJson;
-  const selectedIndexesRef2 = useRef(selectedIndexes);
-  selectedIndexesRef2.current = selectedIndexes;
-
-  // Keyboard shortcuts: S=select, M=move, A=select-all, C=clear, D=delete, Ctrl+Z=undo, Ctrl+Y/Ctrl+Shift+Z=redo
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      // Don't fire shortcuts when typing in an input/textarea
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
-        if (e.key === "z" && e.shiftKey)  { e.preventDefault(); redo(); return; }
-        if (e.key === "y")                { e.preventDefault(); redo(); return; }
-        return;
-      }
-
-      switch (e.key.toLowerCase()) {
-        case "s": setInteractionMode(interactionModeRef2.current === "select" ? "view" : "select"); break;
-        case "m": setInteractionMode(interactionModeRef2.current === "move" ? "view" : "move"); break;
-        case "a":
-          if (previewGeoJsonRef.current) {
-            setSelectedIndexes(Array.from({ length: previewGeoJsonRef.current.features.length }, (_, i) => i));
-          }
-          break;
-        case "c": setSelectedIndexes([]); break;
-        case "d":
-          if (selectedIndexesRef2.current.length > 0) setShowDeleteConfirm(true);
-          break;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Live recompute ONLY when dragging the grid (gridOffset changes).
-  // Boundary / option changes require the user to click "Generate Grid".
-  useEffect(() => {
-    // loadBoundaryVersion sets gridOffset as part of restoring saved state — don't recompute
-    if (skipGridRecomputeRef.current) {
-      skipGridRecomputeRef.current = false;
-      return;
-    }
-    if (!popBoundaryRef.current || previewGeoJson === null) return;
-    const fc = computeGrid(
-      popBoundaryRef.current,
-      gridOptionsRef.current,
-      gridOffset,
-      fdRowsRef.current
-    );
-    setPreviewGeoJson(fc);
-    // Don't reset selectedIndexes during drag — too disruptive
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridOffset]);
-
-  // Ground pipeline: when label orientation transform changes, re-merge labels onto existing features.
-  useEffect(() => {
-    if (pipelineType !== "ground" || !fdInfo?.rows || !previewGeoJsonRef.current) return;
-    const fc = mergeLabelsIntoExisting(previewGeoJsonRef.current, fdInfo.rows, fdTransform);
-    setPreviewGeoJson(fc);
-    setSelectedIndexes([]);
-    pushHistory(fc);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fdTransform]);
-
-  // Hide the population boundary (orange) only when the plot grid is actively visible.
-  // When the grid is hidden (or no grid exists), restore the orange boundary.
-  useEffect(() => {
-    const popLayer = popLayerRef.current;
-    if (!popLayer) return;
-    const gridActivelyShown = gridVisible && (previewGeoJson?.features?.length ?? 0) > 0;
-    popLayer.setStyle(
-      gridActivelyShown
-        ? { opacity: 0, fillOpacity: 0 }
-        : { color: "#f59e0b", weight: 2, opacity: 1, fillOpacity: 0.1 }
-    );
-  }, [previewGeoJson, gridVisible, mapInitialized]);
-
-  // Manual grid generation triggered by the "Generate Grid" button
-  function handleGenerateGrid() {
-    if (!popBoundary) return;
-    if (!fdInfo?.available) {
-      setNoFdWarningOpen(true);
-      return;
-    }
-    _doGenerateGrid();
-  }
-
-  function _doGenerateGrid() {
-    if (!popBoundary) return;
-    const fc = computeGrid(popBoundary, gridOptions, gridOffset, fdInfo?.rows);
-    setPreviewGeoJson(fc);
-    setSelectedIndexes([]);
-    setGridGenerated(true);
-    setGridVisible(true);
-    pushHistory(fc);
-  }
-
-  // Show/hide plot grid layer + switch Geoman edit target
-  useEffect(() => {
-    const map = mapRef.current;
-    const mapAny = map as any;
-    const plotLayer = plotLayerRef.current;
-    const popLayer = popLayerRef.current;
-    if (!map || !plotLayer || !popLayer) return;
-    if (gridVisible) {
-      if (!map.hasLayer(plotLayer)) map.addLayer(plotLayer);
-      // Grid visible → Geoman edits plot cells
-      plotLayersRef.current.forEach(l => { (l as any).options.pmIgnore = false; });
-      if (mapAny.pm) mapAny.pm.setGlobalOptions({ layerGroup: plotLayer });
-    } else {
-      if (map.hasLayer(plotLayer)) map.removeLayer(plotLayer);
-      // Grid hidden → Geoman edits population boundary
-      plotLayersRef.current.forEach(l => { (l as any).options.pmIgnore = true; });
-      if (mapAny.pm) mapAny.pm.setGlobalOptions({ layerGroup: popLayer });
-    }
-  }, [gridVisible]);
-
-  // Keep interaction mode ref in sync
-  useEffect(() => {
-    interactionModeRef.current = interactionMode;
-  }, [interactionMode]);
-
-  // Keep selectedIndexes ref in sync for use in Leaflet event handlers
-  useEffect(() => {
-    selectedIndexesRef.current = selectedIndexes;
-  }, [selectedIndexes]);
-
-  // Keep click handler ref fresh — uses index, not string key
-  handlePlotClickRef.current = (idx: number, shiftKey: boolean) => {
-    if (interactionModeRef.current !== "select") return;
-    setSelectedIndexes((prev) => {
-      if (shiftKey) {
-        // Toggle this index in the selection
-        return prev.includes(idx)
-          ? prev.filter((i) => i !== idx)
-          : [...prev, idx];
-      } else {
-        // Single click: select only this one (or deselect if already the only one)
-        return prev.length === 1 && prev[0] === idx ? [] : [idx];
-      }
-    });
-  };
-
-  // Create plot layers when the grid changes — binds tooltips + click handlers ONCE per grid
-  useEffect(() => {
-    const plotLayer = plotLayerRef.current;
-    if (!plotLayer) return;
-    plotLayer.clearLayers();
-    plotLayersRef.current = [];
-    if (!previewGeoJson) return;
-
-    previewGeoJson.features.forEach((feature, idx) => {
-      const p = feature.properties || {};
-      const plotLabel = p.plot ?? p.plot_id ?? (p.row != null ? `${p.row}_${p.column}` : "?");
-      const lines = [
-        `<strong>Plot ${plotLabel}</strong>`,
-        p.row != null ? `Row: ${p.row} &nbsp; Col: ${p.column}` : null,
-        p.accession ? `Accession: ${p.accession}` : null,
-      ]
-        .filter(Boolean)
-        .join("<br>");
-
-      const leafletLayer = L.geoJSON(feature as GeoJSON.GeoJsonObject, {
-        style: {
-          color: "#2563eb",
-          weight: 1.5,
-          fillColor: "#2563eb",
-          fillOpacity: 0.15,
-        },
-      }).getLayers()[0] as L.Path;
-
-      // When grid is visible, allow Geoman to edit individual plot cells;
-      // when hidden, exclude them so Geoman targets the population boundary.
-      (leafletLayer as any).options.pmIgnore = !gridVisibleRef.current;
-
-      leafletLayer.bindTooltip(lines, { sticky: true, opacity: 0.95 });
-      // Capture idx at creation time — stable closure, no stale ref issues
-      leafletLayer.on("click", (e: any) => {
-        L.DomEvent.stopPropagation(e);
-        handlePlotClickRef.current(idx, e.originalEvent?.shiftKey ?? false);
-      });
-
-      plotLayer.addLayer(leafletLayer);
-      plotLayersRef.current.push(leafletLayer);
-    });
-
-    // Re-apply selection highlight after layers are recreated (e.g. after a move).
-    // selectedIndexesRef2 is always current (assigned during render, not in an effect).
-    const selSet = new Set(selectedIndexesRef2.current);
-    if (selSet.size > 0) {
-      plotLayersRef.current.forEach((layer, idx) => {
-        if (selSet.has(idx)) {
-          layer.setStyle({ color: "#dc2626", weight: 2.5, fillColor: "#ef4444", fillOpacity: 0.4 });
-        }
-      });
-    }
-  }, [previewGeoJson]);
-
-  // Update only styles when selection changes — no layer recreation
-  useEffect(() => {
-    const selSet = new Set(selectedIndexes);
-    plotLayersRef.current.forEach((layer, idx) => {
-      const sel = selSet.has(idx);
-      layer.setStyle({
-        color: sel ? "#dc2626" : "#2563eb",
-        weight: sel ? 2.5 : 1.5,
-        fillColor: sel ? "#ef4444" : "#2563eb",
-        fillOpacity: sel ? 0.4 : 0.15,
-      });
-    });
-  }, [selectedIndexes]);
-
-  // Move-mode: drag on map to translate entire grid
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (interactionMode !== "move") return;
-
-    map.dragging.disable();
-    map.getContainer().style.cursor = "move";
-
-    function onMouseDown(e: L.LeafletMouseEvent) {
-      dragRef.current = { startLng: e.latlng.lng, startLat: e.latlng.lat };
-    }
-    const pendingOffset = { lon: 0, lat: 0 };
-    let rafId: number | null = null;
-    function onMouseMove(e: L.LeafletMouseEvent) {
-      if (!dragRef.current) return;
-      pendingOffset.lon += e.latlng.lng - dragRef.current.startLng;
-      pendingOffset.lat += e.latlng.lat - dragRef.current.startLat;
-      dragRef.current = { startLng: e.latlng.lng, startLat: e.latlng.lat };
-      if (rafId === null) {
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          const { lon, lat } = pendingOffset;
-          pendingOffset.lon = 0;
-          pendingOffset.lat = 0;
-          if (selectedIndexesRef.current.length > 0) {
-            // Move only the selected features by directly translating their coordinates
-            const selSet = new Set(selectedIndexesRef.current);
-            setPreviewGeoJson((prev) => {
-              if (!prev) return prev;
-              const newFeatures = prev.features.map((feature, idx) => {
-                if (!selSet.has(idx)) return feature;
-                const geom = feature.geometry as GeoJSON.Polygon;
-                const newCoords = geom.coordinates.map((ring) =>
-                  ring.map(([fLon, fLat]) => [fLon + lon, fLat + lat])
-                );
-                return { ...feature, geometry: { ...geom, coordinates: newCoords } };
-              });
-              return { ...prev, features: newFeatures };
-            });
-          }
-          // No selection → do nothing; select plots first before dragging in move mode
-        });
-      }
-    }
-    function onMouseUp() {
-      if (dragRef.current && previewGeoJsonRef.current) {
-        pushHistory(previewGeoJsonRef.current);
-      }
-      dragRef.current = null;
-    }
-
-    map.on("mousedown", onMouseDown);
-    map.on("mousemove", onMouseMove);
-    map.on("mouseup", onMouseUp);
-    map.on("mouseout", onMouseUp);
-
-    return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      map.off("mousedown", onMouseDown);
-      map.off("mousemove", onMouseMove);
-      map.off("mouseup", onMouseUp);
-      map.off("mouseout", onMouseUp);
-      if (mapRef.current) {
-        map.dragging.enable();
-        map.getContainer().style.cursor = "";
-      }
-    };
-  }, [interactionMode]);
-
-  // Select-mode: rubber-band drag on map background to select plots within a rectangle.
-  // A drag of > 5px starts the selection box; mouseup selects enclosed plots.
-  // Shift+drag adds to existing selection.
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || interactionMode !== "select") return;
-    const m = map; // stable non-null reference for closures
-
-    // Disable map panning so drag is always rubber-band selection
-    m.dragging.disable();
-    m.getContainer().style.cursor = "crosshair";
-
-    let startLatLng: L.LatLng | null = null;
-    let startContainerPt: L.Point | null = null;
-    let selBox: L.Rectangle | null = null;
-    let isDragging = false;
-    const THRESHOLD = 5; // px before rubber-band kicks in
-
-    function onMouseDown(e: L.LeafletMouseEvent) {
-      e.originalEvent?.preventDefault(); // prevent browser text/element selection during drag
-      startLatLng = e.latlng;
-      startContainerPt = m.latLngToContainerPoint(e.latlng);
-      isDragging = false;
-    }
-
-    function onMouseMove(e: L.LeafletMouseEvent) {
-      if (!startLatLng || !startContainerPt) return;
-      const curPt = m.latLngToContainerPoint(e.latlng);
-      const dist = Math.hypot(
-        curPt.x - startContainerPt.x,
-        curPt.y - startContainerPt.y
-      );
-
-      if (!isDragging && dist > THRESHOLD) {
-        isDragging = true;
-        m.dragging.disable();
-        selBox = L.rectangle(L.latLngBounds(startLatLng, e.latlng), {
-          color: "#2563eb",
-          weight: 1.5,
-          fillColor: "#2563eb",
-          fillOpacity: 0.08,
-          dashArray: "5, 4",
-          interactive: false,
-        }).addTo(m);
-      }
-
-      if (isDragging && selBox && startLatLng) {
-        selBox.setBounds(L.latLngBounds(startLatLng, e.latlng));
-      }
-    }
-
-    function onMouseUp(e: L.LeafletMouseEvent) {
-      if (isDragging && selBox && startLatLng) {
-        const bounds = L.latLngBounds(startLatLng, e.latlng);
-        const inside: number[] = [];
-        plotLayersRef.current.forEach((layer, idx) => {
-          const center = (layer as any).getBounds?.()?.getCenter?.();
-          if (center && bounds.contains(center)) inside.push(idx);
-        });
-        const shiftKey = e.originalEvent?.shiftKey ?? false;
-        setSelectedIndexes((prev) =>
-          shiftKey ? [...new Set([...prev, ...inside])] : inside
-        );
-        m.removeLayer(selBox);
-        selBox = null;
-        m.dragging.enable();
-      }
-      startLatLng = null;
-      startContainerPt = null;
-      isDragging = false;
-    }
-
-    function onMouseOut() {
-      if (isDragging && selBox) {
-        m.removeLayer(selBox);
-        selBox = null;
-        m.dragging.enable();
-      }
-      startLatLng = null;
-      startContainerPt = null;
-      isDragging = false;
-    }
-
-    m.on("mousedown", onMouseDown);
-    m.on("mousemove", onMouseMove);
-    m.on("mouseup", onMouseUp);
-    m.on("mouseout", onMouseOut);
-
-    return () => {
-      m.off("mousedown", onMouseDown);
-      m.off("mousemove", onMouseMove);
-      m.off("mouseup", onMouseUp);
-      m.off("mouseout", onMouseOut);
-      if (selBox) m.removeLayer(selBox);
-      if (mapRef.current) {
-        m.dragging.enable();
-        m.getContainer().style.cursor = "";
-      }
-    };
-  }, [interactionMode]);
-
-  // Load a specific plot boundary version and make it the editing base
-  async function loadBoundaryVersion(version: number) {
-    setBoundaryVersionLoading(true);
-    try {
-      const res = await fetch(
-        apiUrl(`/api/v1/pipeline-runs/${runId}/plot-boundaries/${version}`),
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-          },
-        }
-      );
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      const fc = data.geojson as GeoJSON.FeatureCollection;
-      setPreviewGeoJson(fc);
-      setGridGenerated(true);
-      if (data.grid_settings) {
-        setGridOptions(data.grid_settings.options);
-        skipGridRecomputeRef.current = true;
-        setGridOffset(data.grid_settings.offset ?? { lon: 0, lat: 0 });
-      } else {
-        const features = fc.features;
-        if (features.length > 0) {
-          const maxRow = Math.max(...features.map((f: any) => f.properties?.row ?? 1));
-          const maxCol = Math.max(...features.map((f: any) => f.properties?.column ?? 1));
-          const derived = deriveGridOptionsFromGeojson(fc);
-          setGridOptions((prev) => ({ ...prev, rows: maxRow, columns: maxCol, ...derived }));
-          setGridOffset({ lon: 0, lat: 0 });
-        }
-      }
-      setSelectedBoundaryVersion(version);
-    } catch {
-      showErrorToast("Failed to load boundary version");
-    } finally {
-      setBoundaryVersionLoading(false);
-    }
-  }
-
-  function handleGridOptionsChange(opts: GridOptions) {
-    setGridOptions(opts);
-    // Live recompute — updates the grid immediately as the user adjusts any setting
-    // (angle slider, width, rows, etc.) without requiring "Regenerate Grid".
-    if (gridGenerated && popBoundary) {
-      const fc = computeGrid(popBoundary, opts, gridOffset, fdInfo?.rows);
-      setPreviewGeoJson(fc);
-      setGridVisible(true);
-    }
-  }
-
-  function flipGrid(axis: "vertical" | "horizontal") {
-    if (!previewGeoJson) return;
-    const allCoords = previewGeoJson.features.flatMap((f) =>
-      (f.geometry as GeoJSON.Polygon).coordinates[0]
-    );
-    const lats = allCoords.map((p) => p[1]);
-    const lons = allCoords.map((p) => p[0]);
-    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-    const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
-    const newFeatures = previewGeoJson.features.map((f) => {
-      const geom = f.geometry as GeoJSON.Polygon;
-      const newCoords = geom.coordinates.map((ring) =>
-        ring.map(([lon, lat]) =>
-          axis === "vertical"
-            ? [lon, 2 * centerLat - lat]
-            : [2 * centerLon - lon, lat]
-        )
-      );
-      return { ...f, geometry: { ...geom, coordinates: newCoords } };
-    });
-    const fc = { ...previewGeoJson, features: newFeatures };
-    setPreviewGeoJson(fc);
-    setSelectedIndexes([]);
-    pushHistory(fc);
-  }
-
-  function handleClearAll() {
-    setPreviewGeoJson(null);
-    setSelectedIndexes([]);
-    setGridGenerated(false);
-    // Reset undo history
-    historyRef.current = [];
-    historyIndexRef.current = -1;
-    setCanUndo(false);
-    setCanRedo(false);
-    isDirtyRef.current = true;
-  }
-
-  function handleModeChange(mode: InteractionMode) {
-    // Clicking the active mode button deactivates it → back to view (normal panning)
-    setInteractionMode((prev) => (prev === mode ? "view" : mode));
-  }
-
-  async function handleSave(saveAs = false, name?: string) {
-    if (!previewGeoJson) return;
-    if (!popBoundary) {
-      showErrorToast("Draw a field boundary before saving");
-      return;
-    }
-    setIsSaving(true);
-    if (saveAs) setPendingSaveAs(true);
-
-    // Sync any Geoman vertex-edits from live Leaflet layers into the GeoJSON before saving.
-    // Geoman edits the layer geometry in place without updating React state, so we read
-    // the current layer coordinates directly rather than relying on previewGeoJson.
-    let geojsonToSave = previewGeoJson;
-    const liveLayers = plotLayersRef.current;
-    if (liveLayers.length > 0 && liveLayers.length === previewGeoJson.features.length) {
-      const newFeatures = previewGeoJson.features.map((feature, idx) => {
-        const layer = liveLayers[idx];
-        if (!layer) return feature;
-        try {
-          const updated = (layer as any).toGeoJSON() as GeoJSON.Feature;
-          return { ...updated, properties: feature.properties };
-        } catch {
-          return feature;
-        }
-      });
-      geojsonToSave = { ...previewGeoJson, features: newFeatures };
-    }
-
-    try {
-      const res = await fetch(
-        apiUrl(`/api/v1/pipeline-runs/${runId}/save-plot-grid`),
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-          },
-          body: JSON.stringify({
-            geojson: geojsonToSave,
-            pop_boundary: popBoundary,
-            grid_options: gridOptions,
-            grid_offset: gridOffset,
-            ortho_version: selectedOrthoVersion,
-            stitch_version: selectedStitchVersion,
-            save_as: saveAs,
-            name: name || null,
-          }),
-        }
-      );
-      if (!res.ok) throw new Error();
-      await queryClient.invalidateQueries({ queryKey: ["orthomosaic-info", runId] });
-      await queryClient.invalidateQueries({ queryKey: ["pipeline-runs", runId] });
-      await queryClient.invalidateQueries({ queryKey: ["plot-boundaries", runId] });
-      isDirtyRef.current = false;
-      showSuccessToast(
-        saveAs ? "Saved as new version" : "Plot boundaries saved"
-      );
-      if (saveAs) onSaved?.();
-    } catch {
-      showErrorToast("Failed to save grid");
-    } finally {
-      setIsSaving(false);
-      setPendingSaveAs(false);
-    }
-  }
-
-  function openSaveAsDialog() {
-    setSaveAsName("");
-    setShowSaveAsDialog(true);
-  }
-
-  function confirmSaveAs() {
-    setShowSaveAsDialog(false);
-    handleSave(true, saveAsName.trim() || undefined);
-  }
-
-  if (orthoLoading) {
-    return (
-      <div className="text-muted-foreground flex h-64 items-center justify-center gap-2 text-sm">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        Loading mosaic…
-      </div>
-    );
-  }
-
-  if (!orthoInfo?.available) {
-    return (
-      <div className="text-muted-foreground flex h-64 flex-col items-center justify-center gap-2">
-        <AlertCircle className="h-8 w-8" />
-        <p className="text-sm">
-          No mosaic found for this run. Complete the preceding processing steps
-          first.
-        </p>
-      </div>
-    );
-  }
-
-  const featureCount = previewGeoJson?.features?.length ?? 0;
-
-  return (
-    <div className="space-y-3">
-      {/* Field design status banner */}
-      <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm" data-onboarding="pbp-field-design">
-        {fdInfo?.available ? (
-          <span className="text-green-700">
-            Field design loaded — {fdInfo.row_count} rows × {fdInfo.col_count}{" "}
-            cols
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 font-medium text-red-600">
-            ⚠ Field design required — upload one to draw plot boundaries and
-            merge accession data.
-          </span>
-        )}
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowUploadDialog(true)}
-          >
-            <Upload className="mr-1 h-3 w-3" />
-            {fdInfo?.available ? "Replace" : "Upload"}
-          </Button>
-        </div>
-      </div>
-
-      <details className="bg-muted/40 rounded-md border text-sm" data-onboarding="pbp-instructions">
-        <summary className="flex cursor-pointer select-none list-none items-center justify-between px-4 py-2.5 font-medium">
-          Instructions
-          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform [[open]_&]:rotate-180" />
-        </summary>
-        <ol className="list-inside list-decimal space-y-1.5 px-4 pb-3 pt-1">
-          <li>
-            Click the <strong>polygon icon</strong> (⬠) in the{" "}
-            <strong>top-left toolbar</strong> to draw the outer field boundary.{" "}
-            <strong>Double-click</strong> to finish. You can edit or redraw it at
-            any time, use the <strong>eye icon</strong> (bottom-right panel) to hide
-            the plot grid first so the population boundary is easier to edit.
-          </li>
-          <li>
-            Adjust plot dimensions in the <strong>Plot Settings</strong> panel
-            (bottom-right), then click <strong>Generate Grid</strong> to preview
-            the plot grid.
-          </li>
-          <li>
-            Use <strong>Move</strong> mode to drag selected plots into position, or
-            adjust the <strong>Angle</strong>. After changing settings, click{" "}
-            <strong>Regenerate Grid</strong> to apply.
-          </li>
-          <li>
-            In <strong>Select</strong> mode: <strong>click</strong> a plot to
-            select it, <strong>Shift+click</strong> to add/remove, or{" "}
-            <strong>drag</strong> a rectangle to multi-select.
-          </li>
-          <li>
-            Click <strong>Save</strong> to save and close.
-          </li>
-        </ol>
-        <div className="border-t px-4 py-2.5 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Keyboard shortcuts: </span>
-          <kbd className="bg-background border rounded px-1">S</kbd> select mode ·{" "}
-          <kbd className="bg-background border rounded px-1">M</kbd> move mode ·{" "}
-          <kbd className="bg-background border rounded px-1">A</kbd> select all ·{" "}
-          <kbd className="bg-background border rounded px-1">C</kbd> clear selection ·{" "}
-          <kbd className="bg-background border rounded px-1">D</kbd> delete selected ·{" "}
-          <kbd className="bg-background border rounded px-1">Ctrl</kbd>+<kbd className="bg-background border rounded px-1">Z</kbd> undo ·{" "}
-          <kbd className="bg-background border rounded px-1">Ctrl</kbd>+<kbd className="bg-background border rounded px-1">Y</kbd> redo
-        </div>
-      </details>
-
-      {/* Map with floating grid settings panel */}
-      {/* isolation:isolate contains Leaflet's internal z-indices so dialogs render above */}
-      {/* isolation:isolate contains Leaflet's internal z-indices so dialogs render above */}
-      <div className="relative" style={{ isolation: "isolate" }}>
-        <div
-          ref={mapContainerRef}
-          data-onboarding="pbp-map"
-          className="w-full overflow-hidden rounded-lg border"
-          style={{ height: "calc(100vh - 280px)", minHeight: 500, userSelect: "none", outline: "none" }}
-        />
-        {hasBoundary && (
-          <GridSettingsPanel
-            options={gridOptions}
-            onChange={handleGridOptionsChange}
-            interactionMode={interactionMode}
-            onModeChange={handleModeChange}
-            onSelectAll={() =>
-              setSelectedIndexes(
-                Array.from({ length: featureCount }, (_, i) => i)
-              )
-            }
-            onClearSelection={() => setSelectedIndexes([])}
-            onDeleteSelected={() => {
-              if (selectedIndexes.length > 0) setShowDeleteConfirm(true);
-            }}
-            featureCount={featureCount}
-            selectedCount={selectedIndexes.length}
-            onGenerateGrid={handleGenerateGrid}
-            gridGenerated={gridGenerated}
-            gridVisible={gridVisible}
-            onToggleGrid={() => setGridVisible((v) => !v)}
-            pipelineType={pipelineType}
-            fdAvailable={fdInfo?.available}
-            fdTransform={fdTransform}
-            onFdTransformChange={setFdTransform}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            onUndo={undo}
-            onRedo={redo}
-            onClearAll={handleClearAll}
-            onFlipVertical={() => flipGrid("vertical")}
-            onFlipHorizontal={() => flipGrid("horizontal")}
-          />
-        )}
-        {!hasBoundary && (
-          <div className="bg-background/90 pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-lg border px-4 py-2 text-sm shadow">
-            Use the <strong>polygon tool</strong> (top-left) to draw the outer
-            field boundary
-          </div>
-        )}
-        {/* Bottom-left: stacked version selectors */}
-        <div className="absolute bottom-4 left-4 z-[1000] flex flex-col gap-1" data-onboarding="pbp-version-selectors">
-          {/* Stitch version selector (ground only) */}
-          {pipelineType === "ground" && orthoInfo.stitch_versions && orthoInfo.stitch_versions.length > 0 && (
-            <select
-              value={selectedStitchVersion ?? ""}
-              onChange={(e) => setSelectedStitchVersion(Number(e.target.value))}
-              className="border-input bg-background/90 rounded border px-1.5 py-1 text-xs shadow focus:outline-none"
-            >
-              {orthoInfo.stitch_versions.map((v) => (
-                <option key={v.version} value={v.version}>
-                  Stitching: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
-                </option>
-              ))}
-            </select>
-          )}
-          {/* Ortho version selector (aerial only) */}
-          {pipelineType === "aerial" && orthoInfo.ortho_versions && orthoInfo.ortho_versions.length > 0 && (
-            <select
-              value={selectedOrthoVersion ?? ""}
-              onChange={(e) => setSelectedOrthoVersion(Number(e.target.value))}
-              className="border-input bg-background/90 rounded border px-1.5 py-1 text-xs shadow focus:outline-none"
-            >
-              {orthoInfo.ortho_versions.map((v) => (
-                <option key={v.version} value={v.version}>
-                  Orthomosaic: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
-                </option>
-              ))}
-            </select>
-          )}
-          {/* Boundary version selector */}
-          {orthoInfo.plot_boundary_versions && orthoInfo.plot_boundary_versions.length > 1 && (
-            <div className="flex items-center gap-1.5">
-              <select
-                value={selectedBoundaryVersion ?? ""}
-                onChange={(e) => loadBoundaryVersion(Number(e.target.value))}
-                disabled={boundaryVersionLoading}
-                className="border-input bg-background/90 rounded border px-1.5 py-1 text-xs shadow focus:outline-none disabled:opacity-60"
-              >
-                {orthoInfo.plot_boundary_versions.map((v) => (
-                  <option key={v.version} value={v.version}>
-                    Boundary: {v.name ? `${v.name} (v${v.version})` : `v${v.version}`}
-                  </option>
-                ))}
-              </select>
-              {boundaryVersionLoading && (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex gap-2">
-        <Button variant="outline" data-onboarding="pbp-cancel" onClick={() => isDirtyRef.current ? setShowUnsavedDialog(true) : onCancel()}>
-          Cancel
-        </Button>
-        {previewGeoJson && (
-          <>
-            <Button variant="secondary" data-onboarding="pbp-save" className="bg-secondary/60 hover:bg-secondary/80" onClick={() => handleSave(false)} disabled={isSaving}>
-              {isSaving && !pendingSaveAs ? (
-                <>
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                "Save"
-              )}
-            </Button>
-            <Button
-              data-onboarding="pbp-save-as"
-              onClick={openSaveAsDialog}
-              disabled={isSaving}
-            >
-              {pendingSaveAs ? (
-                <>
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                "Save As"
-              )}
-            </Button>
-          </>
-        )}
       </div>
 
       <FieldDesignUploadDialog
-        open={showUploadDialog}
-        onClose={() => setShowUploadDialog(false)}
-        runId={runId}
-        onSaved={async (info) => {
-          const result = await refetchFd();
-          const newRows = (result.data as FieldDesignInfo | undefined)?.rows;
-          if (pipelineType === "ground" && previewGeoJsonRef.current) {
-            // Ground: keep existing georeferenced boundaries, only re-merge labels
-            const fc = mergeLabelsIntoExisting(previewGeoJsonRef.current, newRows ?? [], fdTransform);
-            setPreviewGeoJson(fc);
-            setSelectedIndexes([]);
-            pushHistory(fc);
-          } else {
-            // Aerial: update row/col counts and regenerate the rectangular grid
-            const newOpts = {
-              ...gridOptions,
-              rows: info.row_count || gridOptions.rows,
-              columns: info.col_count || gridOptions.columns,
-            };
-            setGridOptions(newOpts);
-            if (gridGenerated && popBoundary) {
-              const fc = computeGrid(popBoundary, newOpts, gridOffset, newRows);
-              setPreviewGeoJson(fc);
-              setSelectedIndexes([]);
-              pushHistory(fc);
-            }
-          }
-        }}
+        open={fdDialogOpen}
+        onClose={() => setFdDialogOpen(false)}
+        onSaved={handleFieldDesignSaved}
+        preset={fieldPreset}
+        startWith={fdDialogStart}
+        keep={
+          scope
+            ? {
+                year: scope.year,
+                location: scope.location,
+                experiment: scope.experiment,
+              }
+            : undefined
+        }
       />
 
-      {/* Unsaved changes dialog */}
-      <Dialog open={showUnsavedDialog} onOpenChange={(o) => !o && setShowUnsavedDialog(false)}>
-        <DialogContent className="max-w-sm">
+      <Dialog
+        open={clearConfirmOpen}
+        onOpenChange={(o) => !o && setClearConfirmOpen(false)}
+      >
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Unsaved Changes</DialogTitle>
-            <DialogDescription>You have unsaved boundary changes. Leave without saving?</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowUnsavedDialog(false)}>Stay</Button>
-            <Button variant="destructive" onClick={() => { setShowUnsavedDialog(false); onCancel(); }}>Leave</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete confirmation dialog */}
-      <Dialog open={showDeleteConfirm} onOpenChange={(o) => !o && setShowDeleteConfirm(false)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete selected plots?</DialogTitle>
+            <DialogTitle>Clear all polygons?</DialogTitle>
             <DialogDescription>
-              This will permanently remove{" "}
-              <strong>{selectedIndexes.length} plot{selectedIndexes.length !== 1 ? "s" : ""}</strong>{" "}
-              from the grid. Use undo (Ctrl+Z) to restore them.
+              This removes the {features.length} polygon
+              {features.length === 1 ? "" : "s"} currently drawn on the map.
+              You'll need to draw an outer boundary again before regenerating
+              the grid. You can undo this with Cmd/Ctrl+Z.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setClearConfirmOpen(false)}
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
+              data-testid="boundary-clear-all-confirm"
               onClick={() => {
-                if (!previewGeoJson) { setShowDeleteConfirm(false); return; }
-                const selSet = new Set(selectedIndexes);
-                const remaining = previewGeoJson.features.filter((_, i) => !selSet.has(i));
-                const fc = { ...previewGeoJson, features: remaining };
-                setPreviewGeoJson(fc);
-                setSelectedIndexes([]);
-                pushHistory(fc);
-                setShowDeleteConfirm(false);
+                history.set(
+                  {
+                    ...INITIAL_EDITOR_STATE,
+                    gridMode: stateRef.current.gridMode,
+                    fieldDesign: stateRef.current.fieldDesign,
+                  },
+                  { tag: "clear" },
+                )
+                setClearConfirmOpen(false)
               }}
             >
-              Delete
+              Clear all
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* No field design warning */}
-      <Dialog open={noFdWarningOpen} onOpenChange={(o) => !o && setNoFdWarningOpen(false)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>No Field Design Loaded</DialogTitle>
-            <DialogDescription>
-              No field design file has been uploaded for this run. The grid may not
-              match the actual plot layout (rows × columns will use the current
-              settings). You can upload a field design using the button in the
-              settings panel.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNoFdWarningOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => { setNoFdWarningOpen(false); _doGenerateGrid(); }}>
-              Generate Anyway
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={showSaveAsDialog}
-        onOpenChange={(o) => !o && setShowSaveAsDialog(false)}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Save As New Version</DialogTitle>
-            <DialogDescription>
-              Give this boundary version a name (optional).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-2">
-            <Label htmlFor="save-as-name" className="mb-1 block text-sm">
-              Name
-            </Label>
-            <Input
-              id="save-as-name"
-              placeholder="e.g. final, adjusted, wide-plots"
-              value={saveAsName}
-              onChange={(e) => setSaveAsName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") confirmSaveAs();
-              }}
-              autoFocus
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowSaveAsDialog(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={confirmSaveAs}>Save As</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  );
+  )
 }

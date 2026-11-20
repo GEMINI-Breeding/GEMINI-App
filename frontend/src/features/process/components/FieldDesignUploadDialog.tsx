@@ -1,0 +1,483 @@
+import { useEffect, useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import {
+  agentApi,
+  type FieldLayoutSummary,
+} from "@/features/agent/lib/agentApi"
+import { FieldMapPicker } from "@/features/process/components/FieldMapPicker"
+import {
+  autoDetect,
+  parseCSV,
+  remapAndSerialize,
+} from "@/features/process/lib/csv"
+import {
+  FD_ALIASES,
+  FD_TARGET_COLS,
+  FD_TRANSFORM_IDENTITY,
+  type FdTargetKey,
+  type FdTransform,
+  type FieldDesign,
+  type FieldDesignRow,
+} from "@/features/process/lib/fieldDesign"
+import useCustomToast from "@/hooks/useCustomToast"
+
+interface Props {
+  open: boolean
+  onClose: () => void
+  onSaved: (fd: FieldDesign) => void
+  /** The run's field: a master sheet keeps only its rows. */
+  keep?: { year?: string; location?: string; experiment?: string }
+  /** The design this field already has (held by the agent), with the grid
+   *  orientation its recorded layout gives: one click instead of an upload. */
+  /** Open straight on the field's known design (preset) or on a field map sheet. */
+  startWith?: "upload" | "preset" | "fieldmap"
+  preset?: {
+    path: string
+    name: string
+    transform: FdTransform
+    /** "tier 1 at the north end, bed 1 on the west side" */
+    described: string | null
+  } | null
+}
+
+/**
+ * Two-step dialog for uploading a field-design CSV. Step 1 picks a file and
+ * parses it; step 2 lets the user map their CSV columns onto the pipeline's
+ * expected fields (row, col, plot, accession). On save, the parent receives
+ * a complete `FieldDesign` payload ready to drop onto the geometry snapshot.
+ *
+ * No network calls happen here — the parent owns persistence (snapshot
+ * save). That's intentional: GEMINIbase has no field-design endpoint, and
+ * the design rides on PlotGeometryStateSnapshot anyway.
+ */
+export function FieldDesignUploadDialog({
+  open,
+  onClose,
+  onSaved,
+  keep,
+  preset,
+  startWith = "upload",
+}: Props) {
+  const [step, setStep] = useState<"upload" | "map" | "fieldmap">("upload")
+  const [headers, setHeaders] = useState<string[]>([])
+  const [parsedRows, setParsedRows] = useState<FieldDesignRow[]>([])
+  const [mapping, setMapping] = useState<Partial<Record<FdTargetKey, string>>>(
+    {},
+  )
+  const [fileName, setFileName] = useState<string | null>(null)
+  // The orientation the field's recorded layout gives (when its preset design is used).
+  const [presetTransform, setPresetTransform] = useState<FdTransform | null>(
+    null,
+  )
+  const [presetLoading, setPresetLoading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const { showErrorToast } = useCustomToast()
+
+  function reset() {
+    setStep("upload")
+    setHeaders([])
+    setParsedRows([])
+    setMapping({})
+    setFileName(null)
+    setPresetTransform(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  async function applyPreset() {
+    if (!preset) return
+    setPresetLoading(true)
+    try {
+      const got = await agentApi.fieldLayoutAt(preset.path, keep)
+      setFileName(preset.name)
+      loadText(got.csv)
+      setLayoutNote(got.summary)
+      setPresetTransform(preset.transform)
+    } catch (err) {
+      showErrorToast(
+        err instanceof Error
+          ? `Couldn't read ${preset.name}: ${err.message}`
+          : `Couldn't read ${preset.name}`,
+      )
+    } finally {
+      setPresetLoading(false)
+    }
+  }
+
+  const [layoutNote, setLayoutNote] = useState<FieldLayoutSummary | null>(null)
+
+  // Opened on the known design, or on a field map: go there at once.
+  const startedRef = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once per opening, not again when the preset object changes
+  useEffect(() => {
+    if (!open) {
+      startedRef.current = false
+      return
+    }
+    if (startedRef.current) return
+    startedRef.current = true
+    if (startWith === "fieldmap") setStep("fieldmap")
+    else if (startWith === "preset" && preset) void applyPreset()
+  }, [open, startWith])
+
+  function handleClose() {
+    reset()
+    onClose()
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setFileName(file.name)
+    setLayoutNote(null)
+    // Any shape of design (a drawn map, a workbook, odd column names): the
+    // agent service on this computer reads it into one clean table. Without
+    // it, a plain CSV is read here as before.
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(String(r.result).split(",", 2)[1] ?? "")
+        r.onerror = () => reject(r.error)
+        r.readAsDataURL(file)
+      })
+      const got = await agentApi.fieldLayout(file.name, b64, keep)
+      setFileName(got.kept_as ?? file.name)
+      loadText(got.csv)
+      setLayoutNote(got.summary)
+      return
+    } catch (err) {
+      if (!/\.csv$/i.test(file.name)) {
+        showErrorToast(
+          err instanceof Error
+            ? `Couldn't read ${file.name}: ${err.message}`
+            : `Couldn't read ${file.name}`,
+        )
+        return
+      }
+    }
+    const reader = new FileReader()
+    reader.onload = (ev) => loadText((ev.target?.result as string) ?? "")
+    reader.readAsText(file)
+  }
+
+  function loadText(text: string) {
+    try {
+      const { headers: h, rows } = parseCSV(text)
+      if (!h.length) {
+        showErrorToast("No columns found in CSV — file may be empty.")
+        return
+      }
+      setHeaders(h)
+      setParsedRows(rows)
+      const auto: Partial<Record<FdTargetKey, string>> = {}
+      for (const t of FD_TARGET_COLS)
+        auto[t.key] = autoDetect(h, FD_ALIASES[t.key])
+      setMapping(auto)
+      setStep("map")
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : "Failed to parse CSV")
+    }
+  }
+
+  function handleSave() {
+    const fd: FieldDesign = {
+      csv_text: remapAndSerialize(parsedRows, mapping),
+      mapping,
+      rows: parsedRows,
+      transform: presetTransform ?? FD_TRANSFORM_IDENTITY,
+      ...(fileName ? { source: fileName } : {}),
+    }
+    onSaved(fd)
+    reset()
+  }
+
+  const requiredMapped = FD_TARGET_COLS.filter((t) => t.required).every(
+    (t) => mapping[t.key],
+  )
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
+        <DialogHeader>
+          <DialogTitle>
+            {step === "upload"
+              ? "Upload field design"
+              : step === "fieldmap"
+                ? "Field design from a field map"
+                : "Map columns"}
+          </DialogTitle>
+          <DialogDescription>
+            {step === "upload"
+              ? "Upload a CSV mapping plot grid (row, col) coordinates to plot metadata. The design's rows/cols auto-populate the grid; metadata tags each generated polygon."
+              : step === "fieldmap"
+                ? "Open the field map sheet, then click the plot cells at two opposite corners of this field. Border and empty cells are skipped."
+                : `Match your CSV's columns to the expected pipeline fields. ${parsedRows.length} rows detected.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        {step === "upload" && (
+          <div className="space-y-3">
+            {preset && (
+              <div
+                className="flex flex-wrap items-center gap-3 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm"
+                data-testid="fd-preset"
+              >
+                <div className="min-w-0 flex-1">
+                  <p>
+                    This field's design:{" "}
+                    <span className="font-medium break-all">{preset.name}</span>
+                  </p>
+                  {preset.described && (
+                    <p className="text-muted-foreground text-xs">
+                      Laid out with {preset.described}: the grid is turned to
+                      match.
+                    </p>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  className="shrink-0"
+                  disabled={presetLoading}
+                  onClick={() => void applyPreset()}
+                  data-testid="fd-use-preset"
+                >
+                  {presetLoading ? "Reading…" : "Use it"}
+                </Button>
+              </div>
+            )}
+            <Label htmlFor="fd-file-button">
+              Select the field design (.csv or Excel: a plot list, or a drawn
+              field map)
+            </Label>
+            <div className="flex items-center gap-3">
+              <Button
+                id="fd-file-button"
+                type="button"
+                variant="secondary"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose file
+              </Button>
+              <span
+                className="text-muted-foreground text-sm"
+                data-testid="fd-file-name"
+              >
+                {fileName ?? "No file chosen"}
+              </span>
+              {/* Keep the native input in the DOM so the click() ref + the
+                  Playwright `setInputFiles` testid path both still work. */}
+              <input
+                ref={fileInputRef}
+                data-testid="field-design-file"
+                type="file"
+                accept=".csv,text/csv,.xlsx,.xlsm"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Or{" "}
+              <button
+                type="button"
+                className="text-primary underline-offset-2 hover:underline"
+                data-testid="fd-use-field-map"
+                onClick={() => setStep("fieldmap")}
+              >
+                use a field map
+              </button>
+              : a sheet of plot numbers laid out as in the field, where you
+              click the corners of the plot area (with genotypes from a plot
+              list, if you have one).
+            </p>
+          </div>
+        )}
+
+        {step === "fieldmap" && (
+          <FieldMapPicker
+            onCancel={() => setStep("upload")}
+            onDone={(csv, note) => {
+              setFileName(note)
+              setLayoutNote(null)
+              loadText(csv)
+            }}
+          />
+        )}
+
+        {step === "map" && (
+          <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto">
+            {layoutNote && (
+              <div
+                className="rounded-md border bg-muted/40 p-3 text-sm"
+                data-testid="fd-layout-summary"
+              >
+                <p className="font-medium">
+                  {layoutNote.plots} plots
+                  {layoutNote.crops.length > 1
+                    ? `, ${layoutNote.crops.length} crops: results are filed per crop`
+                    : ""}
+                </p>
+                <ul className="text-muted-foreground mt-1 space-y-0.5 text-xs">
+                  {layoutNote.crops.slice(0, 6).map((c) => (
+                    <li key={c.crop}>
+                      {c.crop}: {c.plots} plots, beds {c.beds || "?"}, tiers{" "}
+                      {c.tiers || "?"}
+                    </li>
+                  ))}
+                </ul>
+                {layoutNote.without_position > 0 && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    {layoutNote.without_position} plots have no bed and tier in
+                    this file (a plot list without the field map).
+                  </p>
+                )}
+                {layoutNote.environments_in_file &&
+                  Object.keys(layoutNote.environments_in_file).length > 1 &&
+                  layoutNote.kept &&
+                  Object.keys(layoutNote.kept).length > 0 && (
+                    <p className="mt-1 text-xs">
+                      A master sheet of{" "}
+                      {Object.keys(layoutNote.environments_in_file).length}{" "}
+                      fields: kept this run's (
+                      {Object.values(layoutNote.kept).join(" · ")}).
+                    </p>
+                  )}
+                {layoutNote.filter_ignored && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    No rows for this run's{" "}
+                    {layoutNote.filter_ignored.join(", ")} in the sheet, so that
+                    column was not used to choose rows: check these are the
+                    right plots.
+                  </p>
+                )}
+                {layoutNote.environments &&
+                  Object.keys(layoutNote.environments).length > 1 && (
+                    <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                      The rows kept still cover several seasons or sites (
+                      {Object.keys(layoutNote.environments).join(", ")}): plot
+                      numbers repeat between them. Use a file for one season and
+                      site.
+                    </p>
+                  )}
+              </div>
+            )}
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-muted-foreground border-b text-left">
+                  <th className="w-2/5 pb-2 font-medium">Pipeline field</th>
+                  <th className="pb-2 font-medium">Your column</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {FD_TARGET_COLS.map((t) => (
+                  <tr key={t.key}>
+                    <td className="py-2 pr-4">
+                      <div className="flex items-center gap-1.5">
+                        <code className="bg-muted rounded px-1 py-0.5 text-xs">
+                          {t.key}
+                        </code>
+                        {t.required && (
+                          <span className="text-xs text-red-500">*</span>
+                        )}
+                      </div>
+                      <div className="text-muted-foreground mt-0.5 text-xs">
+                        {t.hint}
+                      </div>
+                    </td>
+                    <td className="py-2">
+                      <select
+                        data-testid={`field-design-map-${t.key}`}
+                        className="bg-background w-full rounded border px-2 py-1 text-sm"
+                        value={mapping[t.key] ?? ""}
+                        onChange={(e) =>
+                          setMapping((m) => ({ ...m, [t.key]: e.target.value }))
+                        }
+                      >
+                        {t.required ? (
+                          <option value="">— select column —</option>
+                        ) : (
+                          <option value="">— skip —</option>
+                        )}
+                        {headers.map((h) => (
+                          <option key={h} value={h}>
+                            {h}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {!requiredMapped && (
+              <p className="text-xs text-red-500">row and col are required.</p>
+            )}
+
+            <div>
+              <p className="text-muted-foreground mb-1 text-xs">
+                Preview (first 4 rows after mapping):
+              </p>
+              <div className="bg-muted/40 overflow-x-auto rounded border">
+                <table className="w-full font-mono text-xs">
+                  <thead>
+                    <tr className="bg-muted border-b">
+                      {FD_TARGET_COLS.filter((t) => mapping[t.key]).map((t) => (
+                        <th
+                          key={t.key}
+                          className="px-2 py-1 text-left font-medium"
+                        >
+                          {t.key}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsedRows.slice(0, 4).map((row, i) => (
+                      <tr key={i} className="border-b last:border-0">
+                        {FD_TARGET_COLS.filter((t) => mapping[t.key]).map(
+                          (t) => (
+                            <td key={t.key} className="px-2 py-1">
+                              {row[mapping[t.key]!] ?? ""}
+                            </td>
+                          ),
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          {step === "map" && (
+            <Button variant="outline" onClick={() => setStep("upload")}>
+              Back
+            </Button>
+          )}
+          <Button variant="outline" onClick={handleClose}>
+            Cancel
+          </Button>
+          {step === "map" && (
+            <Button
+              data-testid="field-design-confirm"
+              disabled={!requiredMapped}
+              onClick={handleSave}
+            >
+              Use field design
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

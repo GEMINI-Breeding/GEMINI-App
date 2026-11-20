@@ -16,8 +16,8 @@
  *   sizing this component (it fills w-full h-full of its container)
  */
 
-import { useState, useEffect, useRef } from "react"
-import { Loader2, ImageOff } from "lucide-react"
+import { ImageOff, Loader2 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
 // ── Public types ───────────────────────────────────────────────────────────────
 
@@ -35,8 +35,16 @@ export interface Prediction {
 // ── Colour helpers ────────────────────────────────────────────────────────────
 
 const CLASS_COLOURS = [
-  "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6",
-  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
+  "#ef4444",
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#f97316",
+  "#14b8a6",
+  "#6366f1",
 ]
 
 export function classColour(cls: string): string {
@@ -47,22 +55,41 @@ export function classColour(cls: string): string {
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
-export function plotImageUrl(recordId: string, plotId: string): string {
+/**
+ * Build the GEMINIbase file-download URL for a MinIO object path. The
+ * backend mounts everything in the bucket called "gemini" by default, so
+ * pass paths in the form "gemini/Processed/.../plot_3_accession_X.png".
+ *
+ * Used by the Phase 8 InferenceTool to fetch per-plot PNGs the SPLIT
+ * worker already wrote to MinIO.
+ */
+export function objectImageUrl(objectPath: string): string {
   const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
-  const path = `/api/v1/analyze/trait-records/${recordId}/plot-image/${encodeURIComponent(plotId)}`
+  // Litestar's path-parameter parser already does decoding; we just need
+  // to ensure slashes inside the path are preserved.
+  const path = `/api/files/download/${objectPath.split("/").map(encodeURIComponent).join("/")}`
   return base ? `${base}${path}` : path
 }
 
 export function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem("access_token") || ""
+  // Phase 4 stores the JWT under this key (gemini.auth.token); the older
+  // `access_token` key is kept as a fallback so any in-flight code path
+  // that hasn't been migrated keeps working.
+  const token =
+    localStorage.getItem("gemini.auth.token") ||
+    localStorage.getItem("access_token") ||
+    ""
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export interface PlotImageProps {
-  recordId: string
-  plotId: string
+  /**
+   * Phase 8+ callsite. MinIO object path (e.g. "gemini/Processed/.../plot.png");
+   * served via `/api/files/download/{path}` with the standard JWT.
+   */
+  objectPath?: string
   /** When true, image is displayed rotated 90° CW (for ground/stitch plots). */
   rotate?: boolean
   predictions?: Prediction[]
@@ -74,8 +101,7 @@ export interface PlotImageProps {
 }
 
 export function PlotImage({
-  recordId,
-  plotId,
+  objectPath,
   rotate = false,
   predictions = [],
   showDetections = false,
@@ -86,7 +112,10 @@ export function PlotImage({
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [errored, setErrored] = useState(false)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
-  const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null)
+  const [containerSize, setContainerSize] = useState<{
+    w: number
+    h: number
+  } | null>(null)
   const [rotateOverride, setRotateOverride] = useState<boolean | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -94,7 +123,9 @@ export function PlotImage({
   const shouldRotate = rotateOverride !== null ? rotateOverride : rotate
 
   // Reset per-image override whenever the rotate prop changes
-  useEffect(() => { setRotateOverride(null) }, [rotate])
+  useEffect(() => {
+    setRotateOverride(null)
+  }, [])
 
   // Track container dimensions for both rotation math and canvas sizing
   useEffect(() => {
@@ -102,36 +133,46 @@ export function PlotImage({
     if (!el) return
     const obs = new ResizeObserver((entries) => {
       const e = entries[0]
-      if (e) setContainerSize({ w: e.contentRect.width, h: e.contentRect.height })
+      if (e)
+        setContainerSize({ w: e.contentRect.width, h: e.contentRect.height })
     })
     obs.observe(el)
     return () => obs.disconnect()
   }, [])
 
-  // Fetch image (authenticated)
+  // Fetch image (authenticated) by its MinIO object path. No path means
+  // there is no image for this plot (e.g. the ortho was never split).
   useEffect(() => {
-    setBlobUrl(null); setErrored(false); setDims(null)
-    let revoked = false; let objectUrl: string | null = null
-    const url = plotImageUrl(recordId, plotId)
-    console.debug(`[PlotImage] fetching recordId=${recordId} plotId=${plotId} → ${url}`)
+    setBlobUrl(null)
+    setErrored(false)
+    setDims(null)
+    const url = objectPath ? objectImageUrl(objectPath) : ""
+    if (!url) {
+      setErrored(true)
+      return
+    }
+
+    let revoked = false
+    let createdObjectUrl: string | null = null
     fetch(url, { headers: authHeaders() })
       .then((res) => {
-        if (!res.ok) {
-          console.warn(`[PlotImage] HTTP ${res.status} for plotId=${plotId} recordId=${recordId} url=${url}`)
-          throw new Error(`HTTP ${res.status}`)
-        }
-        console.debug(`[PlotImage] OK ${res.status} for plotId=${plotId}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.blob()
       })
       .then((blob) => {
-        if (!revoked) { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl) }
+        if (!revoked) {
+          createdObjectUrl = URL.createObjectURL(blob)
+          setBlobUrl(createdObjectUrl)
+        }
       })
-      .catch((err) => {
-        console.error(`[PlotImage] error for plotId=${plotId} recordId=${recordId}:`, err)
+      .catch(() => {
         if (!revoked) setErrored(true)
       })
-    return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [recordId, plotId])
+    return () => {
+      revoked = true
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl)
+    }
+  }, [objectPath])
 
   // Draw detection overlay — correct coordinate math for both orientations
   useEffect(() => {
@@ -159,11 +200,11 @@ export function PlotImage({
       // Full mapping (element at top:50%,left:50% + translate(-50%,-50%)):
       //   screen_x = cw - css_y
       //   screen_y = css_x
-      const cssBoxW = ch  // CSS box width  = container height
-      const cssBoxH = cw  // CSS box height = container width
+      const cssBoxW = ch // CSS box width  = container height
+      const cssBoxH = cw // CSS box height = container width
       const scale = Math.min(cssBoxW / W, cssBoxH / H)
-      const offX = (cssBoxW - W * scale) / 2  // horizontal offset in CSS box
-      const offY = (cssBoxH - H * scale) / 2  // vertical offset in CSS box
+      const offX = (cssBoxW - W * scale) / 2 // horizontal offset in CSS box
+      const offY = (cssBoxH - H * scale) / 2 // vertical offset in CSS box
 
       for (const p of activePreds) {
         const color = classColour(p.class)
@@ -180,7 +221,8 @@ export function PlotImage({
         const sh = p.width * scale
         // Skip if completely outside canvas
         if (sx + sw < 0 || sx > cw || sy + sh < 0 || sy > ch) continue
-        ctx.strokeStyle = color; ctx.lineWidth = 2
+        ctx.strokeStyle = color
+        ctx.lineWidth = 2
         ctx.strokeRect(sx, sy, sw, sh)
         if (showLabels) {
           const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
@@ -188,8 +230,10 @@ export function PlotImage({
           const tw = ctx.measureText(label).width
           const lx = Math.max(0, sx)
           const ly = Math.max(14, sy)
-          ctx.fillStyle = color; ctx.fillRect(lx, ly - 14, tw + 6, 14)
-          ctx.fillStyle = "#fff"; ctx.fillText(label, lx + 3, ly - 2)
+          ctx.fillStyle = color
+          ctx.fillRect(lx, ly - 14, tw + 6, 14)
+          ctx.fillStyle = "#fff"
+          ctx.fillText(label, lx + 3, ly - 2)
         }
       }
     } else {
@@ -201,8 +245,10 @@ export function PlotImage({
         const color = classColour(p.class)
         const x = (p.x - p.width / 2) * scale + offX
         const y = (p.y - p.height / 2) * scale + offY
-        const w = p.width * scale; const h = p.height * scale
-        ctx.strokeStyle = color; ctx.lineWidth = 2
+        const w = p.width * scale
+        const h = p.height * scale
+        ctx.strokeStyle = color
+        ctx.lineWidth = 2
         ctx.strokeRect(x, y, w, h)
         if (showLabels) {
           const label = `${p.class} ${(p.confidence * 100).toFixed(0)}%`
@@ -210,31 +256,42 @@ export function PlotImage({
           const tw = ctx.measureText(label).width
           const lx = Math.max(offX, x)
           const ly = Math.max(offY + 14, y)
-          ctx.fillStyle = color; ctx.fillRect(lx, ly - 14, tw + 6, 14)
-          ctx.fillStyle = "#fff"; ctx.fillText(label, lx + 3, ly - 2)
+          ctx.fillStyle = color
+          ctx.fillRect(lx, ly - 14, tw + 6, 14)
+          ctx.fillStyle = "#fff"
+          ctx.fillText(label, lx + 3, ly - 2)
         }
       }
     }
-  }, [dims, predictions, showDetections, showLabels, activeClass, shouldRotate, containerSize])
+  }, [
+    dims,
+    predictions,
+    showDetections,
+    showLabels,
+    activeClass,
+    shouldRotate,
+    containerSize,
+  ])
 
   // Image CSS style — swapped dims + object-cover for ground, contain for aerial
-  const imgStyle: React.CSSProperties = shouldRotate && containerSize
-    ? {
-        position: "absolute",
-        top: "50%",
-        left: "50%",
-        transform: "translate(-50%, -50%) rotate(90deg)",
-        width: `${containerSize.h}px`,   // CSS box width  = container height
-        height: `${containerSize.w}px`,  // CSS box height = container width
-        objectFit: "contain",
-      }
-    : {
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        objectFit: "contain",
-      }
+  const imgStyle: React.CSSProperties =
+    shouldRotate && containerSize
+      ? {
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%) rotate(90deg)",
+          width: `${containerSize.h}px`, // CSS box width  = container height
+          height: `${containerSize.w}px`, // CSS box height = container width
+          objectFit: "contain",
+        }
+      : {
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "contain",
+        }
 
   return (
     <div
@@ -254,10 +311,13 @@ export function PlotImage({
         <>
           <img
             src={blobUrl}
-            alt={`plot ${plotId}`}
+            alt={`plot ${objectPath ?? ""}`}
             style={imgStyle}
             onLoad={(e) =>
-              setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+              setDims({
+                w: e.currentTarget.naturalWidth,
+                h: e.currentTarget.naturalHeight,
+              })
             }
           />
           <canvas
@@ -270,8 +330,17 @@ export function PlotImage({
             title={shouldRotate ? "Reset orientation" : "Rotate 90°"}
             className="absolute top-1 right-1 z-10 bg-black/40 hover:bg-black/60 text-white rounded p-1 transition-colors"
           >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" strokeOpacity=".3" />
+            <svg
+              className="w-3 h-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
+                strokeOpacity=".3"
+              />
               <path d="M17 8l-5-5-5 5M12 3v9" />
             </svg>
           </button>

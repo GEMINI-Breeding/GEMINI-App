@@ -1,0 +1,5 @@
+Report of the conversion process:
+Number of files: 1
+Output path: /tmp/amiga-out/RGB
+
+--- File: /tmp/2024_07_15_15_49_18_998387_track-fixture.0000.bin ---

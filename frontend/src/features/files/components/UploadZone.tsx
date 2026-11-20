@@ -1,92 +1,184 @@
-import { Upload, Image } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { pickFiles, isTauri } from "@/lib/platform";
+/**
+ * Browser-native file dropzone for Phase 6.
+ *
+ * Two paths in:
+ *   - Click → hidden <input type="file" multiple webkitdirectory={false}>.
+ *     Returns flat File[] for any selection.
+ *   - Drop → walks `dataTransfer.items[].webkitGetAsEntry()` so dropping a
+ *     *folder* expands into its contained files. Without that walk, browsers
+ *     surface the folder as a single 0-byte File entry whose name is the
+ *     folder, which the parent component then rejects as "wrong file type"
+ *     (the previous misleading failure mode the user hit on
+ *     `Subset Drone Data/`).
+ */
+
+import { Image, Upload } from "lucide-react"
+import { useRef, useState } from "react"
+
+import { setFolder } from "../lib/uploadGroups"
 
 interface UploadZoneProps {
-  onFilesAdded?: (paths: string[]) => void;
+  onFilesAdded?: (files: File[]) => void
+  /** Hint for the native file picker. Examples: "image/*", ".csv,.xlsx" */
+  accept?: string
+  /** When true, the dropzone is visibly inert: clicking does not open the
+   *  picker, and dropping is ignored. Used by the Files page to gate the
+   *  upload affordance behind required scope fields (data type and
+   *  experiment) so files can't be staged into an undefined target. */
+  disabled?: boolean
+  /** Short human-readable reason shown inside the disabled dropzone.
+   *  Required when `disabled` is true so the user understands why. */
+  disabledReason?: string
 }
 
-export function UploadZone({ onFilesAdded }: UploadZoneProps) {
-  const [isDragOver, setIsDragOver] = useState(false);
-  // Ref-tracked version so the Tauri event closure always sees the current value
-  const isDragOverRef = useRef(false);
-  // Counter to handle nested dragenter/dragleave on child elements
-  const dragCountRef = useRef(0);
+interface FileSystemDirectoryEntryLike {
+  isDirectory: true
+  isFile: false
+  name: string
+  createReader(): {
+    readEntries(
+      cb: (entries: FileSystemEntryLike[]) => void,
+      err?: (e: unknown) => void,
+    ): void
+  }
+}
+interface FileSystemFileEntryLike {
+  isDirectory: false
+  isFile: true
+  name: string
+  fullPath: string
+  file(cb: (f: File) => void, err?: (e: unknown) => void): void
+}
+type FileSystemEntryLike =
+  | FileSystemDirectoryEntryLike
+  | FileSystemFileEntryLike
 
-  const setDrag = (val: boolean) => {
-    isDragOverRef.current = val;
-    setIsDragOver(val);
-  };
+async function readAllEntries(
+  reader: ReturnType<FileSystemDirectoryEntryLike["createReader"]>,
+): Promise<FileSystemEntryLike[]> {
+  // readEntries returns at most ~100 entries per call; loop until empty.
+  const out: FileSystemEntryLike[] = []
+  while (true) {
+    const batch = await new Promise<FileSystemEntryLike[]>((resolve, reject) =>
+      reader.readEntries(resolve, reject),
+    )
+    if (batch.length === 0) break
+    out.push(...batch)
+  }
+  return out
+}
 
-  const handleClick = async () => {
-    const selected = await pickFiles({ multiple: true });
-    if (selected && selected.length > 0) {
-      const paths = selected.map((f) => (typeof f === "string" ? f : f.name));
-      onFilesAdded?.(paths);
-    }
-  };
+async function entryToFiles(entry: FileSystemEntryLike): Promise<File[]> {
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) =>
+      entry.file(resolve, reject),
+    )
+    // "/2026-09-17/run2/DJI_0001.JPG" -> "2026-09-17/run2": kept so the
+    // upload step can ask what the folders stand for (runs, treatments).
+    setFolder(file, entry.fullPath.split("/").slice(0, -1).join("/"))
+    return [file]
+  }
+  // Directory: read all children, recurse. Run in parallel for speed —
+  // a typical drone-image folder has hundreds of JPGs.
+  const children = await readAllEntries(entry.createReader())
+  const nested = await Promise.all(children.map(entryToFiles))
+  return nested.flat()
+}
 
-  // Visual feedback — these DOM events fire even in Tauri's webview
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCountRef.current++;
-    setDrag(true);
-  };
+/**
+ * Extract a flat File[] from a DataTransfer, walking any dropped directories.
+ * Falls back to dataTransfer.files when items[] / webkitGetAsEntry isn't
+ * available (older browsers, some test environments).
+ */
+export async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
+  const items = Array.from(dt.items ?? [])
+  const hasGetEntry = items.some(
+    (it) =>
+      typeof (it as DataTransferItem & { webkitGetAsEntry?: unknown })
+        .webkitGetAsEntry === "function",
+  )
+  if (!hasGetEntry) {
+    return Array.from(dt.files)
+  }
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault(); // required to allow drop
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCountRef.current--;
-    if (dragCountRef.current <= 0) {
-      dragCountRef.current = 0;
-      setDrag(false);
-    }
-  };
-
-  // Browser-only drop (in Tauri the OS intercepts this; paths come from the effect below)
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCountRef.current = 0;
-    setDrag(false);
-    if (!isTauri()) {
-      const files = Array.from(e.dataTransfer.files);
-      if (files.length > 0) onFilesAdded?.(files.map((f) => f.name));
-    }
-  };
-
-  // Tauri: listen for native file-drop events on the window.
-  // We only forward paths when the zone itself is in drag-over state,
-  // so drops elsewhere on the window don't accidentally trigger uploads.
-  useEffect(() => {
-    if (!isTauri()) return;
-
-    let unlisten: (() => void) | undefined;
-
-    (async () => {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      unlisten = await win.onDragDropEvent((event) => {
-        const type = event.payload.type;
-        if (type === "drop") {
-          if (isDragOverRef.current) {
-            onFilesAdded?.((event.payload as { paths: string[] }).paths);
-          }
-          dragCountRef.current = 0;
-          setDrag(false);
-        } else if (type === "leave") {
-          dragCountRef.current = 0;
-          setDrag(false);
+  const results = await Promise.all(
+    items.map(async (item) => {
+      if (item.kind !== "file") return [] as File[]
+      const rawEntry = (
+        item as DataTransferItem & {
+          webkitGetAsEntry?: () => unknown
         }
-      });
-    })();
+      ).webkitGetAsEntry?.()
+      if (!rawEntry) {
+        const f = item.getAsFile()
+        return f ? [f] : []
+      }
+      return entryToFiles(rawEntry as unknown as FileSystemEntryLike)
+    }),
+  )
+  return results.flat()
+}
 
-    return () => {
-      unlisten?.();
-    };
-  }, [onFilesAdded]);
+export function UploadZone({
+  onFilesAdded,
+  accept,
+  disabled = false,
+  disabledReason,
+}: UploadZoneProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [isExpanding, setIsExpanding] = useState(false)
+  const dragCountRef = useRef(0)
+
+  const handleClick = () => {
+    if (disabled) return
+    inputRef.current?.click()
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return
+    const files = Array.from(e.target.files ?? [])
+    if (files.length > 0) onFilesAdded?.(files)
+    // Reset so picking the same file twice still triggers onChange.
+    e.target.value = ""
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (disabled) return
+    e.preventDefault()
+    dragCountRef.current++
+    setIsDragOver(true)
+  }
+  const handleDragOver = (e: React.DragEvent) => {
+    if (disabled) return
+    e.preventDefault() // required to allow drop
+  }
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (disabled) return
+    e.preventDefault()
+    dragCountRef.current--
+    if (dragCountRef.current <= 0) {
+      dragCountRef.current = 0
+      setIsDragOver(false)
+    }
+  }
+  const handleDrop = async (e: React.DragEvent) => {
+    if (disabled) return
+    e.preventDefault()
+    dragCountRef.current = 0
+    setIsDragOver(false)
+    // Snapshot the DataTransfer before any await — React pools synthetic
+    // events and `e.dataTransfer` becomes inaccessible after the first
+    // microtask in older React versions.
+    const dt = e.dataTransfer
+    setIsExpanding(true)
+    try {
+      const files = await filesFromDataTransfer(dt)
+      if (files.length > 0) onFilesAdded?.(files)
+    } finally {
+      setIsExpanding(false)
+    }
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card p-6">
@@ -95,29 +187,65 @@ export function UploadZone({ onFilesAdded }: UploadZoneProps) {
         <h2 className="text-foreground">Upload</h2>
       </div>
 
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={accept}
+        onChange={handleInputChange}
+        className="hidden"
+        data-testid="upload-input"
+      />
+
       <div
         onClick={handleClick}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") handleClick();
+          if (disabled) return
+          if (e.key === "Enter" || e.key === " ") handleClick()
         }}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         role="button"
-        tabIndex={0}
-        className={`cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
-          isDragOver
-            ? "border-primary bg-primary/10"
-            : "border-border hover:border-muted-foreground hover:bg-muted"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled || undefined}
+        data-testid="upload-dropzone"
+        data-disabled={disabled || undefined}
+        className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+          disabled
+            ? "cursor-not-allowed border-border bg-muted/30 opacity-60"
+            : isDragOver
+              ? "cursor-pointer border-primary bg-primary/10"
+              : "cursor-pointer border-border hover:border-muted-foreground hover:bg-muted"
         }`}
       >
         <Upload className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-        <p className="mb-1 text-foreground">
-          {isDragOver ? "Drop files here" : "Click to browse or drag & drop files"}
-        </p>
-        <p className="text-muted-foreground">Supports multiple files</p>
+        {disabled ? (
+          <>
+            <p className="mb-1 text-foreground">Upload is locked</p>
+            <p
+              className="text-muted-foreground"
+              data-testid="upload-dropzone-disabled-reason"
+            >
+              {disabledReason ?? "Required fields are missing."}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mb-1 text-foreground">
+              {isExpanding
+                ? "Reading folder…"
+                : isDragOver
+                  ? "Drop files or folders here"
+                  : "Click to browse, or drag & drop files or folders"}
+            </p>
+            <p className="text-muted-foreground">
+              Folders are walked recursively; subfolders included.
+            </p>
+          </>
+        )}
       </div>
     </div>
-  );
+  )
 }

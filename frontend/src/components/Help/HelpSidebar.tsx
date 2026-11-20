@@ -6,8 +6,8 @@
  * the onboarding spotlight.
  */
 
-import { BookOpen, ExternalLink, PlayCircle, X } from "lucide-react"
 import { useLocation } from "@tanstack/react-router"
+import { BookOpen, ExternalLink, PlayCircle, X } from "lucide-react"
 import { openUrl } from "@/lib/platform"
 import { getTourSection } from "./tourSteps"
 
@@ -55,21 +55,37 @@ const SECTIONS: Record<string, Section> = {
       "Reference datasets can be associated with a workspace from the workspace detail page",
     ],
   },
+  plot_boundary_prep: {
+    title: "Plot Boundary Prep",
+    docPath: "/app_guide/aerial_pipeline/",
+    bullets: [
+      "Draw the outer field boundary with the rectangle or polygon tool (top left of the map); the grid settings under the map fill it with plots",
+      "Or import boundaries saved for another date of this field (Version menu → Import from…)",
+      "Click a plot to select it: Shift-click adds, Cmd/Ctrl-click toggles, Cmd/Ctrl-A selects every plot",
+      "Select an area: drag a box around plots to select them; it switches off afterwards so the next drag moves them",
+      "Drag a selected plot to move the whole selection, or use the arrow keys (Shift: ten steps)",
+      "Cmd/Ctrl-Z undoes, Cmd/Ctrl-Shift-Z redoes",
+      "Shift + drag (or the View buttons) turns the map; only the view turns, not the plots",
+      "Save with the quick save on the map, or Save & complete step in the Version menu; the active version is what plot images and traits use",
+    ],
+  },
   "/analyze": {
     title: "Analyze",
     docPath: "/app_guide/analyze/",
     bullets: [
-      "Pipeline Runs tab: browse individual runs, inspect plot images with detection overlays",
-      "Master Table: merged view across all pipelines and dates for a workspace",
-      "Query tab: search and pin plots for side-by-side comparison",
-      "Map tab: spatial overlay of orthomosaics, plot boundaries, and trait values",
-      "Use the Color By selector to visualise any trait or reference metric on the map",
-      "Click the refresh button (↺) to pick up newly completed pipeline runs",
+      "Table (opens first): every plot's traits on each flight date, one row per plot per date; switch Dates to one date, the latest reading or the mean; filter with plot:12, acc:CB27 or date:2022-07; download as CSV",
+      "Query: find plots by number or accession and see each one's image on every date side by side, with that date's traits under it; add several plots to compare them, click an image to page through the season",
+      "Single trait: pick the experiment, season, site and crop first, then one of the traits measured there; it opens through the season (switch to the season table, histogram, genotype range, field layout and more)",
+      "Multivariate: several traits at once (correlation, PCA, ANOVA, heritability, GGE)",
+      "Map: each date's orthomosaic with its plots coloured by a trait",
     ],
   },
 }
 
-function getSectionForPath(pathname: string): Section {
+function getSectionForPath(pathname: string, step?: string): Section {
+  // A step's own tool page has its own help.
+  if (pathname.endsWith("/tool") && step && SECTIONS[step])
+    return SECTIONS[step]
   if (pathname.startsWith("/files")) return SECTIONS["/files"]
   if (pathname.startsWith("/process")) return SECTIONS["/process"]
   if (pathname.startsWith("/analyze")) return SECTIONS["/analyze"]
@@ -79,23 +95,26 @@ function getSectionForPath(pathname: string): Section {
 interface HelpSidebarProps {
   open: boolean
   onClose: () => void
-  onStartTour: () => void
+  onStartTour: (whole?: boolean) => void
 }
 
 export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
   const location = useLocation()
-  const section = getSectionForPath(location.pathname)
-  const tourLabel = getTourSection(location.pathname, (location.search as any)?.step).label
+  const section = getSectionForPath(
+    location.pathname,
+    (location.search as { step?: string })?.step,
+  )
+  const tourLabel = getTourSection(
+    location.pathname,
+    (location.search as any)?.step,
+  ).label
 
   if (!open) return null
 
   return (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-40" onClick={onClose} />
 
       {/* Panel */}
       <aside
@@ -124,7 +143,10 @@ export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
             <h2 className="font-semibold text-sm mb-3">{section.title}</h2>
             <ul className="space-y-2">
               {section.bullets.map((bullet) => (
-                <li key={bullet} className="flex items-start gap-2 text-xs text-muted-foreground">
+                <li
+                  key={bullet}
+                  className="flex items-start gap-2 text-xs text-muted-foreground"
+                >
                   <span className="mt-1 shrink-0 h-1.5 w-1.5 rounded-full bg-primary/60" />
                   {bullet}
                 </li>
@@ -151,17 +173,19 @@ export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
               All Sections
             </p>
             <div className="space-y-1">
-              {Object.entries(SECTIONS).map(([, sec]) => (
-                <button
-                  key={sec.docPath}
-                  type="button"
-                  onClick={() => openUrl(`${DOCS_BASE}${sec.docPath}`)}
-                  className="flex items-center justify-between w-full px-2 py-1.5 rounded text-xs text-left hover:bg-muted transition-colors"
-                >
-                  <span>{sec.title}</span>
-                  <ExternalLink className="h-3 w-3 text-muted-foreground" />
-                </button>
-              ))}
+              {Object.entries(SECTIONS)
+                .filter(([key]) => key.startsWith("/")) // not a tool page's own
+                .map(([, sec]) => (
+                  <button
+                    key={sec.docPath}
+                    type="button"
+                    onClick={() => openUrl(`${DOCS_BASE}${sec.docPath}`)}
+                    className="flex items-center justify-between w-full px-2 py-1.5 rounded text-xs text-left hover:bg-muted transition-colors"
+                  >
+                    <span>{sec.title}</span>
+                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                ))}
             </div>
           </div>
         </div>
@@ -170,12 +194,29 @@ export function HelpSidebar({ open, onClose, onStartTour }: HelpSidebarProps) {
         <div className="border-t px-4 py-4">
           <button
             type="button"
-            onClick={() => { onClose(); onStartTour() }}
+            onClick={() => {
+              onClose()
+              onStartTour()
+            }}
             className="flex items-center justify-center gap-2 w-full rounded-lg border px-3 py-2 text-xs font-medium hover:bg-muted transition-colors"
           >
             <PlayCircle className="h-4 w-4 text-primary" />
-            Start {tourLabel} Tour
+            {tourLabel === "App"
+              ? "Tour of the whole app"
+              : `Start ${tourLabel} Tour`}
           </button>
+          {tourLabel !== "App" && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose()
+                onStartTour(true)
+              }}
+              className="mt-2 flex items-center justify-center gap-2 w-full rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              Tour of the whole app
+            </button>
+          )}
         </div>
       </aside>
     </>

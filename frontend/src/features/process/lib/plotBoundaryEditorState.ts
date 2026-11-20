@@ -1,0 +1,60 @@
+import type { FieldDesign } from "@/features/process/lib/fieldDesign"
+import type { FillPattern } from "@/features/process/lib/grid"
+
+export type BlockParams = {
+  label: string
+  rows: number
+  cols: number
+  angle: number
+  /** Gap between rows of plots (the alley between tiers), metres. */
+  gapMeters: number
+  /** Gap between columns (beds), metres; unset = the same as between rows. */
+  gapColMeters?: number
+  /** Field-row/col of this block's top-left plot (0 = field origin).
+   *  Lets a grid drawn over a subset of the field emit field-coordinate
+   *  row/col so trait records keyed by field position join. */
+  rowOffset: number
+  colOffset: number
+  /** Plot-number assignment order across the grid. */
+  fillPattern: FillPattern
+  /** Plot size, metres: width across the columns (beds), length along the rows.
+   *  Unset or 0: plots stretch to fill the outer boundary. */
+  plotWidthM?: number
+  plotLengthM?: number
+  /** Field-design grids: positions around the design (rows above and below,
+   *  columns each side) drawn as border plots, to help place the grid. */
+  borderRows?: number
+  borderCols?: number
+}
+
+export const DEFAULT_BLOCK_PARAMS: Omit<BlockParams, "label"> = {
+  rows: 4,
+  cols: 10,
+  angle: 0,
+  gapMeters: 0,
+  rowOffset: 0,
+  colOffset: 0,
+  fillPattern: "row-major",
+}
+
+export type PlotBoundaryEditorState = {
+  features: GeoJSON.Feature[]
+  blocks: Record<string, BlockParams>
+  activeBlockId: string | null
+  /** Settings typed before any outer boundary (block) exists: applied to the
+   *  first block drawn. */
+  pendingDefaultParams: Partial<Omit<BlockParams, "label">> | null
+  gridMode: "manual" | "fd"
+  fieldDesign: FieldDesign | null
+  selectedCellIds: string[]
+}
+
+export const INITIAL_EDITOR_STATE: PlotBoundaryEditorState = {
+  features: [],
+  blocks: {},
+  activeBlockId: null,
+  pendingDefaultParams: null,
+  gridMode: "manual",
+  fieldDesign: null,
+  selectedCellIds: [],
+}

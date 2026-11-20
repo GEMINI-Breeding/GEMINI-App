@@ -1,0 +1,174 @@
+/**
+ * Join a per-plot trait-value map onto a FeatureCollection of plot
+ * polygons so deck.gl's GeoJsonLayer (in TraitMap) can color each
+ * feature by `feature.properties[column]`.
+ *
+ * The polygon FeatureCollection comes from `usePlotPolygons`, which
+ * already normalizes per-feature `plot_number` / `plot_row_number` /
+ * `plot_column_number`. The value map's key format MUST match
+ * `plotKeyFromRowColumn` so the lookups line up.
+ */
+import type { TraitRecordOutput } from "@/client"
+import type { PlotPolygonFC } from "@/features/analyze/hooks/usePlotPolygons"
+
+/**
+ * Build a stable lookup key from a plot's (plot_number, row, column).
+ *
+ * Trade-off: encoding all three gives a deterministic join even when
+ * two plots share the same plot_number across rows. Falling back to
+ * `${plot_number}` alone (when row/col are missing) loses that
+ * disambiguation but keeps older snapshots — which only carried a
+ * scalar `plot` — joinable. Callers reduce values from the same key
+ * by mean.
+ */
+/**
+ * How to build the join key:
+ *   - `"plotrc"` (default): `plot_number-row-col` composite. Disambiguates
+ *     when plot_number repeats across rows, but requires the boundary grid's
+ *     row/col to match the trait records' row/col exactly.
+ *   - `"plot"`: `plot_number` alone. Correct when both sides are scoped to a
+ *     single population (plot_number is unique within a population), which is
+ *     what the analyze map does when a population is selected.
+ */
+export type PlotKeyMode = "plotrc" | "plot"
+
+export function plotKey(
+  plotNumber: number | string | null | undefined,
+  row?: number | string | null,
+  col?: number | string | null,
+  mode: PlotKeyMode = "plotrc",
+): string | null {
+  if (plotNumber === null || plotNumber === undefined || plotNumber === "")
+    return null
+  const p = String(plotNumber)
+  if (mode === "plot") return p
+  const hasRC =
+    row !== null &&
+    row !== undefined &&
+    row !== "" &&
+    col !== null &&
+    col !== undefined &&
+    col !== ""
+  return hasRC ? `${p}-${String(row)}-${String(col)}` : p
+}
+
+/**
+ * Reduce a list of trait records to a per-plot mean. Used by
+ * `usePlotTraitValues` to collapse multiple measurements (e.g. several
+ * collection dates) into a single value the map can render.
+ *
+ * Records without a usable plot key are ignored. Records with
+ * non-numeric `trait_value` are ignored. The mean is plain
+ * (sum/count); we explicitly don't weight by accession or season
+ * because the user picks scope upstream.
+ */
+export function reduceTraitRecordsToMeanByPlot(
+  records: TraitRecordOutput[],
+  opts: { keyMode?: PlotKeyMode } = {},
+): Map<string, number> {
+  const keyMode = opts.keyMode ?? "plotrc"
+  const sums = new Map<string, { sum: number; count: number }>()
+  for (const r of records) {
+    const v =
+      typeof r.trait_value === "number" && Number.isFinite(r.trait_value)
+        ? r.trait_value
+        : null
+    if (v === null) continue
+    const key = plotKey(
+      r.plot_number ?? null,
+      (r as { plot_row_number?: number | null }).plot_row_number ?? null,
+      (r as { plot_column_number?: number | null }).plot_column_number ?? null,
+      keyMode,
+    )
+    if (key === null) continue
+    const prev = sums.get(key)
+    if (prev) {
+      prev.sum += v
+      prev.count += 1
+    } else {
+      sums.set(key, { sum: v, count: 1 })
+    }
+  }
+  const out = new Map<string, number>()
+  for (const [k, { sum, count }] of sums) {
+    out.set(k, sum / count)
+  }
+  return out
+}
+
+/**
+ * Decorate each polygon feature with `properties[column] = mean` from
+ * the values map. Returns a *new* FeatureCollection — the input isn't
+ * mutated, so the same upstream FC can be re-used with multiple traits
+ * stacked or compared.
+ *
+ * Features without a matching value get the column omitted (TraitMap
+ * renders these as the "no value" gray).
+ */
+export function joinTraitToPolygons(
+  fc: PlotPolygonFC,
+  values: Map<string, number>,
+  column: string,
+  keyMode: PlotKeyMode = "plotrc",
+): PlotPolygonFC {
+  return {
+    type: "FeatureCollection",
+    features: fc.features.map((f) => {
+      const props = f.properties ?? {}
+      const key = plotKey(
+        props.plot_number ?? null,
+        props.plot_row_number ?? null,
+        props.plot_column_number ?? null,
+        keyMode,
+      )
+      const v = key !== null ? values.get(key) : undefined
+      const nextProps =
+        v !== undefined
+          ? { ...props, [column]: v }
+          : ({ ...props } as typeof props)
+      return { ...f, properties: nextProps }
+    }),
+  }
+}
+
+/**
+ * Attach every trait's per-plot value under `_hover` for the map tooltip
+ * (the colour shows one trait; hovering a plot lists them all). Rows come
+ * from the matrix endpoint; plots with no row get no `_hover`.
+ */
+export function attachHoverValues(
+  fc: PlotPolygonFC,
+  rows: Array<{
+    plot_number?: number | string | null
+    plot_row_number?: number | null
+    plot_column_number?: number | null
+    values: Record<string, number | null>
+  }>,
+  keyMode: PlotKeyMode = "plotrc",
+): PlotPolygonFC {
+  const byKey = new Map<string, Record<string, number | null>>()
+  for (const r of rows) {
+    const key = plotKey(
+      r.plot_number ?? null,
+      r.plot_row_number ?? null,
+      r.plot_column_number ?? null,
+      keyMode,
+    )
+    if (key !== null) byKey.set(key, r.values)
+  }
+  if (byKey.size === 0) return fc
+  return {
+    type: "FeatureCollection",
+    features: fc.features.map((f) => {
+      const props = f.properties ?? {}
+      const key = plotKey(
+        props.plot_number ?? null,
+        props.plot_row_number ?? null,
+        props.plot_column_number ?? null,
+        keyMode,
+      )
+      const values = key !== null ? byKey.get(key) : undefined
+      return values ? { ...f, properties: { ...props, _hover: values } } : f
+    }),
+  }
+}

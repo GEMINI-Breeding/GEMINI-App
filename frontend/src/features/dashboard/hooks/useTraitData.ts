@@ -1,48 +1,71 @@
 /**
  * React Query wrappers for trait data used by dashboard widgets.
- * Reuses the same query keys as the Analyze tab for cache sharing.
+ *
+ * Widgets were written against main's "trait record" (one extraction run's
+ * GeoJSON). They now read GEMINIbase through the adapter in
+ * `../lib/traitCatalog.ts` + `../lib/recordSource.ts`: a record is every
+ * trait value sharing an experiment, season, site, population and date.
  */
 
-import { useQuery, useQueries } from "@tanstack/react-query"
-import { analyzeApi, type TraitRecord, type TraitsResponse } from "@/features/analyze/api"
+import { useQueries, useQuery } from "@tanstack/react-query"
+import type { TraitRecord, TraitsResponse } from "@/features/analyze/api"
+import { fetchRecordGeojson, fetchTraitRecords } from "../lib/recordSource"
 
 // ── All trait records (catalog) ───────────────────────────────────────────────
 
 export function useTraitRecords() {
   return useQuery({
     queryKey: ["trait-records"],
-    queryFn: () => analyzeApi.listTraitRecords(),
+    queryFn: fetchTraitRecords,
     staleTime: 30_000,
-    // Automatically re-check for new pipeline extractions every 30 seconds
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   })
 }
 
-// ── GeoJSON for a single trait record ─────────────────────────────────────────
+// ── GeoJSON for one or more records ───────────────────────────────────────────
+
+/**
+ * Query options for one record's per-plot FeatureCollection. The matrix
+ * endpoint needs the trait names, which come from the catalog, so it waits
+ * for `records`. A saved widget whose record is gone fails with a message
+ * rather than silently rendering nothing.
+ */
+export function recordGeojsonQuery(
+  id: string,
+  records: TraitRecord[] | undefined,
+) {
+  return {
+    queryKey: ["trait-record-geojson", id],
+    queryFn: (): Promise<TraitsResponse> => {
+      const rec = records?.find((r) => r.id === id)
+      if (!rec) {
+        throw new Error(
+          "This trait record no longer exists. Edit the widget and pick another.",
+        )
+      }
+      return fetchRecordGeojson(id, rec.trait_columns)
+    },
+    enabled: Boolean(id) && records !== undefined,
+    staleTime: 5 * 60_000,
+    retry: false,
+  }
+}
 
 export function useTraitRecordGeojson(recordId: string | null) {
+  const { data: records } = useTraitRecords()
   return useQuery({
-    queryKey: ["trait-record-geojson", recordId],
-    queryFn: () => analyzeApi.getTraitRecordGeojson(recordId!),
-    enabled: !!recordId,
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: true,
-    // Don't retry 404s — the file is missing on disk, retrying won't help
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    ...recordGeojsonQuery(recordId ?? "", records),
+    enabled: Boolean(recordId) && records !== undefined,
   })
 }
 
 // ── GeoJSON for multiple records (temporal charts) ────────────────────────────
 
 export function useMultiTraitGeojson(recordIds: string[]) {
+  const { data: records } = useTraitRecords()
   const results = useQueries({
-    queries: recordIds.map((id) => ({
-      queryKey: ["trait-record-geojson", id],
-      queryFn: () => analyzeApi.getTraitRecordGeojson(id),
-      staleTime: 5 * 60_000,
-      retry: (failureCount: number, error: any) => error?.status !== 404 && failureCount < 2,
-    })),
+    queries: recordIds.map((id) => recordGeojsonQuery(id, records)),
   })
 
   const loading = results.some((r) => r.isLoading)
@@ -52,18 +75,6 @@ export function useMultiTraitGeojson(recordIds: string[]) {
   const firstValid = data.find((d) => d !== null) ?? null
 
   return { data, loading, error, firstValid }
-}
-
-// ── Plot IDs with images for a record ─────────────────────────────────────────
-
-export function useImagePlotIds(recordId: string | null) {
-  return useQuery({
-    queryKey: ["trait-record-image-plot-ids", recordId],
-    queryFn: () => analyzeApi.getTraitRecordImagePlotIds(recordId!),
-    enabled: !!recordId,
-    staleTime: 5 * 60_000,
-    select: (d) => d.plot_ids,
-  })
 }
 
 // ── Value formatter ───────────────────────────────────────────────────────────
@@ -89,7 +100,7 @@ export function formatDashboardValue(value: unknown, col?: string): string {
       col.includes("/") ||
       lower.includes("count") ||
       lower === "n_plants" ||
-      lower.startsWith("n_") && !lower.includes("ndvi")
+      (lower.startsWith("n_") && !lower.includes("ndvi"))
     if (isCount) return value.toFixed(1)
 
     // Physical measurements: height and vegetation fraction
@@ -120,8 +131,8 @@ export function applyFilters(
   if (active.length === 0) return features
   return features.filter((f) =>
     active.every(([field, vals]) =>
-      vals.includes(String(f.properties?.[field] ?? ""))
-    )
+      vals.includes(String(f.properties?.[field] ?? "")),
+    ),
   )
 }
 
@@ -137,14 +148,18 @@ export function computeAggregate(
 ): number | null {
   const values = geojson.features
     .map((f) => f.properties?.[metric] as number)
-    .filter((v) => typeof v === "number" && !isNaN(v))
+    .filter((v) => typeof v === "number" && !Number.isNaN(v))
 
   if (values.length === 0) return null
   switch (aggregation) {
-    case "avg": return values.reduce((a, b) => a + b, 0) / values.length
-    case "min": return Math.min(...values)
-    case "max": return Math.max(...values)
-    case "count": return values.length
+    case "avg":
+      return values.reduce((a, b) => a + b, 0) / values.length
+    case "min":
+      return Math.min(...values)
+    case "max":
+      return Math.max(...values)
+    case "count":
+      return values.length
   }
 }
 
@@ -161,7 +176,7 @@ export function groupBy(
   geojson.features.forEach((f) => {
     const key = String(f.properties?.[groupField] ?? "(none)")
     const val = f.properties?.[metric] as number
-    if (typeof val === "number" && !isNaN(val)) {
+    if (typeof val === "number" && !Number.isNaN(val)) {
       if (!buckets.has(key)) buckets.set(key, [])
       buckets.get(key)!.push(val)
     }
@@ -190,7 +205,7 @@ export function groupByMulti(
     const metricMap = buckets.get(key)!
     metrics.forEach((m) => {
       const val = f.properties?.[m] as number
-      if (typeof val === "number" && !isNaN(val)) {
+      if (typeof val === "number" && !Number.isNaN(val)) {
         if (!metricMap.has(m)) metricMap.set(m, [])
         metricMap.get(m)!.push(val)
       }
@@ -201,7 +216,8 @@ export function groupByMulti(
       const row: Record<string, string | number> = { name }
       metrics.forEach((m) => {
         const vals = metricMap.get(m) ?? []
-        row[m] = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+        row[m] =
+          vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
       })
       return row
     })
@@ -229,10 +245,14 @@ function aggregateValues(
 ): number {
   if (vals.length === 0) return 0
   switch (agg) {
-    case "avg": return vals.reduce((a, b) => a + b, 0) / vals.length
-    case "min": return Math.min(...vals)
-    case "max": return Math.max(...vals)
-    case "sum": return vals.reduce((a, b) => a + b, 0)
+    case "avg":
+      return vals.reduce((a, b) => a + b, 0) / vals.length
+    case "min":
+      return Math.min(...vals)
+    case "max":
+      return Math.max(...vals)
+    case "sum":
+      return vals.reduce((a, b) => a + b, 0)
     case "median": {
       const s = [...vals].sort((a, b) => a - b)
       return s.length % 2 === 0
@@ -278,7 +298,7 @@ export function buildTemporalSeries(
     if (!groupByField) {
       const vals = features
         .map((f) => f.properties?.[metric] as number)
-        .filter((v) => typeof v === "number" && !isNaN(v))
+        .filter((v) => typeof v === "number" && !Number.isNaN(v))
 
       row[metric] = vals.length ? aggregateValues(vals, agg) : 0
 
@@ -287,7 +307,9 @@ export function buildTemporalSeries(
         let lo: number, hi: number
         if (options.bandType === "std") {
           const mean = vals.reduce((a, b) => a + b, 0) / vals.length
-          const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length)
+          const std = Math.sqrt(
+            vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length,
+          )
           lo = mean - std
           hi = mean + std
         } else {
@@ -303,7 +325,7 @@ export function buildTemporalSeries(
       features.forEach((f) => {
         const key = String(f.properties?.[groupByField] ?? "(none)")
         const val = f.properties?.[metric] as number
-        if (typeof val === "number" && !isNaN(val)) {
+        if (typeof val === "number" && !Number.isNaN(val)) {
           if (!buckets.has(key)) buckets.set(key, [])
           buckets.get(key)!.push(val)
         }
@@ -317,6 +339,8 @@ export function buildTemporalSeries(
   })
 
   return result.sort((a, b) =>
-    normalizeDateForSort(String(a.date)).localeCompare(normalizeDateForSort(String(b.date)))
+    normalizeDateForSort(String(a.date)).localeCompare(
+      normalizeDateForSort(String(b.date)),
+    ),
   )
 }

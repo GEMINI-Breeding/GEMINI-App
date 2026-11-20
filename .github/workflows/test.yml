@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, migration/geminibase]
   pull_request:
-    branches: [main]
+    branches: [main, migration/geminibase]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,6 +14,7 @@ jobs:
   unit:
     name: Frontend unit (Vitest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -35,14 +36,108 @@ jobs:
         with:
           name: frontend-coverage
           path: frontend/coverage
-          retention-days: 14
+          # Short: artifacts count toward the org's pooled storage.
+          retention-days: 3
 
-  e2e:
-    name: Frontend E2E (Playwright)
+  backend-unit:
+    name: Backend unit (pytest)
     runs-on: ubuntu-latest
-    needs: unit
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.*
+
+      - name: Install backend deps
+        run: |
+          # Use Poetry's own venv rather than the system Python. With
+          # virtualenvs.create=false, `poetry install` tries to overwrite
+          # apt-installed packages (urllib3, idna, packaging, PyJWT, ...)
+          # whose RECORD files are missing on the GHA Debian runner image,
+          # which fails every time. A Poetry-managed venv sidesteps that.
+          poetry install --no-root --with test
+
+      - name: Run backend unit tests
+        run: |
+          # Use the existing fast unit-test suite. Integration tests that
+          # require infra live under tests/integration and are run separately
+          # by the compose-smoke job below.
+          poetry run pytest tests/unit -q
+
+  compose-smoke:
+    name: Compose stack smoke
+    # Brings the GEMINIbase backend stack up from the root docker-compose.yaml
+    # (which `include:`s backend/gemini/pipeline/docker-compose.yaml) and hits
+    # the health + schema endpoints. This verifies the submodule-pointer +
+    # compose-include plumbing on every push, which was silently broken for
+    # all of Phases 0-3 under the previous workflow.
+    runs-on: ubuntu-latest
+    needs: [unit, backend-unit]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Seed .env files
+        run: |
+          # scripts/setup-backend.sh runs submodule init + .env seeding.
+          bash scripts/setup-backend.sh
+
+      - name: Bring up the core stack (db, storage, rest-api, logger, titiler)
+        run: |
+          docker compose -f docker-compose.yaml up -d --build \
+            rest-api db storage storage-init logger titiler
+
+      - name: Wait for /healthz
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:7777/healthz > /dev/null; then
+              echo "rest-api healthy"; exit 0
+            fi
+            sleep 3
+          done
+          echo "rest-api failed to become healthy"
+          docker compose -f docker-compose.yaml logs rest-api
+          exit 1
+
+      - name: Sanity — all 28+ controllers register
+        run: |
+          curl -sf http://localhost:7777/schema/openapi.json \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); n=len(d["paths"]); print(f"{n} paths registered"); assert n > 180, f"expected >180 paths, got {n}"'
+
+      - name: Dump rest-api logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yaml logs rest-api
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yaml down -v
+
+  e2e-playwright:
+    name: Frontend E2E (Playwright)
+    runs-on: ubuntu-24.04   # Playwright 1.57 has no browsers for 26.04 (ubuntu-latest)
+    needs: [compose-smoke]
+    # Without this, a hung or endlessly-retrying run sits on the runner
+    # until GitHub's 6-hour default kills it. The suite takes ~9 min
+    # locally; CI is slower and uses `retries: 2`, so 45 min is generous
+    # while still failing fast when something wedges. (First observed:
+    # a run that sat in "Run Playwright" for 1h49m with no output.)
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-node@v4
         with:
@@ -50,44 +145,71 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
+      - name: Seed .env files
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bash scripts/setup-backend.sh
+          # The Playwright fixture DELETEs /api/e2e_cleanup?prefix=... after
+          # every test. That endpoint is gated off by default (it is a
+          # destructive prefix-delete, so it must not exist in a real
+          # deployment) and .env.example doesn't ship the flag — so in CI
+          # every one of those calls 404'd and each test's rows stayed in
+          # the database for the whole run. Enable it here rather than in
+          # setup-backend.sh, so a developer running that script doesn't
+          # silently get a destructive endpoint on their own stack.
+          echo "GEMINI_E2E_CLEANUP_ENABLED=1" >> backend/gemini/pipeline/.env
 
-      - name: Create repo .env for test config
-        run: |
-          cp .env.example .env
-
-      - name: Sync backend deps
-        working-directory: backend
-        run: uv sync --frozen
-
-      - name: Pull ODM Docker image (for pipeline-orthomosaic.spec.ts)
-        run: docker pull opendronemap/odm
-
-      - name: Start backend (uvicorn)
-        working-directory: backend
+      - name: Bring up the full stack
         env:
-          APP_DATA_ROOT: ${{ runner.temp }}/gemi-test-data
-          # Backend reads FRONTEND_HOST into its CORS allowlist. The Playwright
-          # dev server in this repo runs on 5273 (see playwright.config.ts).
-          FRONTEND_HOST: http://localhost:5273
+          # The fixture "previous GEMI install" for legacy-import.spec,
+          # mounted read-only into rest-api and the geo worker (locally the
+          # dev override mounts it; CI doesn't use the override).
+          GEMINI_LEGACY_APP_HOST_DIR: ${{ github.workspace }}/frontend/tests/fixtures/legacy/app
+          GEMINI_LEGACY_DATA_HOST_DIR: ${{ github.workspace }}/frontend/tests/fixtures/legacy/data
         run: |
-          mkdir -p "$APP_DATA_ROOT"
-          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/backend.log" 2>&1 &
-          for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:8000/api/v1/utils/health-check/ > /dev/null; then
-              echo "backend ready"; exit 0
-            fi
-            sleep 2
+          # Every worker whose job type a spec can submit must be up, or
+          # that job sits in PENDING until the spec times out. thermal was
+          # missing since the thermal specs landed (1c51ff4): all three
+          # THERMAL_EXTRACT specs waited out their timeout and then
+          # retried, which is most of why this job ran to 45 min.
+          # odm is listed for RUN_ODM; the heavy ODM spec is gated behind
+          # RUN_HEAVY_E2E, but the worker must exist for the job to be
+          # picked up at all.
+          docker compose -f docker-compose.yaml up -d --build \
+            rest-api db storage storage-init logger titiler \
+            geminibase-worker-ml geminibase-worker-geo geminibase-worker-amiga \
+            geminibase-worker-gwas geminibase-worker-thermal \
+            geminibase-worker-stitch geminibase-worker-odm geminibase-nodeodm
+
+      - name: Wait for /healthz
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:7777/healthz > /dev/null; then exit 0; fi
+            sleep 3
           done
-          echo "backend failed to start"; cat "$RUNNER_TEMP/backend.log"; exit 1
+          docker compose -f docker-compose.yaml logs rest-api
+          exit 1
+
+      - name: Assert every worker is actually running
+        run: |
+          # A worker that failed to start doesn't fail the bring-up — its
+          # jobs just sit in PENDING until the spec times out, which reads
+          # as a slow/flaky test rather than a missing service. Fail here
+          # instead, with the name of the service that's down.
+          missing=0
+          for s in geminibase-worker-ml geminibase-worker-geo \
+                   geminibase-worker-amiga geminibase-worker-gwas \
+                   geminibase-worker-thermal geminibase-worker-stitch \
+                   geminibase-worker-odm; do
+            state=$(docker inspect -f '{{.State.Running}}' "$s" 2>/dev/null || echo "absent")
+            if [ "$state" != "true" ]; then
+              echo "::error::worker $s is not running (state: $state)"
+              docker compose -f docker-compose.yaml logs "$s" 2>&1 | tail -40 || true
+              missing=1
+            else
+              echo "ok: $s"
+            fi
+          done
+          exit $missing
 
       - name: Install frontend deps
         working-directory: frontend
@@ -99,7 +221,7 @@ jobs:
 
       - name: Run Playwright
         working-directory: frontend
-        run: npx playwright test --project=e2e-setup --project=e2e-workflows
+        run: npm run test:e2e
 
       - name: Upload Playwright report on failure
         if: failure()
@@ -109,12 +231,12 @@ jobs:
           path: |
             frontend/playwright-report
             frontend/test-results
-          retention-days: 14
+          retention-days: 5
 
-      - name: Upload backend log on failure
+      - name: Dump stack logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-log
-          path: ${{ runner.temp }}/backend.log
-          retention-days: 14
+        run: docker compose -f docker-compose.yaml logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yaml down -v

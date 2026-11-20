@@ -1,0 +1,419 @@
+/**
+ * "Import from…" — reuse plot boundaries saved for another flight date,
+ * sensor, run or experiment.
+ *
+ * Boundary versions are keyed by their Processed/ directory, i.e. per
+ * date *and* sensor, so a field drawn once was invisible to every later
+ * flight. Main auto-applied the previous layout silently; this is an
+ * explicit pick instead. Importing loads the layout into the editor as
+ * unsaved work — nothing is written here until the user saves.
+ *
+ * Dates of the same field and season are listed first, earliest at the top:
+ * boundaries drawn before the canopy closed carry to later dates. "Align to
+ * this orthomosaic" moves them by how far the two maps differ (measured from
+ * the images by the agent service); crops can be picked, for a flight of one
+ * crop. Each plot keeps its label, crop and genotype from the field design.
+ */
+
+import { useMutation } from "@tanstack/react-query"
+import { useMemo, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { agentApi } from "@/features/agent/lib/agentApi"
+import {
+  useAllPlotGeometryVersions,
+  useLoadPlotGeometryVersion,
+} from "@/features/process/hooks/usePlotGeometry"
+import useCustomToast from "@/hooks/useCustomToast"
+
+/** `Processed/{season}/{exp}/{site}/{pop}/{date}/{platform}/{sensor}/` → parts. */
+export function describeDirectory(directory: string) {
+  const parts = directory.replace(/\/+$/, "").split("/")
+  const [, season, experiment, site, population, date, platform, sensor] = parts
+  return { season, experiment, site, population, date, platform, sensor }
+}
+
+/** Same field and season: everything but the date matches. */
+function sameField(a: string, b: string): boolean {
+  const x = describeDirectory(a)
+  const y = describeDirectory(b)
+  return (
+    x.season === y.season &&
+    x.experiment === y.experiment &&
+    x.site === y.site &&
+    x.population === y.population &&
+    x.platform === y.platform &&
+    x.sensor === y.sensor
+  )
+}
+
+/** The same experiment, site and population (any season, date or sensor). */
+export function sameTrial(a: string, b: string): boolean {
+  const x = describeDirectory(a)
+  const y = describeDirectory(b)
+  return (
+    x.experiment === y.experiment &&
+    x.site === y.site &&
+    x.population === y.population
+  )
+}
+
+/** Where another field differs from this one, in a few words ("Sorghum"). */
+export function otherParts(
+  d: ReturnType<typeof describeDirectory>,
+  here: ReturnType<typeof describeDirectory>,
+): string {
+  return [
+    d.experiment !== here.experiment && d.experiment,
+    d.site !== here.site && d.site,
+    d.population !== here.population && d.population,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/**
+ * How close a saved layout's directory is to the one being edited, highest
+ * first: the same field (site and population) matters most, then the same
+ * season and experiment; ties go to the nearest date. A 2026 sorghum layout
+ * is rarely what a 2023 legume flight needs.
+ */
+export function closeness(candidate: string, current: string): number {
+  const a = describeDirectory(candidate)
+  const b = describeDirectory(current)
+  let score = 0
+  if (a.site && a.site === b.site) score += 8
+  if (a.population && a.population === b.population) score += 8
+  if (a.season && a.season === b.season) score += 4
+  if (a.experiment && a.experiment === b.experiment) score += 2
+  if (a.platform && a.platform === b.platform) score += 1
+  return score
+}
+
+function daysApart(x?: string, y?: string): number {
+  const dx = Date.parse(x ?? "")
+  const dy = Date.parse(y ?? "")
+  return Number.isNaN(dx) || Number.isNaN(dy)
+    ? Number.POSITIVE_INFINITY
+    : Math.abs(dx - dy) / 86_400_000
+}
+
+/** Saved versions in the order to offer them: best candidates first. */
+export function rankCandidates<
+  T extends { directory: string; version: number },
+>(rows: T[], current: string): T[] {
+  const date = describeDirectory(current).date
+  return [...rows].sort(
+    (p, q) =>
+      closeness(q.directory, current) - closeness(p.directory, current) ||
+      daysApart(describeDirectory(p.directory).date, date) -
+        daysApart(describeDirectory(q.directory).date, date) ||
+      q.version - p.version,
+  )
+}
+
+export function BoundaryImportPicker({
+  directory,
+  onImport,
+  onImportSnapshot,
+}: {
+  /** The directory being edited; its own versions live in the Versions tab. */
+  directory: string
+  onImport: (directory: string, version: number, plotCount: number) => void
+  /** Boundaries moved onto this date (and/or some crops only), not yet saved. */
+  onImportSnapshot?: (snapshot: Record<string, unknown>, note: string) => void
+}) {
+  const { data = [], isLoading, isError } = useAllPlotGeometryVersions()
+  const [filter, setFilter] = useState("")
+  // Other experiments, sites and populations only when asked for.
+  const [showAll, setShowAll] = useState(false)
+  const [picked, setPicked] = useState<{
+    directory: string
+    version: number
+    plotCount: number
+  } | null>(null)
+  const [align, setAlign] = useState(true)
+  const [crops, setCrops] = useState<string[] | null>(null)
+
+  const { rows, others } = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    const all = rankCandidates(
+      data.filter((v) => v.directory !== directory && v.plot_count > 0),
+      directory,
+    ).map((v) => ({
+      ...v,
+      same: sameField(v.directory, directory),
+      trial: sameTrial(v.directory, directory),
+    }))
+    const others = all.filter((v) => !v.trial).length
+    return {
+      others,
+      rows: all.filter(
+        (v) =>
+          (showAll || v.trial) && (!q || v.directory.toLowerCase().includes(q)),
+      ),
+    }
+  }, [data, directory, filter, showAll])
+  const here = describeDirectory(directory)
+
+  // The crops in the picked version (from each plot's design properties).
+  const loaded = useLoadPlotGeometryVersion(
+    picked?.directory ?? null,
+    picked?.version ?? null,
+  )
+  const available = useMemo(() => {
+    const feats =
+      ((loaded.data?.state_snapshot?.boundaries as { features?: unknown[] })
+        ?.features as { properties?: Record<string, unknown> }[]) ?? []
+    return [
+      ...new Set(
+        feats
+          .map((f) => f.properties?.crop)
+          .filter((c): c is string => typeof c === "string" && c.length > 0),
+      ),
+    ].sort()
+  }, [loaded.data])
+  const chosen = crops ?? available
+
+  const { showErrorToast } = useCustomToast()
+  const move = useMutation({
+    mutationFn: () =>
+      agentApi.moveBoundaries({
+        from_directory: picked!.directory,
+        from_version: picked!.version,
+        to_directory: directory,
+        crops: chosen.length < available.length ? chosen : undefined,
+        align,
+      }),
+    onSuccess: (r) => {
+      const s = r.shift
+      const subset = available.length > 0 && chosen.length < available.length
+      // A weak match is no measurement: the two maps could not be lined up, and
+      // flights of one field (RTK) usually agree to centimetres. Keep the plots
+      // where they were saved rather than move them by a guess.
+      if (
+        align &&
+        s &&
+        s.match != null &&
+        s.match < 0.05 &&
+        !subset &&
+        picked
+      ) {
+        onImport(picked.directory, picked.version, picked.plotCount)
+        showErrorToast(
+          `The two orthomosaics could not be lined up reliably (match ${s.match}), so the plots were kept where they are on ${describeDirectory(picked.directory).date}. Check them on the map and move them by hand if needed.`,
+        )
+        setPicked(null)
+        return
+      }
+      const moved =
+        align && s
+          ? ` moved ${s.dx.toFixed(2)} m east, ${s.dy.toFixed(2)} m north (match ${s.match ?? "?"})`
+          : ""
+      onImportSnapshot?.(
+        r.state_snapshot,
+        `Imported ${r.plots} plots${moved}. ${r.check}.`,
+      )
+      setPicked(null)
+    },
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Aligning goes through the app's own service on this computer: when it
+      // does not answer (restarted, say), the page needs reloading.
+      showErrorToast(
+        /fetch|network|Failed to|ECONN|502|503/i.test(msg)
+          ? "Could not reach the app's service to align the boundaries. Reload the page and import again (or import without aligning)."
+          : `Import failed: ${msg}`,
+      )
+    },
+  })
+
+  const importPicked = () => {
+    if (!picked) return
+    const subset = available.length > 0 && chosen.length < available.length
+    if ((align || subset) && onImportSnapshot) move.mutate()
+    else {
+      onImport(picked.directory, picked.version, picked.plotCount)
+      setPicked(null)
+    }
+  }
+
+  if (isLoading) {
+    return <p className="text-muted-foreground text-sm">Loading…</p>
+  }
+  if (isError) {
+    return (
+      <p className="text-destructive text-sm">
+        Could not list saved boundaries.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-2" data-testid="boundary-import-picker">
+      <p className="text-muted-foreground text-xs">
+        Boundaries saved for other dates of {here.experiment} · {here.site} ·{" "}
+        {here.population}, nearest date first. They load as unsaved work: check
+        the fit, then save.
+      </p>
+      {showAll && (
+        <Input
+          placeholder="Filter by experiment, site, date…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="h-8 text-xs"
+          data-testid="boundary-import-filter"
+        />
+      )}
+      {rows.length === 0 ? (
+        <p
+          className="text-muted-foreground text-sm"
+          data-testid="boundary-import-empty"
+        >
+          {filter
+            ? "No saved boundaries match."
+            : showAll
+              ? "No boundaries saved anywhere else yet."
+              : "None saved for another date of this field yet."}
+        </p>
+      ) : (
+        <ul className="max-h-80 divide-y overflow-y-auto rounded-md border">
+          {rows.map((v) => {
+            const d = describeDirectory(v.directory)
+            const isPicked =
+              picked?.directory === v.directory && picked.version === v.version
+            return (
+              <li
+                key={`${v.directory}|${v.version}`}
+                className={`flex items-center gap-2 px-2.5 py-1.5 ${isPicked ? "bg-muted/60" : ""}`}
+                data-testid="boundary-import-row"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">
+                    <span className="font-mono text-xs">{d.date}</span>{" "}
+                    <span className="text-muted-foreground text-xs">
+                      {d.platform}/{d.sensor}
+                      {d.season !== here.season ? ` · ${d.season}` : ""}
+                    </span>
+                  </p>
+                  <p
+                    className="text-muted-foreground truncate text-xs"
+                    title={`${v.directory}${v.name ? ` · ${v.name}` : ""}`}
+                  >
+                    {!v.trial && `${otherParts(d, here)} · `}v{v.version} ·{" "}
+                    {v.plot_count} plots{v.is_active ? " · active" : ""}
+                    {v.name ? ` · ${v.name}` : ""}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  className="h-7 shrink-0 px-2 text-xs"
+                  variant={isPicked ? "default" : "outline"}
+                  onClick={() => {
+                    setPicked({
+                      directory: v.directory,
+                      version: v.version,
+                      plotCount: v.plot_count,
+                    })
+                    setCrops(null)
+                    setAlign(v.same)
+                  }}
+                >
+                  Import…
+                </Button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {others > 0 && (
+        <Button
+          variant="link"
+          size="sm"
+          className="h-auto px-0 text-xs"
+          data-testid="boundary-import-show-all"
+          onClick={() => {
+            setShowAll((x) => !x)
+            setFilter("")
+          }}
+        >
+          {showAll
+            ? "Only this field"
+            : `Show other experiments, sites and populations (${others})`}
+        </Button>
+      )}
+      {picked && (
+        <div
+          className="space-y-2 rounded-md border p-3 text-sm"
+          data-testid="boundary-import-options"
+        >
+          <p className="font-medium">
+            {describeDirectory(picked.directory).date} · {picked.plotCount}{" "}
+            plots
+          </p>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="boundary-import-align"
+              checked={align}
+              onCheckedChange={(c) => setAlign(c === true)}
+              disabled={!onImportSnapshot}
+              data-testid="boundary-import-align"
+            />
+            <label htmlFor="boundary-import-align">
+              Align to this date's orthomosaic (moves every plot by how far the
+              two maps differ; sizes and labels stay)
+            </label>
+          </div>
+          {available.length > 1 && (
+            <div className="space-y-1">
+              <p className="text-muted-foreground text-xs">
+                Crops to bring (each keeps its field-design labels):
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {available.map((c) => (
+                  <div key={c} className="flex items-center gap-1.5">
+                    <Checkbox
+                      id={`boundary-crop-${c.replace(/\W+/g, "-")}`}
+                      checked={chosen.includes(c)}
+                      onCheckedChange={(on) =>
+                        setCrops(
+                          on === true
+                            ? [...chosen, c]
+                            : chosen.filter((x) => x !== c),
+                        )
+                      }
+                    />
+                    <label htmlFor={`boundary-crop-${c.replace(/\W+/g, "-")}`}>
+                      {c}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {move.error && (
+            <p className="text-destructive text-xs">
+              {move.error instanceof Error
+                ? move.error.message
+                : String(move.error)}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={move.isPending || chosen.length === 0}
+              onClick={importPicked}
+              data-testid="boundary-import-go"
+            >
+              {move.isPending ? "Aligning…" : "Import"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setPicked(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

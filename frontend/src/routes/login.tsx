@@ -1,13 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   createFileRoute,
   Link as RouterLink,
   redirect,
+  useNavigate,
 } from "@tanstack/react-router"
+import { AxiosError } from "axios"
+import { useState } from "react"
 import { useForm } from "react-hook-form"
+import { toast } from "sonner"
 import { z } from "zod"
 
-import type { Body_login_login_access_token as AccessToken } from "@/client"
+import { ApiError } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import {
   Form,
@@ -20,38 +25,101 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
+import { useCapabilities } from "@/features/process/hooks/useCapabilities"
 import { isLoggedIn } from "@/hooks/useAuth"
+import { login, loginAsGuest, loginOptions } from "@/lib/auth"
+import {
+  autoSignIn,
+  clearSignedOut,
+  markManualSignIn,
+  signInRequired,
+} from "@/lib/autoSignIn"
+import { checkBackend } from "@/lib/connection"
 
 const formSchema = z.object({
   username: z.email(),
-  password: z
-    .string()
-    .min(1, { message: "Password is required" })
-    .min(8, { message: "Password must be at least 8 characters" }),
-}) satisfies z.ZodType<AccessToken>
+  // Empty for an account made without a password (when the server allows those).
+  password: z.string(),
+})
 
 type FormData = z.infer<typeof formSchema>
 
 export const Route = createFileRoute("/login")({
   component: Login,
   beforeLoad: async () => {
-    if (isLoggedIn()) {
-      throw redirect({
-        to: "/",
-      })
+    // No login step by default: sign in with this computer's own account
+    // unless the person signed out or asked for a login screen.
+    if (isLoggedIn() || (await autoSignIn())) {
+      throw redirect({ to: "/" })
     }
+    if (!(await checkBackend())) throw redirect({ to: "/" })
   },
   head: () => ({
-    meta: [
-      {
-        title: "Log In - FastAPI Cloud",
-      },
-    ],
+    meta: [{ title: "Log In — GEMINI" }],
   }),
 })
 
+interface LoginError {
+  title: string
+  hint?: string
+}
+
+function describeLoginError(err: unknown): LoginError {
+  let status: number | undefined
+  let detail: string | undefined
+  if (err instanceof ApiError) {
+    status = err.status
+    detail = typeof err.body === "string" ? err.body : undefined
+  } else if (err instanceof AxiosError && err.response) {
+    status = err.response.status
+    detail =
+      typeof err.response.data === "string"
+        ? err.response.data
+        : err.response.data?.detail
+  }
+  if (status === 400 || status === 401) {
+    return { title: "Incorrect email or password." }
+  }
+  if (status === 404) {
+    return {
+      title:
+        "Login endpoint not found on the backend (HTTP 404 at /api/users/login/access-token).",
+      hint:
+        "The running REST API doesn't have the JWT auth controller. " +
+        "Make sure the backend you're running was built from the migration submodule " +
+        "(GEMINIbase dev/gemini-app-migration branch); older images don't ship this endpoint.",
+    }
+  }
+  if (status === 503) {
+    return {
+      title: "Auth is disabled on the backend.",
+      hint: "Set GEMINI_JWT_SECRET on the backend's .env and restart the REST API container.",
+    }
+  }
+  if (status !== undefined) {
+    return {
+      title: `Login failed (HTTP ${status}).${detail ? ` ${detail}` : ""}`,
+    }
+  }
+  // No status → likely a network error (fetch threw) or a logic bug.
+  const message = err instanceof Error ? err.message : String(err)
+  return {
+    title: "Login failed — could not reach the backend.",
+    hint: message ? `Underlying error: ${message}` : undefined,
+  }
+}
+
 function Login() {
-  const isPending = false
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const capabilities = useCapabilities()
+  const options = useQuery({
+    queryKey: ["login-options"],
+    queryFn: loginOptions,
+    staleTime: 60_000,
+  })
+  const passwordless = options.data?.passwordless ?? false
+  const [loginError, setLoginError] = useState<LoginError | null>(null)
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -62,7 +130,44 @@ function Login() {
     },
   })
 
-  const onSubmit = (_data: FormData) => {}
+  const loginMutation = useMutation({
+    mutationFn: ({ username, password }: FormData) => login(username, password),
+    onSuccess: async () => {
+      setLoginError(null)
+      clearSignedOut()
+      markManualSignIn()
+      await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
+      navigate({ to: "/" })
+    },
+    onError: (err: unknown) => {
+      const described = describeLoginError(err)
+      setLoginError(described)
+      toast.error(described.title)
+    },
+  })
+
+  const isPending = loginMutation.isPending
+
+  const onSubmit = (data: FormData) => {
+    setLoginError(null)
+    if (!data.password && !passwordless) {
+      form.setError("password", { message: "Password is required" })
+      return
+    }
+    loginMutation.mutate(data)
+  }
+
+  const guestMutation = useMutation({
+    mutationFn: loginAsGuest,
+    onSuccess: async () => {
+      clearSignedOut()
+      markManualSignIn()
+      await queryClient.invalidateQueries({ queryKey: ["currentUser"] })
+      navigate({ to: "/" })
+    },
+    onError: (err: unknown) =>
+      toast.error(err instanceof Error ? err.message : "Guest sign-in failed"),
+  })
 
   return (
     <AuthLayout>
@@ -73,6 +178,16 @@ function Login() {
         >
           <div className="flex flex-col items-center gap-2 text-center">
             <h1 className="text-2xl font-bold">Login to your account</h1>
+            <p className="text-muted-foreground text-sm">
+              Nothing to sign in to yet?{" "}
+              <RouterLink
+                to="/setup"
+                className="underline underline-offset-4"
+                data-testid="setup-link"
+              >
+                Set up with the agent
+              </RouterLink>
+            </p>
           </div>
 
           <div className="grid gap-4">
@@ -112,7 +227,11 @@ function Login() {
                   <FormControl>
                     <PasswordInput
                       data-testid="password-input"
-                      placeholder="Password"
+                      placeholder={
+                        passwordless
+                          ? "Password (none for an account made without one)"
+                          : "Password"
+                      }
                       {...field}
                     />
                   </FormControl>
@@ -121,17 +240,72 @@ function Login() {
               )}
             />
 
+            {loginError && (
+              <div
+                role="alert"
+                data-testid="login-error"
+                className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-left text-sm"
+              >
+                <p className="font-medium text-destructive">
+                  {loginError.title}
+                </p>
+                {loginError.hint && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {loginError.hint}
+                  </p>
+                )}
+              </div>
+            )}
+
             <LoadingButton type="submit" loading={isPending}>
               Log In
             </LoadingButton>
+            {options.data?.guest && (
+              <LoadingButton
+                type="button"
+                variant="outline"
+                loading={guestMutation.isPending}
+                onClick={() => guestMutation.mutate()}
+                data-testid="continue-as-guest"
+              >
+                Continue as guest
+              </LoadingButton>
+            )}
           </div>
 
-          <div className="text-center text-sm">
-            Don't have an account yet?{" "}
-            <RouterLink to="/signup" className="underline underline-offset-4">
-              Sign up
-            </RouterLink>
-          </div>
+          {/* After a deliberate sign-out: back in without a password, as
+              this computer's own account, unless a login was asked for. */}
+          {!signInRequired() && (
+            <button
+              type="button"
+              data-testid="continue-without-signin"
+              className="text-muted-foreground hover:text-foreground text-center text-sm underline underline-offset-4"
+              onClick={async () => {
+                if (await autoSignIn({ afterSignOut: true })) {
+                  await queryClient.invalidateQueries({
+                    queryKey: ["currentUser"],
+                  })
+                  navigate({ to: "/" })
+                } else {
+                  toast.error(
+                    "Automatic sign-in is not available here. Sign in with an account.",
+                  )
+                }
+              }}
+            >
+              Continue as this computer's account
+            </button>
+          )}
+
+          {/* Self-registration is off unless the server enables it. */}
+          {capabilities.data?.signup_enabled && (
+            <div className="text-center text-sm">
+              Don't have an account yet?{" "}
+              <RouterLink to="/signup" className="underline underline-offset-4">
+                Sign up
+              </RouterLink>
+            </div>
+          )}
         </form>
       </Form>
     </AuthLayout>

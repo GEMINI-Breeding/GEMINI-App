@@ -5,15 +5,23 @@
  * State is serialised to JSON on every write and loaded once on mount.
  */
 
-import { useState, useCallback } from "react"
-import type { DashboardState, DashboardTab, DashboardWidget, WidgetSpan } from "./types"
+import { useCallback, useEffect, useState } from "react"
+import type {
+  DashboardState,
+  DashboardTab,
+  DashboardWidget,
+  WidgetSpan,
+} from "./types"
 
 const STORAGE_KEY = "gemini-dashboard"
 
+/** The generated Overview: not stored, always first, cannot be deleted. */
+export const AUTO_TAB_ID = "auto"
+
 function defaultState(): DashboardState {
   return {
-    tabs: [{ id: "tab-default", name: "Overview", widgets: [] }],
-    activeTabId: "tab-default",
+    tabs: [{ id: "tab-default", name: "My views", widgets: [] }],
+    activeTabId: AUTO_TAB_ID,
   }
 }
 
@@ -35,9 +43,16 @@ function migrateWidget(w: DashboardWidget): DashboardWidget {
 }
 
 function migrateState(raw: DashboardState): DashboardState {
+  // The empty tab older versions opened on is now "My views"; the Overview
+  // is generated. A tab the person filled or renamed keeps its name.
+  const tabs = raw.tabs.map((t) =>
+    t.id === "tab-default" && t.name === "Overview" && t.widgets.length === 0
+      ? { ...t, name: "My views" }
+      : t,
+  )
   return {
     ...raw,
-    tabs: raw.tabs.map((tab) => ({
+    tabs: tabs.map((tab) => ({
       ...tab,
       widgets: tab.widgets.map(migrateWidget),
     })),
@@ -62,120 +77,188 @@ function save(state: DashboardState) {
   }
 }
 
+/**
+ * Keep a view on the dashboard, from anywhere (the Overview, Analyze): added
+ * to the person's first tab. A dashboard already open picks it up on its
+ * next load; `pinned` listeners update it at once.
+ */
+const pinListeners = new Set<() => void>()
+export function pinWidget(widget: DashboardWidget): string {
+  const s = load()
+  const tab = s.tabs[0]
+  tab.widgets = [...tab.widgets, widget]
+  save(s)
+  for (const l of pinListeners) l()
+  return tab.name
+}
+
 export function useDashboardStore() {
   const [state, _setState] = useState<DashboardState>(load)
-
-  const setState = useCallback((updater: (prev: DashboardState) => DashboardState) => {
-    _setState((prev) => {
-      const next = updater(prev)
-      save(next)
-      return next
-    })
+  useEffect(() => {
+    const reload = () => _setState(load())
+    pinListeners.add(reload)
+    return () => {
+      pinListeners.delete(reload)
+    }
   }, [])
+
+  const setState = useCallback(
+    (updater: (prev: DashboardState) => DashboardState) => {
+      _setState((prev) => {
+        const next = updater(prev)
+        save(next)
+        return next
+      })
+    },
+    [],
+  )
 
   // ── Tab actions ──────────────────────────────────────────────────────────────
 
-  const addTab = useCallback((name: string) => {
-    const id = `tab-${Date.now()}`
-    setState((s) => ({
-      ...s,
-      tabs: [...s.tabs, { id, name, widgets: [] }],
-      activeTabId: id,
-    }))
-  }, [setState])
+  const addTab = useCallback(
+    (name: string) => {
+      const id = `tab-${Date.now()}`
+      setState((s) => ({
+        ...s,
+        tabs: [...s.tabs, { id, name, widgets: [] }],
+        activeTabId: id,
+      }))
+    },
+    [setState],
+  )
 
-  const renameTab = useCallback((tabId: string, name: string) => {
-    setState((s) => ({
-      ...s,
-      tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, name } : t)),
-    }))
-  }, [setState])
+  const renameTab = useCallback(
+    (tabId: string, name: string) => {
+      setState((s) => ({
+        ...s,
+        tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, name } : t)),
+      }))
+    },
+    [setState],
+  )
 
-  const deleteTab = useCallback((tabId: string) => {
-    setState((s) => {
-      const remaining = s.tabs.filter((t) => t.id !== tabId)
-      if (remaining.length === 0) return s // always keep at least one
-      const nextActive = remaining.find((t) => t.id === s.activeTabId) ?? remaining[0]
-      return { tabs: remaining, activeTabId: nextActive.id }
-    })
-  }, [setState])
+  const deleteTab = useCallback(
+    (tabId: string) => {
+      setState((s) => {
+        const remaining = s.tabs.filter((t) => t.id !== tabId)
+        if (remaining.length === 0) return s // always keep at least one
+        const nextActive =
+          remaining.find((t) => t.id === s.activeTabId) ?? remaining[0]
+        return {
+          tabs: remaining,
+          activeTabId:
+            s.activeTabId === AUTO_TAB_ID ? AUTO_TAB_ID : nextActive.id,
+        }
+      })
+    },
+    [setState],
+  )
 
-  const setActiveTab = useCallback((tabId: string) => {
-    setState((s) => ({ ...s, activeTabId: tabId }))
-  }, [setState])
+  const setActiveTab = useCallback(
+    (tabId: string) => {
+      setState((s) => ({ ...s, activeTabId: tabId }))
+    },
+    [setState],
+  )
 
   // ── Widget actions ───────────────────────────────────────────────────────────
 
-  const addWidget = useCallback((tabId: string, widget: DashboardWidget) => {
-    console.log(`[DashboardStore] addWidget tabId: ${tabId} | widget: ${widget.instanceId} type: ${widget.type}`)
-    setState((s) => {
-      const next = {
+  const addWidget = useCallback(
+    (tabId: string, widget: DashboardWidget) => {
+      console.log(
+        `[DashboardStore] addWidget tabId: ${tabId} | widget: ${widget.instanceId} type: ${widget.type}`,
+      )
+      setState((s) => {
+        const next = {
+          ...s,
+          tabs: s.tabs.map((t) =>
+            t.id === tabId ? { ...t, widgets: [...t.widgets, widget] } : t,
+          ),
+        }
+        console.log(
+          `[DashboardStore] widget count on tab: ${next.tabs.find((t) => t.id === tabId)?.widgets.length}`,
+        )
+        return next
+      })
+    },
+    [setState],
+  )
+
+  const updateWidget = useCallback(
+    (tabId: string, instanceId: string, patch: Partial<DashboardWidget>) => {
+      setState((s) => ({
         ...s,
         tabs: s.tabs.map((t) =>
-          t.id === tabId ? { ...t, widgets: [...t.widgets, widget] } : t
+          t.id === tabId
+            ? {
+                ...t,
+                widgets: t.widgets.map((w) =>
+                  w.instanceId === instanceId
+                    ? ({ ...w, ...patch } as DashboardWidget)
+                    : w,
+                ),
+              }
+            : t,
         ),
-      }
-      console.log(`[DashboardStore] widget count on tab: ${next.tabs.find(t => t.id === tabId)?.widgets.length}`)
-      return next
-    })
-  }, [setState])
+      }))
+    },
+    [setState],
+  )
 
-  const updateWidget = useCallback((tabId: string, instanceId: string, patch: Partial<DashboardWidget>) => {
-    setState((s) => ({
-      ...s,
-      tabs: s.tabs.map((t) =>
-        t.id === tabId
-          ? {
-              ...t,
-              widgets: t.widgets.map((w) =>
-                w.instanceId === instanceId ? ({ ...w, ...patch } as DashboardWidget) : w
-              ),
-            }
-          : t
-      ),
-    }))
-  }, [setState])
+  const removeWidget = useCallback(
+    (tabId: string, instanceId: string) => {
+      setState((s) => ({
+        ...s,
+        tabs: s.tabs.map((t) =>
+          t.id === tabId
+            ? {
+                ...t,
+                widgets: t.widgets.filter((w) => w.instanceId !== instanceId),
+              }
+            : t,
+        ),
+      }))
+    },
+    [setState],
+  )
 
-  const removeWidget = useCallback((tabId: string, instanceId: string) => {
-    setState((s) => ({
-      ...s,
-      tabs: s.tabs.map((t) =>
-        t.id === tabId ? { ...t, widgets: t.widgets.filter((w) => w.instanceId !== instanceId) } : t
-      ),
-    }))
-  }, [setState])
+  const reorderWidget = useCallback(
+    (tabId: string, instanceId: string, direction: "left" | "right") => {
+      setState((s) => ({
+        ...s,
+        tabs: s.tabs.map((t) => {
+          if (t.id !== tabId) return t
+          const idx = t.widgets.findIndex((w) => w.instanceId === instanceId)
+          if (idx === -1) return t
+          const next = [...t.widgets]
+          const swap = direction === "left" ? idx - 1 : idx + 1
+          if (swap < 0 || swap >= next.length) return t
+          ;[next[idx], next[swap]] = [next[swap], next[idx]]
+          return { ...t, widgets: next }
+        }),
+      }))
+    },
+    [setState],
+  )
 
-  const reorderWidget = useCallback((tabId: string, instanceId: string, direction: "left" | "right") => {
-    setState((s) => ({
-      ...s,
-      tabs: s.tabs.map((t) => {
-        if (t.id !== tabId) return t
-        const idx = t.widgets.findIndex((w) => w.instanceId === instanceId)
-        if (idx === -1) return t
-        const next = [...t.widgets]
-        const swap = direction === "left" ? idx - 1 : idx + 1
-        if (swap < 0 || swap >= next.length) return t
-        ;[next[idx], next[swap]] = [next[swap], next[idx]]
-        return { ...t, widgets: next }
-      }),
-    }))
-  }, [setState])
-
-  const resizeWidget = useCallback((tabId: string, instanceId: string, span: WidgetSpan) => {
-    setState((s) => ({
-      ...s,
-      tabs: s.tabs.map((t) =>
-        t.id === tabId
-          ? {
-              ...t,
-              widgets: t.widgets.map((w) =>
-                w.instanceId === instanceId ? { ...w, span } : w
-              ),
-            }
-          : t
-      ),
-    }))
-  }, [setState])
+  const resizeWidget = useCallback(
+    (tabId: string, instanceId: string, span: WidgetSpan) => {
+      setState((s) => ({
+        ...s,
+        tabs: s.tabs.map((t) =>
+          t.id === tabId
+            ? {
+                ...t,
+                widgets: t.widgets.map((w) =>
+                  w.instanceId === instanceId ? { ...w, span } : w,
+                ),
+              }
+            : t,
+        ),
+      }))
+    },
+    [setState],
+  )
 
   const resetDashboard = useCallback(() => {
     const fresh = defaultState()
@@ -187,10 +270,12 @@ export function useDashboardStore() {
 
   const activeTab: DashboardTab =
     state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0]
+  const autoActive = state.activeTabId === AUTO_TAB_ID
 
   return {
     state,
     activeTab,
+    autoActive,
     addTab,
     renameTab,
     deleteTab,

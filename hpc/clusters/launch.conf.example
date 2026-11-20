@@ -1,0 +1,73 @@
+# Template for hpc/clusters/<name>/launch.conf (that file is not committed: it names your
+# cluster, account and paths). The agent's hpc_configure writes one from a survey; or copy this.
+
+HPC_HOST=you@login.cluster.edu
+HPC_KEY=/c/Users/you/.ssh/id_ed25519
+HPC_KNOWN_HOSTS=/c/Users/you/.ssh/known_hosts
+GEMI_HPC_ROOT=/group/yourlab/gemini_app
+
+# Published stack the images come from; current source is mounted over it.
+GEMI_IMAGE_REGISTRY=ghcr.io/gemini-breeding
+GEMI_IMAGE_VERSION=sha-ab4d1a5
+
+# Core job (database, storage, API): small, long-running.
+CORE_PARTITION=${CORE_PARTITION:-gpu-part}
+CORE_ACCOUNT=${CORE_ACCOUNT:-labgrp}
+CORE_CPUS=4
+CORE_MEM=16G
+CORE_TIME=2-00:00:00
+
+# Worker jobs: "partition:account" tried in order; first that can start soon wins.
+WORKER_TRY="gpu-part:labgrp gpu-part2:labgrp shared:general"
+WORKER_TIME=1-00:00:00
+WORKER_RES_amiga="cpus=8 mem=32G gpus=0"
+WORKER_RES_stitch="cpus=16 mem=56G gpus=0"
+WORKER_RES_odm="cpus=16 mem=56G gpus=0"
+WORKER_RES_geo="cpus=4 mem=16G gpus=0"
+WORKER_RES_ml="cpus=8 mem=32G gpus=0"
+# More than one copy of a worker at once (they share the waiting jobs). A copy beyond the first is
+# submitted only when the cluster could start it now. Default 1.
+# WORKER_MAX_odm=3
+
+LOCAL_API_PORT=auto
+
+# Local LLM for the agent (vLLM, OpenAI-compatible API).
+LLM_IMAGE=vllm/vllm-openai:v0.31.0   # a tested version, not "latest"
+LLM_MODEL=google/gemma-4-31B-it-qat-w4a16-ct
+LLM_NAME=gemma4
+LLM_TRY="gpu-part:labgrp:gpu:1 shared:general:gpu:1 gpu-part2:labgrp:gpu:1"
+LLM_RES="cpus=8 mem=48G"
+LLM_TIME=0-12:00:00
+LLM_ARGS='--max-model-len 32768 --gpu-memory-utilization 0.92'
+LLM_PULL_PARTITION=gpu-part
+LLM_PULL_ACCOUNT=labgrp
+
+# Job limits the gate enforces (defaults shown): per job, and for all GEMI jobs together.
+# Here they can only be LOWERED. To raise them, or to switch the checks off (GEMI_ALLOW_UNSAFE=1),
+# a person writes the same lines into <GEMI_HPC_ROOT>/limits.conf on the cluster by hand:
+# that file is never synced from here, so no tool on this computer can raise them.
+# GEMI_MAX_CPUS=32
+# GEMI_MAX_MEM_GB=128
+# GEMI_MAX_GPUS=1
+# GEMI_MAX_TIME=2-00:00:00
+# GEMI_MAX_JOBS=10
+# GEMI_MAX_TOTAL_CPUS=128
+# GEMI_MAX_TOTAL_MEM_GB=512
+# GEMI_MAX_TOTAL_GPUS=4
+# More placements the Compute panel and the agent may use ("partition:account ..."):
+# GEMI_EXTRA_PLACES=""
+
+# Stop when idle (from inside each job; 0 = never). A worker ends after this many minutes with no job
+# of its kinds waiting or running; GPU workers sooner. The model ends after this long with no request.
+WORKER_IDLE_MINUTES=20
+WORKER_IDLE_MINUTES_GPU=5
+LLM_IDLE_MINUTES=30
+# Rules the cluster's administrators publish for AI agents (skills),
+# comma separated. When set (or found by `gemi-hpc site-skills`), those rules govern:
+# the Claude Code guard asks before raw ssh/Slurm commands instead of denying them.
+# SITE_RULES=<skill name>
+# Folders data already on the cluster may be uploaded from (`gemi-hpc ingest <folder>`); the person
+# names the folder, nothing is searched. Space separated.
+# GEMI_DATA_ROOTS="/group/yourlab/data"
+# Where the gate looks for them on the cluster (default: common system skill folders).
+# SITE_SKILL_DIRS="/share/claude/skills $HOME/.claude/skills"

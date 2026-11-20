@@ -10,12 +10,17 @@
  * the OnboardingContext.
  */
 
-import { useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, X } from "lucide-react"
 import { useNavigate } from "@tanstack/react-router"
+import { ChevronLeft, ChevronRight, X } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import type { TourStep } from "./tourSteps"
 
-interface Rect { x: number; y: number; w: number; h: number }
+interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
 interface Props {
   steps: TourStep[]
@@ -28,7 +33,13 @@ interface Props {
 const PAD = 10 // padding around the highlighted element
 const TOOLTIP_W = 320
 
-export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) {
+export function OnboardingTour({
+  steps,
+  step,
+  onNext,
+  onBack,
+  onClose,
+}: Props) {
   const navigate = useNavigate()
   const data = steps[step]
   const [rect, setRect] = useState<Rect | null>(null)
@@ -38,7 +49,10 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
 
   // Keep viewport size in sync
   useEffect(() => {
-    const onResize = () => { setVw(window.innerWidth); setVh(window.innerHeight) }
+    const onResize = () => {
+      setVw(window.innerWidth)
+      setVh(window.innerHeight)
+    }
     window.addEventListener("resize", onResize)
     return () => window.removeEventListener("resize", onResize)
   }, [])
@@ -48,24 +62,38 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
     let cancelled = false
 
     async function run() {
+      setRect(null)
       if (data.route) {
-        await navigate({ to: data.route })
+        await navigate({ to: data.route, search: data.search ?? {} })
         // Brief delay so the new page renders its nav items
         await new Promise((r) => setTimeout(r, 120))
       }
 
+      if (data.focus) {
+        window.dispatchEvent(
+          new CustomEvent("gemini:tour-focus", { detail: data.focus }),
+        )
+        await new Promise((r) => setTimeout(r, 60))
+      }
       if (!data.selector || cancelled) {
         setRect(null)
         return
       }
 
+      let scrolled = false
       function track() {
         if (cancelled) return
         const el = document.querySelector(data.selector!)
         if (el) {
           const r = el.getBoundingClientRect()
           setRect({ x: r.left, y: r.top, w: r.width, h: r.height })
-          el.scrollIntoView({ block: "nearest", behavior: "smooth" })
+          if (!scrolled) {
+            el.scrollIntoView({ block: "nearest", behavior: "smooth" })
+            scrolled = true
+          }
+        } else {
+          // Not on this page (yet, or at all): the step shows as a centred card.
+          setRect(null)
         }
         rafRef.current = requestAnimationFrame(track)
       }
@@ -77,7 +105,7 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
       cancelled = true
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
     }
-  }, [step, data, navigate])
+  }, [data, navigate])
 
   const isFirst = step === 0
   const isLast = step === steps.length - 1
@@ -101,9 +129,7 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
     tooltipX = Math.min(Math.max(spotX, 12), vw - TOOLTIP_W - 12)
     const belowY = spotY + spotH + 12
     tooltipY =
-      belowY + tooltipH > vh - 12
-        ? Math.max(spotY - tooltipH - 12, 12)
-        : belowY
+      belowY + tooltipH > vh - 12 ? Math.max(spotY - tooltipH - 12, 12) : belowY
   }
 
   return (
@@ -153,7 +179,7 @@ export function OnboardingTour({ steps, step, onNext, onBack, onClose }: Props) 
             width: spotW,
             height: spotH,
             borderRadius: 8,
-            border: "2px solid hsl(var(--primary))",
+            border: "2px solid var(--primary)",
             zIndex: 9999,
             pointerEvents: "none",
             boxSizing: "border-box",

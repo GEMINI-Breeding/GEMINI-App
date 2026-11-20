@@ -1,11 +1,17 @@
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useMutation } from "@tanstack/react-query"
 import {
   createFileRoute,
   Link as RouterLink,
   redirect,
+  useNavigate,
 } from "@tanstack/react-router"
+import { AxiosError } from "axios"
 import { useForm } from "react-hook-form"
+import { toast } from "sonner"
 import { z } from "zod"
+
+import { ApiError, UsersService } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import {
   Form,
@@ -18,6 +24,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
+import { useCapabilities } from "@/features/process/hooks/useCapabilities"
 import { isLoggedIn } from "@/hooks/useAuth"
 
 const formSchema = z
@@ -49,16 +56,13 @@ export const Route = createFileRoute("/signup")({
     }
   },
   head: () => ({
-    meta: [
-      {
-        title: "Sign Up - FastAPI Cloud",
-      },
-    ],
+    meta: [{ title: "Sign Up — GEMINI" }],
   }),
 })
 
 function SignUp() {
-  const isPending = false
+  const navigate = useNavigate()
+  const capabilities = useCapabilities()
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -71,7 +75,71 @@ function SignUp() {
     },
   })
 
-  const onSubmit = (_data: FormData) => {}
+  const signupMutation = useMutation({
+    mutationFn: (data: FormData) =>
+      UsersService.apiUsersSignupSignup({
+        requestBody: {
+          email: data.email,
+          password: data.password,
+          full_name: data.full_name,
+        },
+      }),
+    onSuccess: () => {
+      // New accounts start inactive until a superuser approves them.
+      toast.success(
+        "Account created. An administrator must approve it before you can log in.",
+      )
+      navigate({ to: "/login" })
+    },
+    onError: (err: unknown) => {
+      let message = "Signup failed. Please try again."
+      let status: number | undefined
+      let detail: string | undefined
+      if (err instanceof ApiError) {
+        status = err.status
+        const body = err.body as any
+        detail = body?.error_description ?? body?.error
+      } else if (err instanceof AxiosError && err.response) {
+        status = err.response.status
+        detail = err.response.data?.error_description
+      }
+      if (status === 400) {
+        message = detail ?? "That email is already registered."
+      } else if (status === 403) {
+        message =
+          "Sign-up is turned off on this server. Ask an administrator for an account."
+      } else if (status === 503) {
+        message =
+          "Auth is disabled on the backend (GEMINI_JWT_SECRET unset); signup is unavailable."
+      }
+      toast.error(message)
+    },
+  })
+
+  const isPending = signupMutation.isPending
+  const onSubmit = (data: FormData) => signupMutation.mutate(data)
+
+  if (capabilities.data && !capabilities.data.signup_enabled)
+    return (
+      <AuthLayout>
+        <div
+          className="flex flex-col gap-4 text-center"
+          data-testid="signup-disabled"
+        >
+          <h1 className="text-2xl font-bold">Sign-up is turned off</h1>
+          <p className="text-muted-foreground text-sm">
+            Accounts on this server are created by an administrator (Admin →
+            Users → Add User). Ask one for an account.
+          </p>
+          <RouterLink
+            to="/login"
+            className="text-sm underline underline-offset-4"
+          >
+            Back to log in
+          </RouterLink>
+        </div>
+      </AuthLayout>
+    )
 
   return (
     <AuthLayout>
@@ -159,11 +227,7 @@ function SignUp() {
               )}
             />
 
-            <LoadingButton
-              type="submit"
-              className="w-full"
-              loading={isPending}
-            >
+            <LoadingButton type="submit" className="w-full" loading={isPending}>
               Sign Up
             </LoadingButton>
           </div>

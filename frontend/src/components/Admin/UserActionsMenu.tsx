@@ -1,7 +1,7 @@
 import { EllipsisVertical } from "lucide-react"
 import { useState } from "react"
 
-import type { UserPublic } from "@/client"
+import type { UserOutput } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -13,7 +13,7 @@ import DeleteUser from "./DeleteUser"
 import EditUser from "./EditUser"
 
 interface UserActionsMenuProps {
-  user: UserPublic
+  user: UserOutput
 }
 
 export const UserActionsMenu = ({ user }: UserActionsMenuProps) => {
@@ -33,7 +33,7 @@ export const UserActionsMenu = ({ user }: UserActionsMenuProps) => {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <EditUser user={user} onSuccess={() => setOpen(false)} />
-        <DeleteUser id={user.id} onSuccess={() => setOpen(false)} />
+        <DeleteUser id={String(user.id)} onSuccess={() => setOpen(false)} />
       </DropdownMenuContent>
     </DropdownMenu>
   )

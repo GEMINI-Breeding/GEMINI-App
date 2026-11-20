@@ -14,6 +14,10 @@ export interface ProcessItem {
   error?: string
   /** Custom status label override (e.g. "Extracting…") */
   label?: string
+  /** Bytes uploaded so far for this item (file_upload type only) */
+  uploadedBytes?: number
+  /** Total bytes for this item (file_upload type only) */
+  totalBytes?: number
 }
 
 export interface Process {
@@ -31,8 +35,18 @@ export interface Process {
   message?: string
   /** TanStack Router path to navigate to when the user clicks "View" in the panel */
   link?: string
+  /** Found on the server (started by the agent, another tab or before a reload), not started here. */
+  background?: boolean
   /** Call to abort an in-progress upload */
   cancel?: () => void
   /** Pipeline run ID — if set, ProcessContext opens its own SSE to track progress */
   runId?: string
+  /** The run step the job is (trait_extraction, …), when known. */
+  stepKey?: string
+  /**
+   * Further jobs this process waits for after `runId`, in order (an upload
+   * of several .bin logs runs one extraction job per log). The process is
+   * done only when the last one completes.
+   */
+  nextRunIds?: string[]
 }

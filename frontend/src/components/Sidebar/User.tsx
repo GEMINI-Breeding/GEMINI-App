@@ -1,6 +1,5 @@
-import { Link as RouterLink } from "@tanstack/react-router"
-import { ChevronsUpDown, Settings } from "lucide-react"
-
+import { Link as RouterLink, useNavigate } from "@tanstack/react-router"
+import { ChevronsUpDown, LogOut, Settings } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -16,6 +15,8 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import useAuth from "@/hooks/useAuth"
+import { markSignedOut, noAccountsInUse } from "@/lib/autoSignIn"
 import { getInitials } from "@/utils"
 
 interface UserInfoProps {
@@ -41,13 +42,25 @@ function UserInfo({ fullName, email }: UserInfoProps) {
 
 export function User({ user }: { user: any }) {
   const { isMobile, setOpenMobile } = useSidebar()
+  const navigate = useNavigate()
+  const { logout } = useAuth()
 
-  if (!user) return null
+  // Signed in by the app itself, no login screen asked for: no account to
+  // show, and no sign-out to lock the person out with (Settings → Sign-in
+  // turns accounts on, and this menu returns).
+  if (!user || noAccountsInUse()) return null
 
   const handleMenuClick = () => {
     if (isMobile) {
       setOpenMobile(false)
     }
+  }
+
+  const handleLogout = () => {
+    handleMenuClick()
+    markSignedOut()
+    logout()
+    navigate({ to: "/login" })
   }
 
   return (
@@ -80,6 +93,15 @@ export function User({ user }: { user: any }) {
                 User Settings
               </DropdownMenuItem>
             </RouterLink>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={handleLogout}
+              data-testid="logout-menu-item"
+            >
+              <LogOut />
+              Log Out
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

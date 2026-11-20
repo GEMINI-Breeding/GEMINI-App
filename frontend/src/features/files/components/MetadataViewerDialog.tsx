@@ -1,48 +1,92 @@
+/**
+ * MetadataViewerDialog — look inside an upload's GPS metadata CSV
+ * (`msgs_synced.csv` from Amiga extraction, `drone_msgs.csv` from
+ * ArduPilot logs, or any other CSV): a filterable table, a lat/lon
+ * scatter of the track, a time series of any numeric column, and — when
+ * the file has `direction_raw` / `direction` — raw vs. smoothed heading.
+ *
+ * Ported from main (PR #153). Main fetched `/api/v1/files/{id}/metadata-csvs`
+ * (server-side pandas); here the CSV is read straight from MinIO and parsed
+ * in the browser, so no backend route is needed.
+ */
+import { useQuery } from "@tanstack/react-query"
+import { Loader2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { X, Loader2 } from "lucide-react"
 import {
-  XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ScatterChart, Scatter, ZAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+  ZAxis,
 } from "recharts"
-import { OpenAPI } from "@/client"
+
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select"
+import { apiUrl, DEFAULT_BUCKET } from "@/features/files/lib/download"
+import { parseCSV } from "@/features/process/lib/csv"
+import { getToken } from "@/lib/auth"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-interface CsvFile {
+export interface CsvFile {
   label: string
   columns: string[]
   rows: Record<string, string | number | null>[]
 }
 
-interface Props {
-  uploadId: string
-  title: string
-  onClose: () => void
+/** Parse CSV text into columns + rows, numbers as numbers, blanks as null. */
+export function toCsvFile(text: string, label: string): CsvFile {
+  const { headers, rows } = parseCSV(text)
+  return {
+    label,
+    columns: headers,
+    rows: rows.map((r) => {
+      const out: Record<string, string | number | null> = {}
+      for (const h of headers) {
+        const v = (r[h] ?? "").trim()
+        if (v === "") out[h] = null
+        else {
+          const n = Number(v)
+          out[h] = Number.isFinite(n) ? n : v
+        }
+      }
+      return out
+    }),
+  }
+}
+
+/** CSVs worth opening in the viewer rather than just downloading. */
+export function isViewableCsv(objectName: string): boolean {
+  return /\.csv$/i.test(objectName)
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function apiBase() {
-  return (window as any).__GEMI_BACKEND_URL__ ?? OpenAPI.BASE ?? ""
-}
-
-async function authHeader(): Promise<string> {
-  const token =
-    typeof OpenAPI.TOKEN === "function"
-      ? await (OpenAPI.TOKEN as () => Promise<string>)()
-      : OpenAPI.TOKEN ?? ""
-  return token ? `Bearer ${token}` : ""
-}
 
 const LAT_COLS = new Set(["lat", "latitude"])
 const LON_COLS = new Set(["lon", "lng", "longitude"])
 const TIME_COLS = new Set(["timestamp", "stamp", "gps_time", "time"])
 const SKIP_COLS = new Set([
-  "heading_motion", "image_path", "rgb_file", "/top/rgb_file",
-  "disparity_file", "/top/disparity_file",
+  "heading_motion",
+  "image_path",
+  "rgb_file",
+  "/top/rgb_file",
+  "disparity_file",
+  "/top/disparity_file",
 ])
 
 function isNumeric(col: string, rows: CsvFile["rows"]): boolean {
@@ -72,7 +116,11 @@ function TableView({ file }: { file: CsvFile }) {
       }
       if (search) {
         const q = search.toLowerCase()
-        return displayCols.some((c) => String(row[c] ?? "").toLowerCase().includes(q))
+        return displayCols.some((c) =>
+          String(row[c] ?? "")
+            .toLowerCase()
+            .includes(q),
+        )
       }
       return true
     })
@@ -87,21 +135,29 @@ function TableView({ file }: { file: CsvFile }) {
           onChange={(e) => setSearch(e.target.value)}
           className="border-input bg-background text-foreground placeholder:text-muted-foreground h-8 rounded-md border px-3 text-xs w-56"
         />
-        <span className="text-xs text-muted-foreground">{filtered.length} rows</span>
+        <span className="text-xs text-muted-foreground">
+          {filtered.length} rows
+        </span>
       </div>
       <div className="overflow-auto flex-1 min-h-0 border rounded-md">
         <table className="w-full text-xs">
           <thead className="bg-muted/60 sticky top-0 z-10">
             <tr>
               {displayCols.map((col) => (
-                <th key={col} className="px-2 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap">
+                <th
+                  key={col}
+                  className="px-2 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap"
+                >
                   <div className="flex flex-col gap-0.5">
                     <span>{col}</span>
                     <input
                       placeholder="filter…"
                       value={colFilters[col] ?? ""}
                       onChange={(e) =>
-                        setColFilters((prev) => ({ ...prev, [col]: e.target.value }))
+                        setColFilters((prev) => ({
+                          ...prev,
+                          [col]: e.target.value,
+                        }))
                       }
                       className="bg-background border-input h-5 w-full rounded border px-1 text-[10px] font-normal"
                       onClick={(e) => e.stopPropagation()}
@@ -117,8 +173,15 @@ function TableView({ file }: { file: CsvFile }) {
                 {displayCols.map((col) => {
                   const val = row[col]
                   return (
-                    <td key={col} className="px-2 py-1 text-muted-foreground whitespace-nowrap tabular-nums">
-                      {val == null ? <span className="opacity-30">—</span> : String(val)}
+                    <td
+                      key={col}
+                      className="px-2 py-1 text-muted-foreground whitespace-nowrap tabular-nums"
+                    >
+                      {val == null ? (
+                        <span className="opacity-30">—</span>
+                      ) : (
+                        String(val)
+                      )}
                     </td>
                   )
                 })}
@@ -146,7 +209,7 @@ function LatLonView({ file }: { file: CsvFile }) {
     if (!latCol || !lonCol) return []
     return file.rows
       .map((r) => ({ x: Number(r[lonCol]), y: Number(r[latCol]) }))
-      .filter((p) => isFinite(p.x) && isFinite(p.y))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
   }, [file.rows, latCol, lonCol])
 
   if (!latCol || !lonCol) {
@@ -181,7 +244,12 @@ function LatLonView({ file }: { file: CsvFile }) {
               domain={["auto", "auto"]}
               tickFormatter={(v) => v.toFixed(5)}
               tick={{ fontSize: 10 }}
-              label={{ value: "Longitude", position: "insideBottom", offset: -2, fontSize: 11 }}
+              label={{
+                value: "Longitude",
+                position: "insideBottom",
+                offset: -2,
+                fontSize: 11,
+              }}
             />
             <YAxis
               type="number"
@@ -191,14 +259,24 @@ function LatLonView({ file }: { file: CsvFile }) {
               tickFormatter={(v) => v.toFixed(5)}
               tick={{ fontSize: 10 }}
               width={80}
-              label={{ value: "Latitude", angle: -90, position: "insideLeft", fontSize: 11 }}
+              label={{
+                value: "Latitude",
+                angle: -90,
+                position: "insideLeft",
+                fontSize: 11,
+              }}
             />
             <ZAxis range={[8, 8]} />
             <Tooltip
               cursor={false}
               formatter={(value: unknown) => [(value as number).toFixed(6)]}
             />
-            <Scatter data={points} fill="#3b82f6" opacity={0.7} onClick={() => {}} />
+            <Scatter
+              data={points}
+              fill="#3b82f6"
+              opacity={0.7}
+              onClick={() => {}}
+            />
           </ScatterChart>
         </ResponsiveContainer>
       </div>
@@ -210,10 +288,9 @@ function LatLonView({ file }: { file: CsvFile }) {
 
 function TimeSeriesView({ file }: { file: CsvFile }) {
   const numericCols = useMemo(
-    () => file.columns.filter(
-      (c) => !SKIP_COLS.has(c) && isNumeric(c, file.rows)
-    ),
-    [file]
+    () =>
+      file.columns.filter((c) => !SKIP_COLS.has(c) && isNumeric(c, file.rows)),
+    [file],
   )
 
   const timeCol = file.columns.find((c) => TIME_COLS.has(c.toLowerCase()))
@@ -230,9 +307,12 @@ function TimeSeriesView({ file }: { file: CsvFile }) {
       .map((r, i) => {
         const t = timeCol ? Number(r[timeCol]) : i
         const v = selectedCol ? r[selectedCol] : null
-        return { t: isFinite(t) ? t : i, v: v != null ? Number(v) : null }
+        return {
+          t: Number.isFinite(t) ? t : i,
+          v: v != null ? Number(v) : null,
+        }
       })
-      .filter((d) => d.v != null && isFinite(d.v as number))
+      .filter((d) => d.v != null && Number.isFinite(d.v as number))
   }, [file.rows, timeCol, selectedCol])
 
   if (numericCols.length === 0) {
@@ -255,11 +335,15 @@ function TimeSeriesView({ file }: { file: CsvFile }) {
           </SelectTrigger>
           <SelectContent>
             {numericCols.map((c) => (
-              <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>
+              <SelectItem key={c} value={c} className="text-xs">
+                {c}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        <span className="text-xs text-muted-foreground">{chartData.length} points</span>
+        <span className="text-xs text-muted-foreground">
+          {chartData.length} points
+        </span>
       </div>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
@@ -272,7 +356,12 @@ function TimeSeriesView({ file }: { file: CsvFile }) {
               domain={["auto", "auto"]}
               tickFormatter={tickFormatter}
               tick={{ fontSize: 10 }}
-              label={{ value: xLabel, position: "insideBottom", offset: -12, fontSize: 11 }}
+              label={{
+                value: xLabel,
+                position: "insideBottom",
+                offset: -12,
+                fontSize: 11,
+              }}
             />
             <YAxis
               type="number"
@@ -281,15 +370,29 @@ function TimeSeriesView({ file }: { file: CsvFile }) {
               tickFormatter={tickFormatter}
               tick={{ fontSize: 10 }}
               width={72}
-              label={{ value: selectedCol, angle: -90, position: "insideLeft", fontSize: 11 }}
+              label={{
+                value: selectedCol,
+                angle: -90,
+                position: "insideLeft",
+                fontSize: 11,
+              }}
             />
             <ZAxis range={[16, 16]} />
             <Tooltip
               cursor={false}
-              formatter={(value: unknown) => [(value as number)?.toFixed ? (value as number).toFixed(6) : String(value)]}
+              formatter={(value: unknown) => [
+                (value as number)?.toFixed
+                  ? (value as number).toFixed(6)
+                  : String(value),
+              ]}
               labelFormatter={(l) => `${xLabel}: ${tickFormatter(Number(l))}`}
             />
-            <Scatter data={chartData} fill="#3b82f6" opacity={0.7} onClick={() => {}} />
+            <Scatter
+              data={chartData}
+              fill="#3b82f6"
+              opacity={0.7}
+              onClick={() => {}}
+            />
           </ScatterChart>
         </ResponsiveContainer>
       </div>
@@ -299,7 +402,12 @@ function TimeSeriesView({ file }: { file: CsvFile }) {
 
 // ── Smoothing tab ──────────────────────────────────────────────────────────────
 
-const DIR_TO_DEG: Record<string, number> = { North: 0, East: 90, South: 180, West: 270 }
+const DIR_TO_DEG: Record<string, number> = {
+  North: 0,
+  East: 90,
+  South: 180,
+  West: 270,
+}
 const DIR_ORDER = ["North", "East", "South", "West"]
 
 function SmoothedDirectionView({ file }: { file: CsvFile }) {
@@ -313,9 +421,9 @@ function SmoothedDirectionView({ file }: { file: CsvFile }) {
     const smoothed: { t: number; v: number }[] = []
     file.rows.forEach((r, i) => {
       const t = timeCol ? Number(r[timeCol]) : i
-      const x = isFinite(t) ? t : i
-      const rawDir = r["direction_raw"]
-      const smDir = r["direction"]
+      const x = Number.isFinite(t) ? t : i
+      const rawDir = r.direction_raw
+      const smDir = r.direction
       if (hasRaw && rawDir != null && DIR_TO_DEG[String(rawDir)] != null)
         raw.push({ t: x, v: DIR_TO_DEG[String(rawDir)] })
       if (hasSmoothed && smDir != null && DIR_TO_DEG[String(smDir)] != null)
@@ -338,14 +446,22 @@ function SmoothedDirectionView({ file }: { file: CsvFile }) {
     <div className="h-full flex flex-col gap-3">
       <div className="shrink-0 flex items-center gap-4 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#94a3b8" }} />
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-full"
+            style={{ background: "#94a3b8" }}
+          />
           Raw (per-frame)
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: "#3b82f6" }} />
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-full"
+            style={{ background: "#3b82f6" }}
+          />
           Smoothed
         </span>
-        <span className="ml-auto">{rawData.length} raw · {smoothedData.length} smoothed frames</span>
+        <span className="ml-auto">
+          {rawData.length} raw · {smoothedData.length} smoothed frames
+        </span>
       </div>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
@@ -357,7 +473,12 @@ function SmoothedDirectionView({ file }: { file: CsvFile }) {
               domain={["auto", "auto"]}
               tickFormatter={tickFormatter}
               tick={{ fontSize: 10 }}
-              label={{ value: xLabel, position: "insideBottom", offset: -12, fontSize: 11 }}
+              label={{
+                value: xLabel,
+                position: "insideBottom",
+                offset: -12,
+                fontSize: 11,
+              }}
             />
             <YAxis
               type="number"
@@ -378,10 +499,22 @@ function SmoothedDirectionView({ file }: { file: CsvFile }) {
               labelFormatter={(l) => `${xLabel}: ${tickFormatter(Number(l))}`}
             />
             {hasRaw && (
-              <Scatter name="Raw" data={rawData} fill="#94a3b8" opacity={0.45} onClick={() => {}} />
+              <Scatter
+                name="Raw"
+                data={rawData}
+                fill="#94a3b8"
+                opacity={0.45}
+                onClick={() => {}}
+              />
             )}
             {hasSmoothed && (
-              <Scatter name="Smoothed" data={smoothedData} fill="#3b82f6" opacity={0.75} onClick={() => {}} />
+              <Scatter
+                name="Smoothed"
+                data={smoothedData}
+                fill="#3b82f6"
+                opacity={0.75}
+                onClick={() => {}}
+              />
             )}
           </ScatterChart>
         </ResponsiveContainer>
@@ -394,40 +527,35 @@ function SmoothedDirectionView({ file }: { file: CsvFile }) {
 
 type ViewTab = "table" | "latlon" | "timeseries" | "smoothing"
 
-export function MetadataViewerDialog({ uploadId, title, onClose }: Props) {
-  const [loading, setLoading] = useState(true)
-  const [files, setFiles] = useState<CsvFile[]>([])
-  const [activeFile, setActiveFile] = useState(0)
+export function MetadataViewerDialog({
+  objectPath,
+  onClose,
+}: {
+  /** MinIO object path of the CSV (no bucket). null = closed. */
+  objectPath: string | null
+  onClose: () => void
+}) {
   const [activeTab, setActiveTab] = useState<ViewTab>("table")
+  const label = objectPath?.split("/").pop() ?? ""
 
-  useEffect(() => {
-    let cancelled = false
-    authHeader().then((auth) => {
-      fetch(`${apiBase()}/api/v1/files/${uploadId}/metadata-csvs`, {
-        headers: auth ? { Authorization: auth } : {},
-      })
-        .then((r) => (r.ok ? r.json() : []))
-        .then((data: CsvFile[]) => {
-          if (!cancelled) {
-            setFiles(data)
-            setLoading(false)
-          }
-        })
-        .catch(() => { if (!cancelled) setLoading(false) })
-    })
-    return () => { cancelled = true }
-  }, [uploadId])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [onClose])
-
-  const file = files[activeFile]
+  const csv = useQuery({
+    queryKey: ["files", "metadata-csv", objectPath],
+    queryFn: async (): Promise<CsvFile> => {
+      const res = await fetch(
+        apiUrl(`/api/files/download/${DEFAULT_BUCKET}/${objectPath}`),
+        { headers: { Authorization: `Bearer ${getToken()}` } },
+      )
+      if (!res.ok) throw new Error(`Couldn't read ${label}: HTTP ${res.status}`)
+      return toCsvFile(await res.text(), label)
+    },
+    enabled: Boolean(objectPath),
+    staleTime: 60_000,
+  })
+  const file = csv.data
 
   const hasDirectionData = file
-    ? file.columns.includes("direction_raw") || file.columns.includes("direction")
+    ? file.columns.includes("direction_raw") ||
+      file.columns.includes("direction")
     : false
 
   useEffect(() => {
@@ -438,89 +566,74 @@ export function MetadataViewerDialog({ uploadId, title, onClose }: Props) {
     { id: "table", label: "Table" },
     { id: "latlon", label: "Lat / Lon" },
     { id: "timeseries", label: "Time Series" },
-    ...(hasDirectionData ? [{ id: "smoothing" as ViewTab, label: "Smoothing" }] : []),
+    ...(hasDirectionData
+      ? [{ id: "smoothing" as ViewTab, label: "Smoothing" }]
+      : []),
   ]
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-      onClick={onClose}
-    >
-      <div
-        className="bg-background relative flex h-[90vh] w-[92vw] max-w-6xl flex-col rounded-lg overflow-hidden shadow-xl"
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open={objectPath !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        className="flex h-[90vh] w-[92vw] max-w-6xl flex-col sm:max-w-6xl"
+        data-testid="metadata-viewer"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b px-4 py-3 shrink-0 gap-4">
+        <DialogHeader className="flex-row items-center justify-between gap-4 space-y-0">
           <div className="min-w-0 flex-1">
-            <p className="font-medium text-sm truncate">{title}</p>
-            {file && (
-              <p className="text-muted-foreground text-xs">
-                {file.label} — {file.columns.length} columns · {file.rows.length} rows
-              </p>
-            )}
+            <DialogTitle className="truncate text-sm">{label}</DialogTitle>
+            <DialogDescription className="text-xs">
+              {file
+                ? `${file.columns.length} columns · ${file.rows.length} rows`
+                : "GPS / metadata CSV"}
+            </DialogDescription>
           </div>
-
-          <div className="flex items-center gap-3 shrink-0">
-            {/* File selector */}
-            {files.length > 1 && (
-              <select
-                value={activeFile}
-                onChange={(e) => setActiveFile(Number(e.target.value))}
-                className="border-input bg-background text-foreground rounded border px-2 py-1 text-xs"
+          <div className="flex overflow-hidden rounded-md border text-xs">
+            {TAB_LABELS.map(({ id, label: tabLabel }) => (
+              <button
+                type="button"
+                key={id}
+                onClick={() => setActiveTab(id)}
+                data-testid={`metadata-tab-${id}`}
+                className={`px-3 py-1.5 transition-colors ${
+                  activeTab === id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
               >
-                {files.map((f, i) => (
-                  <option key={i} value={i}>{f.label}</option>
-                ))}
-              </select>
-            )}
-
-            {/* View tabs */}
-            <div className="flex rounded-md border overflow-hidden text-xs">
-              {TAB_LABELS.map(({ id, label }) => (
-                <button
-                  key={id}
-                  onClick={() => setActiveTab(id)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    activeTab === id
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <button className="text-muted-foreground hover:text-foreground" onClick={onClose}>
-              <X className="h-5 w-5" />
-            </button>
+                {tabLabel}
+              </button>
+            ))}
           </div>
-        </div>
+        </DialogHeader>
 
-        {/* Body */}
-        <div className="flex-1 min-h-0 p-4 overflow-hidden">
-          {loading && (
-            <div className="flex items-center justify-center h-full gap-2 text-muted-foreground text-sm">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {csv.isLoading && (
+            <div className="flex h-full items-center justify-center gap-2 text-muted-foreground text-sm">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading metadata…
+              Loading…
             </div>
           )}
-          {!loading && files.length === 0 && (
-            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              No metadata CSV files found for this upload.
+          {csv.isError && (
+            <div className="flex h-full items-center justify-center text-destructive text-sm">
+              {(csv.error as Error).message}
             </div>
           )}
-          {!loading && file && (
+          {file && file.rows.length === 0 && (
+            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+              This CSV has no rows.
+            </div>
+          )}
+          {file && file.rows.length > 0 && (
             <>
-              {activeTab === "table"      && <TableView              file={file} />}
-              {activeTab === "latlon"     && <LatLonView             file={file} />}
-              {activeTab === "timeseries" && <TimeSeriesView         file={file} />}
-              {activeTab === "smoothing"  && <SmoothedDirectionView  file={file} />}
+              {activeTab === "table" && <TableView file={file} />}
+              {activeTab === "latlon" && <LatLonView file={file} />}
+              {activeTab === "timeseries" && <TimeSeriesView file={file} />}
+              {activeTab === "smoothing" && (
+                <SmoothedDirectionView file={file} />
+              )}
             </>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

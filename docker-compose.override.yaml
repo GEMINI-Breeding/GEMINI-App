@@ -1,0 +1,185 @@
+# Dev-loop overrides for the GEMINI-App backend stack.
+#
+# This file is auto-loaded by `docker compose` whenever you run from
+# the GEMINI-App repo root, on top of the included submodule compose.
+# It adds `develop.watch` rules so `docker compose watch` does the
+# right thing on every kind of change:
+#
+#   • Python source under `backend/gemini/`
+#       - rest-api: already bind-mounted with `--reload`; live edits
+#         take effect without watch (left as-is).
+#       - workers (ml, geo, odm, gwas): synced into the container
+#         AND the worker process is restarted (sync+restart), since
+#         worker scripts have no reload mechanism of their own.
+#   • Dependency / Dockerfile changes
+#       - `pyproject.toml`, `poetry.lock`, or any per-service
+#         Dockerfile triggers a full image rebuild for that service.
+#         No more stale-image footguns when the submodule pointer bumps.
+#
+# It also downgrades every service's restart policy from the submodule's
+# `always` to `unless-stopped`. With `always`, the Docker daemon brings
+# containers back up every time it starts — so launching Docker Desktop
+# silently resurrected the whole stack even after `docker compose stop`.
+# `unless-stopped` keeps the same crash-recovery behaviour but honours an
+# explicit stop across daemon restarts. (`storage-init` is a one-shot that
+# runs and exits; it has no restart policy and is deliberately left alone.)
+#
+# Usage:
+#   docker compose watch       # dev mode — live sync + auto-rebuild
+#   docker compose up -d       # normal mode — `develop:` is a no-op
+#
+# Compose `develop.watch` requires Docker Compose v2.22+ (you have v5+).
+#
+# Notes:
+#   - Synced changes live in the container's writable layer. After
+#     `docker compose down`, the next `up` recreates the container from
+#     the image, so any synced edits not yet in the image are lost.
+#     Run `--build` when you want them baked in.
+#   - The override only adds `develop:` blocks and `restart:` keys;
+#     existing service definitions in the submodule's compose are
+#     otherwise untouched.
+
+services:
+  rest-api:
+    restart: unless-stopped
+    # Dev/E2E: a small fixture "previous GEMI install" (tests/fixtures/
+    # legacy); point GEMINI_LEGACY_*_HOST_DIR at a real one to try that.
+    volumes:
+      - ${GEMINI_LEGACY_APP_HOST_DIR:-./frontend/tests/fixtures/legacy/app}:/legacy/app:ro
+      - ${GEMINI_LEGACY_DATA_HOST_DIR:-./frontend/tests/fixtures/legacy/data}:/legacy/data:ro
+    develop:
+      watch:
+        # rest-api Python source is already bind-mounted at
+        # backend/gemini → /geminibase/gemini and reloaded by
+        # `litestar run --reload`. Watch only needs to handle the
+        # cases that bind-mount + reload don't cover: dependency
+        # and Dockerfile changes that require a fresh image.
+        - action: rebuild
+          path: ./backend/gemini/rest_api/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-ml:
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/ml/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-geo:
+    restart: unless-stopped
+    # Dev/E2E: a small fixture "previous GEMI install" (tests/fixtures/
+    # legacy); point GEMINI_LEGACY_*_HOST_DIR at a real one to try that.
+    volumes:
+      - ${GEMINI_LEGACY_APP_HOST_DIR:-./frontend/tests/fixtures/legacy/app}:/legacy/app:ro
+      - ${GEMINI_LEGACY_DATA_HOST_DIR:-./frontend/tests/fixtures/legacy/data}:/legacy/data:ro
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/geo/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-odm:
+    restart: unless-stopped
+    develop:
+      watch:
+        # odm worker already has a bind mount, but no reload — restart
+        # is what propagates code changes to a running worker.
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/odm/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-gwas:
+    restart: unless-stopped
+    develop:
+      watch:
+        # gwas Dockerfile uses /geminibase as WORKDIR (different from
+        # the other workers' /app), so the sync target differs.
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /geminibase/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/gwas/Dockerfile
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  geminibase-worker-stitch:
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/stitch/Dockerfile
+        - action: rebuild
+          path: ./backend/gemini/workers/stitch/requirements.txt
+        - action: rebuild
+          path: ./backend/gemini/workers/stitch/agrowstitch-opencv413.patch
+
+  geminibase-worker-thermal:
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/gemini
+          target: /app/gemini
+        - action: rebuild
+          path: ./backend/gemini/workers/thermal/Dockerfile
+        - action: rebuild
+          path: ./backend/gemini/workers/thermal/requirements.txt
+        - action: rebuild
+          path: ./backend/pyproject.toml
+        - action: rebuild
+          path: ./backend/poetry.lock
+
+  # The submodule ships its own React UI (port 3000). We use the Vite app under
+  # `frontend/` instead, and the submodule's gemini-ui source is currently
+  # broken (missing src/lib/), so its image build fails. Park it behind an
+  # opt-in profile so `docker compose up -d` skips it. To run it anyway:
+  #     docker compose --profile geminibase-ui up -d
+  geminibase-ui:
+    profiles: ["geminibase-ui"]
+
+  # Services with no dev-loop overrides of their own — present here only to
+  # relax the submodule's `restart: always` (see header).
+  db:
+    restart: unless-stopped
+
+  storage:
+    restart: unless-stopped
+
+  logger:
+    restart: unless-stopped
+
+  titiler:
+    restart: unless-stopped
+
+  geminibase-nodeodm:
+    restart: unless-stopped
+
+  geminibase-worker-amiga:
+    restart: unless-stopped

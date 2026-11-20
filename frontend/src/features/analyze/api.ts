@@ -1,12 +1,16 @@
 /** Typed fetch wrappers for the /analyze backend endpoints. */
 
 function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
+  const base =
+    (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
   return base ? `${base}${path}` : path
 }
 
 function authHeaders() {
-  const token = localStorage.getItem("access_token") || ""
+  // Phase 4 canonical token lives under gemini.auth.token. Full rewrite of
+  // this file lands in Phase 10 (Analyze migration); reading the correct
+  // storage key here keeps the tokens authenticated in the interim.
+  const token = localStorage.getItem("gemini.auth.token") || ""
   return { Authorization: `Bearer ${token}` }
 }
 
@@ -93,22 +97,32 @@ export interface TraitRecord {
 export const analyzeApi = {
   // Legacy run-based (used by AnalyzeRun detail page)
   listRuns: () => get<AnalyzableRun[]>("/api/v1/analyze/runs"),
-  getTraits: (runId: string) => get<TraitsResponse>(`/api/v1/analyze/runs/${runId}/traits`),
-  getOrthoInfo: (runId: string) => get<OrthoInfoResponse>(`/api/v1/analyze/runs/${runId}/ortho-info`),
+  getTraits: (runId: string) =>
+    get<TraitsResponse>(`/api/v1/analyze/runs/${runId}/traits`),
+  getOrthoInfo: (runId: string) =>
+    get<OrthoInfoResponse>(`/api/v1/analyze/runs/${runId}/ortho-info`),
 
   // Trait record provenance
   listTraitRecords: () => get<TraitRecord[]>("/api/v1/analyze/trait-records"),
   listTraitRecordsByRun: (runId: string) =>
     get<TraitRecord[]>(`/api/v1/analyze/trait-records?run_id=${runId}`),
-  getTraitRecordGeojson: (id: string) => get<TraitsResponse>(`/api/v1/analyze/trait-records/${id}/geojson`),
-  getTraitRecordOrthoInfo: (id: string) => get<OrthoInfoResponse>(`/api/v1/analyze/trait-records/${id}/ortho-info`),
-  getTraitRecordImagePlotIds: (id: string) => get<{ plot_ids: string[] }>(`/api/v1/analyze/trait-records/${id}/image-plot-ids`),
+  getTraitRecordGeojson: (id: string) =>
+    get<TraitsResponse>(`/api/v1/analyze/trait-records/${id}/geojson`),
+  getTraitRecordOrthoInfo: (id: string) =>
+    get<OrthoInfoResponse>(`/api/v1/analyze/trait-records/${id}/ortho-info`),
+  getTraitRecordImagePlotIds: (id: string) =>
+    get<{ plot_ids: string[] }>(
+      `/api/v1/analyze/trait-records/${id}/image-plot-ids`,
+    ),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Format a version number + optional name as "v1 — My Name" or just "v1". */
-export function versionLabel(version: number | null, name: string | null | undefined): string {
+export function versionLabel(
+  version: number | null,
+  name: string | null | undefined,
+): string {
   if (version == null) return "—"
   const v = `v${version}`
   return name ? `${v} — ${name}` : v

@@ -8,35 +8,65 @@
  * - Per-column value filters inline in the table header
  */
 
-import { useState, useMemo } from "react"
-import { useQueries } from "@tanstack/react-query"
-import { Loader2, Pin, PinOff, Search, X, ChevronDown, ChevronUp, ListFilter, ScanSearch, ChevronLeft, ChevronRight, Tag } from "lucide-react"
-import { PlotImage, type Prediction, authHeaders } from "@/components/Common/PlotImage"
-import { Input } from "@/components/ui/input"
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  ListFilter,
+  Loader2,
+  Pin,
+  PinOff,
+  ScanSearch,
+  Search,
+  Tag,
+  X,
+} from "lucide-react"
+import { useMemo, useState } from "react"
+import { PlotImage, type Prediction } from "@/components/Common/PlotImage"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table"
 import {
-  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import {
-  useTraitRecordGeojson, useMultiTraitGeojson, applyFilters, formatDashboardValue,
+  applyFilters,
+  formatDashboardValue,
+  useMultiTraitGeojson,
+  useTraitRecordGeojson,
+  useTraitRecords,
 } from "../hooks/useTraitData"
-import { useTraitRecords } from "../hooks/useTraitData"
 import type { PlotViewerConfig } from "../types"
 
-function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? ""
-  return base ? `${base}${path}` : path
-}
+// Detection overlay: main fetched per-run box predictions from
+// `/api/v1/pipeline-runs/{id}/inference-results`, which GEMINIbase does not
+// have. Detection *counts* reach the dashboard as ordinary traits
+// ("<class> count (<label>)"); boxes would need their own route, so the
+// overlay stays empty and its toggle hidden.
+const NO_PREDICTIONS: Record<string, Prediction[]> = {}
 
 // ── Column filter dropdown ────────────────────────────────────────────────────
 
 function ColFilterDropdown({
-  col, uniqueValues, selected, onChange,
+  col,
+  uniqueValues,
+  selected,
+  onChange,
 }: {
   col: string
   uniqueValues: string[]
@@ -48,6 +78,7 @@ function ColFilterDropdown({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
+          type="button"
           className={`ml-0.5 inline-flex items-center rounded p-0.5 transition-colors hover:bg-muted ${isActive ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground"}`}
           title={`Filter ${col.replace(/_/g, " ")}`}
         >
@@ -55,11 +86,15 @@ function ColFilterDropdown({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
-        <DropdownMenuLabel className="text-xs">{col.replace(/_/g, " ")}</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs">
+          {col.replace(/_/g, " ")}
+        </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {isActive && (
           <>
-            <DropdownMenuItem className="text-xs" onClick={() => onChange([])}>Clear filter</DropdownMenuItem>
+            <DropdownMenuItem className="text-xs" onClick={() => onChange([])}>
+              Clear filter
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
         )}
@@ -69,7 +104,11 @@ function ColFilterDropdown({
             className="text-xs"
             checked={selected.includes(v)}
             onCheckedChange={() =>
-              onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v])
+              onChange(
+                selected.includes(v)
+                  ? selected.filter((x) => x !== v)
+                  : [...selected, v],
+              )
             }
             onSelect={(e) => e.preventDefault()}
           >
@@ -96,7 +135,10 @@ interface PlotViewerWidgetProps {
   onUpdateConfig?: (patch: Partial<PlotViewerConfig>) => void
 }
 
-export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetProps) {
+export function PlotViewerWidget({
+  config,
+  onUpdateConfig,
+}: PlotViewerWidgetProps) {
   const { pinnedPlotIds, filters } = config
   const [search, setSearch] = useState("")
   const [tableCollapsed, setTableCollapsed] = useState(false)
@@ -114,62 +156,35 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
     return []
   }, [config.traitRecordIds, config.traitRecordId])
 
-  // Batch-fetch inference results for all active records (for detection overlay)
-  const activeRunIds = useMemo(() => {
-    if (!allRecords) return [] as string[]
-    const ids = new Set<string>()
-    activeIds.forEach((rid) => {
-      const rec = allRecords.find((r) => r.id === rid)
-      if (rec?.run_id) ids.add(rec.run_id)
-    })
-    return [...ids]
-  }, [allRecords, activeIds])
-
-  const inferenceResults = useQueries({
-    queries: activeRunIds.map((runId) => ({
-      queryKey: ["inference-results", runId],
-      queryFn: () =>
-        fetch(apiUrl(`/api/v1/pipeline-runs/${runId}/inference-results`), { headers: authHeaders() })
-          .then((r) => r.ok ? r.json() : null),
-      staleTime: 60_000,
-    })),
-  })
-
-  const predsByPlot = useMemo<Record<string, Prediction[]>>(() => {
-    const map: Record<string, Prediction[]> = {}
-    inferenceResults.forEach((res) => {
-      const data = res.data
-      if (!data?.available) return
-      const images: Array<{ name: string; plot?: string }> = data.images ?? []
-      const predictions: Prediction[] = data.predictions ?? []
-      for (const img of images) {
-        if (!img.plot) continue
-        const preds = predictions.filter((p) => p.image === img.name)
-        if (preds.length > 0) map[img.plot] = preds
-      }
-    })
-    return map
-  }, [inferenceResults])
+  const predsByPlot = NO_PREDICTIONS
 
   const inferenceAvailable = Object.keys(predsByPlot).length > 0
 
   const uniqueClasses = useMemo(() => {
-    const all = Object.values(predsByPlot).flat().map((p) => p.class)
+    const all = Object.values(predsByPlot)
+      .flat()
+      .map((p) => p.class)
     return [...new Set(all)].sort()
   }, [predsByPlot])
 
   const isMultiSource = activeIds.length > 1
 
   // Single-source
-  const singleGeo = useTraitRecordGeojson(activeIds.length === 1 ? activeIds[0] : null)
+  const singleGeo = useTraitRecordGeojson(
+    activeIds.length === 1 ? activeIds[0] : null,
+  )
 
   // Multi-source
   const multiGeo = useMultiTraitGeojson(activeIds.length > 1 ? activeIds : [])
 
-  const isLoading = activeIds.length === 1 ? singleGeo.isLoading : multiGeo.loading
+  const isLoading =
+    activeIds.length === 1 ? singleGeo.isLoading : multiGeo.loading
 
   // Merge all plots
-  const { allPlots, metricCols } = useMemo((): { allPlots: PlotEntry[]; metricCols: string[] } => {
+  const { allPlots, metricCols } = useMemo((): {
+    allPlots: PlotEntry[]
+    metricCols: string[]
+  } => {
     if (activeIds.length === 0) return { allPlots: [], metricCols: [] }
 
     if (activeIds.length === 1) {
@@ -177,7 +192,9 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
       if (!geoData) return { allPlots: [], metricCols: [] }
       const plots = applyFilters(geoData.geojson.features, filters).map((f) => {
         const p = f.properties ?? {}
-        const plotId = String(p.plot_id ?? p.plot ?? p.plot_number ?? p.PlotID ?? "")
+        const plotId = String(
+          p.plot_id ?? p.plot ?? p.plot_number ?? p.PlotID ?? "",
+        )
         return {
           recordId: activeIds[0],
           plotId,
@@ -195,10 +212,14 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
       if (!geoData) return
       const recordId = activeIds[i]
       const record = allRecords?.find((r) => r.id === recordId)
-      const label = record ? `${record.pipeline_name} · ${record.date}` : recordId
+      const label = record
+        ? `${record.pipeline_name} · ${record.date}`
+        : recordId
       applyFilters(geoData.geojson.features, filters).forEach((f) => {
         const p = f.properties ?? {}
-        const plotId = String(p.plot_id ?? p.plot ?? p.plot_number ?? p.PlotID ?? "")
+        const plotId = String(
+          p.plot_id ?? p.plot ?? p.plot_number ?? p.PlotID ?? "",
+        )
         plots.push({
           recordId,
           plotId,
@@ -207,7 +228,7 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
           source: label,
         })
       })
-      geoData.metric_columns.slice(0, 4).forEach((m) => metricSet.add(m))
+      for (const m of geoData.metric_columns.slice(0, 4)) metricSet.add(m)
     })
     return { allPlots: plots, metricCols: [...metricSet].slice(0, 4) }
   }, [activeIds, singleGeo.data, multiGeo.data, filters, allRecords])
@@ -224,10 +245,16 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
     const out: Record<string, string[]> = {}
     const checkCols = ["accession", "_source", ...metricCols]
     checkCols.forEach((col) => {
-      const vals = [...new Set(allPlots.map((p) => {
-        if (col === "accession") return p.accession
-        return String(p.properties[col] ?? "")
-      }).filter(Boolean))].sort()
+      const vals = [
+        ...new Set(
+          allPlots
+            .map((p) => {
+              if (col === "accession") return p.accession
+              return String(p.properties[col] ?? "")
+            })
+            .filter(Boolean),
+        ),
+      ].sort()
       if (vals.length > 0 && vals.length <= 200) out[col] = vals
     })
     return out
@@ -239,24 +266,33 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
     const q = search.toLowerCase().trim()
     if (q) {
       result = result.filter(
-        (p) => p.plotId.toLowerCase().includes(q) || p.accession.toLowerCase().includes(q)
+        (p) =>
+          p.plotId.toLowerCase().includes(q) ||
+          p.accession.toLowerCase().includes(q),
       )
     }
-    const activeCF = Object.entries(colFilters).filter(([, vals]) => vals.length > 0)
+    const activeCF = Object.entries(colFilters).filter(
+      ([, vals]) => vals.length > 0,
+    )
     if (activeCF.length > 0) {
       result = result.filter((p) =>
         activeCF.every(([col, vals]) => {
-          const v = col === "accession" ? p.accession : String(p.properties[col] ?? "")
+          const v =
+            col === "accession" ? p.accession : String(p.properties[col] ?? "")
           return vals.includes(v)
-        })
+        }),
       )
     }
     return result
   }, [allPlots, search, colFilters])
 
-  const pinnedPlots = allPlots.filter((p) => pinnedPlotIds.includes(`${p.recordId}:${p.plotId}`))
+  const pinnedPlots = allPlots.filter((p) =>
+    pinnedPlotIds.includes(`${p.recordId}:${p.plotId}`),
+  )
 
-  function pinKey(p: PlotEntry) { return `${p.recordId}:${p.plotId}` }
+  function pinKey(p: PlotEntry) {
+    return `${p.recordId}:${p.plotId}`
+  }
 
   function togglePin(p: PlotEntry) {
     if (!onUpdateConfig) return
@@ -267,9 +303,13 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
     onUpdateConfig({ pinnedPlotIds: next })
   }
 
-  function clearPinned() { onUpdateConfig?.({ pinnedPlotIds: [] }) }
+  function clearPinned() {
+    onUpdateConfig?.({ pinnedPlotIds: [] })
+  }
 
-  const activeColFilterCount = Object.values(colFilters).filter((v) => v.length > 0).length
+  const activeColFilterCount = Object.values(colFilters).filter(
+    (v) => v.length > 0,
+  ).length
 
   if (activeIds.length === 0) {
     return (
@@ -301,16 +341,26 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
           />
         </div>
         {activeColFilterCount > 0 && (
-          <button className="text-xs text-primary hover:underline whitespace-nowrap" onClick={() => setColFilters({})}>
-            Clear {activeColFilterCount} filter{activeColFilterCount > 1 ? "s" : ""}
+          <button
+            type="button"
+            className="text-xs text-primary hover:underline whitespace-nowrap"
+            onClick={() => setColFilters({})}
+          >
+            Clear {activeColFilterCount} filter
+            {activeColFilterCount > 1 ? "s" : ""}
           </button>
         )}
         <button
+          type="button"
           className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
           onClick={() => setTableCollapsed((v) => !v)}
           title={tableCollapsed ? "Show plot list" : "Hide plot list"}
         >
-          {tableCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+          {tableCollapsed ? (
+            <ChevronDown className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronUp className="w-3.5 h-3.5" />
+          )}
           <span>{tableCollapsed ? "Show" : "Hide"}</span>
         </button>
       </div>
@@ -325,13 +375,19 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
                 {tableCols.map((col) => (
                   <TableHead key={col} className="text-xs whitespace-nowrap">
                     <span className="flex items-center gap-0.5">
-                      {col === "_source" ? "Source" : col === "plotId" ? "Plot ID" : col.replace(/_/g, " ")}
+                      {col === "_source"
+                        ? "Source"
+                        : col === "plotId"
+                          ? "Plot ID"
+                          : col.replace(/_/g, " ")}
                       {uniqueByCol[col] && (
                         <ColFilterDropdown
                           col={col}
                           uniqueValues={uniqueByCol[col]}
                           selected={colFilters[col] ?? []}
-                          onChange={(vals) => setColFilters((prev) => ({ ...prev, [col]: vals }))}
+                          onChange={(vals) =>
+                            setColFilters((prev) => ({ ...prev, [col]: vals }))
+                          }
                         />
                       )}
                     </span>
@@ -344,20 +400,34 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
                 const key = pinKey(p)
                 const isPinned = pinnedPlotIds.includes(key)
                 return (
-                  <TableRow key={key} className={isPinned ? "bg-primary/5" : ""}>
+                  <TableRow
+                    key={key}
+                    className={isPinned ? "bg-primary/5" : ""}
+                  >
                     <TableCell className="py-1">
                       <button
+                        type="button"
                         onClick={() => togglePin(p)}
                         className={`p-0.5 rounded transition-colors ${isPinned ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
                         title={isPinned ? "Unpin" : "Pin plot"}
                       >
-                        {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                        {isPinned ? (
+                          <PinOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Pin className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </TableCell>
-                    <TableCell className="text-xs py-1 font-mono">{p.plotId}</TableCell>
-                    <TableCell className="text-xs py-1">{p.accession || "—"}</TableCell>
+                    <TableCell className="text-xs py-1 font-mono">
+                      {p.plotId}
+                    </TableCell>
+                    <TableCell className="text-xs py-1">
+                      {p.accession || "—"}
+                    </TableCell>
                     {isMultiSource && (
-                      <TableCell className="text-xs py-1 text-muted-foreground">{p.source || "—"}</TableCell>
+                      <TableCell className="text-xs py-1 text-muted-foreground">
+                        {p.source || "—"}
+                      </TableCell>
                     )}
                     {metricCols.map((m) => (
                       <TableCell key={m} className="text-xs py-1">
@@ -380,14 +450,19 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium">
               Pinned Plots{" "}
-              <Badge variant="secondary" className="text-[10px]">{pinnedPlots.length}</Badge>
+              <Badge variant="secondary" className="text-[10px]">
+                {pinnedPlots.length}
+              </Badge>
             </span>
             <div className="flex items-center gap-1">
               {inferenceAvailable && (
                 <>
                   <button
+                    type="button"
                     onClick={() => setShowDetections((v) => !v)}
-                    title={showDetections ? "Hide detections" : "Show detections"}
+                    title={
+                      showDetections ? "Hide detections" : "Show detections"
+                    }
                     className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showDetections ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
                   >
                     <ScanSearch className="w-3 h-3" />
@@ -395,6 +470,7 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
                   </button>
                   {showDetections && (
                     <button
+                      type="button"
                       onClick={() => setShowLabels((v) => !v)}
                       className={`flex items-center gap-1 text-xs rounded px-2 py-0.5 border transition-colors ${showLabels ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground border-input hover:text-foreground"}`}
                     >
@@ -405,53 +481,86 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
                   {showDetections && uniqueClasses.length > 1 && (
                     <div className="flex items-center gap-0.5 border rounded text-xs">
                       <button
-                        onClick={() => setActiveClass((c) => {
-                          const i = uniqueClasses.indexOf(c ?? "")
-                          return i <= 0 ? null : uniqueClasses[i - 1]
-                        })}
+                        type="button"
+                        onClick={() =>
+                          setActiveClass((c) => {
+                            const i = uniqueClasses.indexOf(c ?? "")
+                            return i <= 0 ? null : uniqueClasses[i - 1]
+                          })
+                        }
                         className="px-1 py-0.5 hover:bg-muted transition-colors"
-                      ><ChevronLeft className="w-3 h-3" /></button>
+                      >
+                        <ChevronLeft className="w-3 h-3" />
+                      </button>
                       <span className="px-1 min-w-[56px] text-center truncate">
                         {activeClass ?? "All"}
                       </span>
                       <button
-                        onClick={() => setActiveClass((c) => {
-                          const i = uniqueClasses.indexOf(c ?? "")
-                          return i >= uniqueClasses.length - 1 ? null : uniqueClasses[i + 1]
-                        })}
+                        type="button"
+                        onClick={() =>
+                          setActiveClass((c) => {
+                            const i = uniqueClasses.indexOf(c ?? "")
+                            return i >= uniqueClasses.length - 1
+                              ? null
+                              : uniqueClasses[i + 1]
+                          })
+                        }
                         className="px-1 py-0.5 hover:bg-muted transition-colors"
-                      ><ChevronRight className="w-3 h-3" /></button>
+                      >
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
                     </div>
                   )}
                 </>
               )}
-              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={clearPinned}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs"
+                onClick={clearPinned}
+              >
                 <X className="w-3 h-3 mr-1" /> Clear
               </Button>
             </div>
           </div>
           <div
             className="grid gap-3"
-            style={{ gridTemplateColumns: `repeat(${Math.min(pinnedPlots.length, 3)}, minmax(0, 1fr))` }}
+            style={{
+              gridTemplateColumns: `repeat(${Math.min(pinnedPlots.length, 3)}, minmax(0, 1fr))`,
+            }}
           >
             {pinnedPlots.map((p) => {
               const key = pinKey(p)
               return (
                 <div key={key} className="border rounded-lg p-2 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono font-medium truncate">{p.plotId}</span>
-                    <button onClick={() => togglePin(p)} className="text-muted-foreground hover:text-destructive">
+                    <span className="text-xs font-mono font-medium truncate">
+                      {p.plotId}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => togglePin(p)}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
                       <X className="w-3 h-3" />
                     </button>
                   </div>
                   {isMultiSource && p.source && (
-                    <p className="text-[10px] text-muted-foreground truncate">{p.source}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {p.source}
+                    </p>
                   )}
                   <div className="w-full" style={{ height: 220 }}>
                     <PlotImage
-                      recordId={p.recordId}
-                      plotId={p.plotId}
-                      rotate={allRecords?.find((r) => r.id === p.recordId)?.pipeline_type === "ground"}
+                      objectPath={
+                        typeof p.properties._image === "string"
+                          ? `gemini/${p.properties._image}`
+                          : undefined
+                      }
+                      rotate={
+                        allRecords?.find((r) => r.id === p.recordId)
+                          ?.pipeline_type === "ground"
+                      }
                       predictions={predsByPlot[p.plotId] ?? []}
                       showDetections={showDetections}
                       showLabels={showLabels}
@@ -461,8 +570,13 @@ export function PlotViewerWidget({ config, onUpdateConfig }: PlotViewerWidgetPro
                   {metricCols.length > 0 && (
                     <div className="space-y-0.5">
                       {metricCols.map((m) => (
-                        <div key={m} className="flex justify-between text-[10px]">
-                          <span className="text-muted-foreground">{m.replace(/_/g, " ")}</span>
+                        <div
+                          key={m}
+                          className="flex justify-between text-[10px]"
+                        >
+                          <span className="text-muted-foreground">
+                            {m.replace(/_/g, " ")}
+                          </span>
                           <span className="font-medium">
                             {typeof p.properties[m] === "number"
                               ? (p.properties[m] as number).toFixed(3)

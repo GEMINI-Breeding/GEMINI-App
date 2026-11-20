@@ -1,262 +1,26 @@
-import { useEffect, useState, useCallback } from "react"
-
-import { OpenAPI } from "@/client"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Settings, Server, Info, RefreshCw, CheckCircle, AlertCircle } from "lucide-react"
+import {
+  AlertCircle,
+  CheckCircle,
+  Cpu,
+  HardDrive,
+  Home,
+  Info,
+  KeyRound,
+  RefreshCw,
+} from "lucide-react"
+import { useCallback, useState } from "react"
 import { NavSidebar } from "@/components/Common/NavSidebar"
+import { Button } from "@/components/ui/button"
+import { ComputePanel } from "@/features/agent/components/ComputePanel"
+import { InstallHelper } from "@/features/agent/components/InstallHelper"
+import { restartWalkthrough } from "@/features/agent/components/Welcome"
+import useAuth from "@/hooks/useAuth"
+import { CURRENT_VERSION, checkForUpdates } from "@/hooks/useUpdateChecker"
 import { openUrl } from "@/lib/platform"
-import { checkForUpdates, CURRENT_VERSION } from "@/hooks/useUpdateChecker"
-
-async function getToken(): Promise<string> {
-  return typeof OpenAPI.TOKEN === "function"
-    ? await (OpenAPI.TOKEN as () => Promise<string>)()
-    : OpenAPI.TOKEN ?? ""
-}
-
-async function fetchDataRoot(): Promise<string> {
-  const token = await getToken()
-  const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/data-root`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error("Failed to fetch data root")
-  const data = await res.json()
-  return data.value as string
-}
-
-async function saveDataRoot(value: string): Promise<string> {
-  const token = await getToken()
-  const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/data-root`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ value }),
-  })
-  if (!res.ok) throw new Error("Failed to save data root")
-  const data = await res.json()
-  return data.value as string
-}
-
-interface DockerResources {
-  cpus: number | null
-  memory_gb: number | null
-  swap_gb: number | null
-}
-
-interface SystemInfo {
-  cpu_count: number
-  total_ram_gb: number
-}
-
-async function fetchSystemInfo(): Promise<SystemInfo> {
-  const token = await getToken()
-  const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/system-info`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error("Failed to fetch system info")
-  return res.json() as Promise<SystemInfo>
-}
-
-async function fetchDockerResources(): Promise<DockerResources> {
-  const token = await getToken()
-  const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/docker-resources`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error("Failed to fetch Docker resources")
-  return res.json() as Promise<DockerResources>
-}
-
-async function saveDockerResources(body: DockerResources): Promise<DockerResources> {
-  const token = await getToken()
-  const res = await fetch(`${OpenAPI.BASE}/api/v1/settings/docker-resources`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error("Failed to save Docker resources")
-  return res.json() as Promise<DockerResources>
-}
-
-function numStr(v: number | null): string {
-  return v != null ? String(v) : ""
-}
-
-function parseNum(s: string): number | null {
-  const n = parseFloat(s)
-  return isNaN(n) || n <= 0 ? null : n
-}
-
-function GeneralSettings() {
-  const [dataRoot, setDataRoot] = useState("")
-  const [defaultRoot, setDefaultRoot] = useState("")
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-
-  useEffect(() => {
-    fetchDataRoot().then((value) => {
-      setDataRoot(value)
-      setDefaultRoot(value)
-    })
-  }, [])
-
-  const handleSave = async () => {
-    setSaving(true)
-    setSaved(false)
-    try {
-      const result = await saveDataRoot(dataRoot)
-      setDataRoot(result)
-      setSaved(true)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="max-w-xl flex flex-col gap-4">
-      <div className="grid gap-2">
-        <Label htmlFor="data-root">Data Root Directory</Label>
-        <Input
-          id="data-root"
-          value={dataRoot}
-          onChange={(e) => { setDataRoot(e.target.value); setSaved(false) }}
-          placeholder="/path/to/data"
-        />
-        <p className="text-muted-foreground text-sm">
-          The root directory where uploaded files are stored.
-        </p>
-      </div>
-      <div className="flex gap-3 items-center">
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save"}
-        </Button>
-        <Button variant="outline" onClick={() => { setDataRoot(defaultRoot); setSaved(false) }}>
-          Reset to Default
-        </Button>
-        {saved && <span className="text-sm text-green-600">Settings saved.</span>}
-      </div>
-    </div>
-  )
-}
-
-function DockerSettings() {
-  const [cpus, setCpus] = useState("")
-  const [memoryGb, setMemoryGb] = useState("")
-  const [swapGb, setSwapGb] = useState("")
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null)
-
-  useEffect(() => {
-    fetchDockerResources().then((r) => {
-      setCpus(numStr(r.cpus))
-      setMemoryGb(numStr(r.memory_gb))
-      setSwapGb(numStr(r.swap_gb))
-    })
-    fetchSystemInfo().then(setSysInfo)
-  }, [])
-
-  const handleSave = async () => {
-    setSaving(true)
-    setSaved(false)
-    try {
-      const result = await saveDockerResources({
-        cpus: parseNum(cpus),
-        memory_gb: parseNum(memoryGb),
-        swap_gb: parseNum(swapGb),
-      })
-      setCpus(numStr(result.cpus))
-      setMemoryGb(numStr(result.memory_gb))
-      setSwapGb(numStr(result.swap_gb))
-      setSaved(true)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleClear = async () => {
-    setSaving(true)
-    setSaved(false)
-    try {
-      await saveDockerResources({ cpus: null, memory_gb: null, swap_gb: null })
-      setCpus("")
-      setMemoryGb("")
-      setSwapGb("")
-      setSaved(true)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="max-w-xl flex flex-col gap-4">
-      <p className="text-muted-foreground text-sm">
-        Limit resources used by Docker containers (ODM, bin extractor). Leave blank for no limit.
-        Changes apply to the next container run, no restart required.
-      </p>
-      {sysInfo && (
-        <p className="text-xs text-orange-500 font-mono">
-          {sysInfo.cpu_count} CPUs &nbsp;·&nbsp; {sysInfo.total_ram_gb} GB RAM available
-        </p>
-      )}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="grid gap-2">
-          <Label htmlFor="docker-cpus">Max CPUs</Label>
-          <Input
-            id="docker-cpus"
-            type="number"
-            min="0.1"
-            step="0.5"
-            value={cpus}
-            onChange={(e) => { setCpus(e.target.value); setSaved(false) }}
-            placeholder="e.g. 4"
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="docker-memory">Max RAM (GB)</Label>
-          <Input
-            id="docker-memory"
-            type="number"
-            min="0.1"
-            step="0.5"
-            value={memoryGb}
-            onChange={(e) => { setMemoryGb(e.target.value); setSaved(false) }}
-            placeholder="e.g. 8"
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="docker-swap">Extra Swap (GB) <span className="text-muted-foreground font-normal text-xs">(requires RAM limit)</span></Label>
-          <Input
-            id="docker-swap"
-            type="number"
-            min="0"
-            step="0.5"
-            value={swapGb}
-            onChange={(e) => { setSwapGb(e.target.value); setSaved(false) }}
-            placeholder="e.g. 2"
-          />
-        </div>
-      </div>
-      <p className="text-muted-foreground text-xs">
-        Extra Swap is additional swap on top of Max RAM. Requires Max RAM to be set.
-      </p>
-      <div className="flex gap-3 items-center">
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save"}
-        </Button>
-        <Button variant="outline" onClick={handleClear} disabled={saving}>
-          Clear Limits
-        </Button>
-        {saved && <span className="text-sm text-green-600">Docker settings saved.</span>}
-      </div>
-    </div>
-  )
-}
+import { HomeSettings } from "./HomeSettings"
+import { LegacyImport } from "./LegacyImport"
+import { SignInSettings } from "./SignInSettings"
+import { StackSettings } from "./StackSettings"
 
 type UpdateStatus =
   | { kind: "idle" }
@@ -272,7 +36,11 @@ function AboutSettings() {
     setStatus({ kind: "checking" })
     const result = await checkForUpdates()
     if (result.status === "update_available") {
-      setStatus({ kind: "update_available", version: result.version, downloadUrl: result.downloadUrl })
+      setStatus({
+        kind: "update_available",
+        version: result.version,
+        downloadUrl: result.downloadUrl,
+      })
     } else if (result.status === "up_to_date") {
       setStatus({ kind: "up_to_date", version: result.version })
     } else {
@@ -284,7 +52,27 @@ function AboutSettings() {
     <div className="max-w-xl flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium">Version</span>
-        <span className="text-muted-foreground text-sm font-mono">{CURRENT_VERSION}</span>
+        <span className="text-muted-foreground text-sm font-mono">
+          {CURRENT_VERSION}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium">Set-up walkthrough</span>
+        <span className="text-muted-foreground text-sm">
+          Where the processing runs and which model the agent uses.
+        </span>
+        <Button
+          variant="outline"
+          className="mt-1 w-fit"
+          data-testid="restart-walkthrough"
+          onClick={() => {
+            restartWalkthrough()
+            window.location.assign("/")
+          }}
+        >
+          Run it again
+        </Button>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -294,7 +82,9 @@ function AboutSettings() {
           onClick={handleCheck}
           disabled={status.kind === "checking"}
         >
-          <RefreshCw className={`h-4 w-4 mr-2 ${status.kind === "checking" ? "animate-spin" : ""}`} />
+          <RefreshCw
+            className={`h-4 w-4 mr-2 ${status.kind === "checking" ? "animate-spin" : ""}`}
+          />
           {status.kind === "checking" ? "Checking…" : "Check for Updates"}
         </Button>
 
@@ -331,17 +121,22 @@ function AboutSettings() {
 }
 
 const SETTINGS_NAV_GROUPS = [
-  { items: [
-    { id: "general", label: "General", icon: Settings },
-    { id: "docker",  label: "Docker",  icon: Server  },
-    { id: "about",   label: "About",   icon: Info    },
-  ]},
+  {
+    items: [
+      { id: "home", label: "Home", icon: Home },
+      { id: "data", label: "Data & services", icon: HardDrive },
+      { id: "compute", label: "Compute", icon: Cpu },
+      { id: "signin", label: "Sign-in", icon: KeyRound },
+      { id: "about", label: "About", icon: Info },
+    ],
+  },
 ] as const
 
-type SettingsSection = "general" | "docker" | "about"
+type SettingsSection = "home" | "data" | "compute" | "signin" | "about"
 
-const ApplicationSettings = () => {
-  const [active, setActive] = useState<SettingsSection>("general")
+const ApplicationSettings = ({ initial }: { initial?: SettingsSection }) => {
+  const [active, setActive] = useState<SettingsSection>(initial ?? "home")
+  const { user } = useAuth()
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -351,9 +146,25 @@ const ApplicationSettings = () => {
         onSelect={(id) => setActive(id as SettingsSection)}
       />
       <div className="flex-1 overflow-auto px-6 py-6">
-        {active === "general" && <GeneralSettings />}
-        {active === "docker"  && <DockerSettings />}
-        {active === "about"   && <AboutSettings />}
+        {active === "data" && (
+          <>
+            <StackSettings />
+            <LegacyImport />
+          </>
+        )}
+        {active === "home" && <HomeSettings />}
+        {active === "compute" && (
+          <div className="flex h-full min-h-[70vh] flex-col gap-2">
+            <p className="text-muted-foreground text-sm">
+              Where processing runs: the stack, and the workers that start when
+              a job needs them and stop when idle.
+            </p>
+            <InstallHelper what="git" />
+            <ComputePanel canManage={Boolean(user?.is_superuser)} wide />
+          </div>
+        )}
+        {active === "signin" && <SignInSettings />}
+        {active === "about" && <AboutSettings />}
       </div>
     </div>
   )

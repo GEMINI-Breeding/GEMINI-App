@@ -1,22 +1,73 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useSearch } from "@tanstack/react-router"
+import { z } from "zod"
 
 import ApplicationSettings from "@/components/UserSettings/ApplicationSettings"
+import ChangePassword from "@/components/UserSettings/ChangePassword"
+import KeysSettings from "@/components/UserSettings/KeysSettings"
+import UserInformation from "@/components/UserSettings/UserInformation"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { PeopleSettings } from "@/features/people/PeopleSettings"
+
+const settingsSearchSchema = z.object({
+  // Opens a section of the Application tab (e.g. Compute, from the sidebar's place switch).
+  section: z.enum(["home", "data", "compute", "signin", "about"]).optional(),
+})
 
 export const Route = createFileRoute("/_layout/settings")({
   component: UserSettings,
+  validateSearch: settingsSearchSchema,
   head: () => ({
     meta: [{ title: "Settings" }],
   }),
 })
 
 function UserSettings() {
+  const { section } = useSearch({ from: "/_layout/settings" })
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex-shrink-0 px-6 pt-5 pb-3 border-b">
         <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-muted-foreground text-sm">Manage your application settings and preferences</p>
+        <p className="text-muted-foreground text-sm">
+          Manage your application settings, profile, password and keys
+        </p>
       </div>
-      <ApplicationSettings />
+      <Tabs defaultValue="application" className="flex min-h-0 flex-1 flex-col">
+        <TabsList className="mx-6 mt-3 self-start">
+          <TabsTrigger
+            value="application"
+            data-testid="settings-tab-application"
+          >
+            Application
+          </TabsTrigger>
+          {/* The profile and password forms existed but were mounted
+              nowhere, so nobody could change their own password. */}
+          <TabsTrigger value="account" data-testid="settings-tab-account">
+            Account
+          </TabsTrigger>
+          <TabsTrigger value="keys" data-testid="settings-tab-keys">
+            Keys &amp; tokens
+          </TabsTrigger>
+          <TabsTrigger value="people" data-testid="settings-tab-people">
+            People
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="application" className="min-h-0 flex-1">
+          <ApplicationSettings key={section ?? "home"} initial={section} />
+        </TabsContent>
+        <TabsContent
+          value="account"
+          className="space-y-6 overflow-y-auto px-6 pb-6"
+        >
+          <UserInformation />
+          <ChangePassword />
+        </TabsContent>
+        <TabsContent value="keys" className="overflow-y-auto px-6 pb-6">
+          <KeysSettings />
+        </TabsContent>
+        <TabsContent value="people" className="overflow-y-auto px-6 pb-6 pt-3">
+          <PeopleSettings />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

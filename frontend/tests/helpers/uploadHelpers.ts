@@ -1,5 +1,6 @@
-import type { Locator, Page } from "@playwright/test"
+import type { Page } from "@playwright/test"
 import { expect } from "@playwright/test"
+
 import { waitForResponseOk } from "./waitFor"
 
 /** Navigate to the Files dashboard. The Upload section is active by default. */
@@ -8,27 +9,35 @@ export async function navigateToUpload(page: Page): Promise<void> {
   // NavSidebar has `data-onboarding="files-tab-upload"`; click it to force
   // the Upload view in case a prior test left Manage active.
   await page.locator('[data-onboarding="files-tab-upload"]').click()
-  await expect(
-    page.getByRole("heading", { name: /^upload$/i }),
-  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: /^upload$/i })).toBeVisible()
 }
 
 /**
  * Open the DataTypes dropdown and pick an entry by its visible label
- * (e.g. "Image Data", "Orthomosaic", "Field Design").
+ * (e.g. "Image Data", "Orthomosaic", "Farm-ng Binary File").
  */
 export async function selectDataType(page: Page, label: string): Promise<void> {
   await page.locator('[data-onboarding="files-data-type-selector"]').click()
   await page.getByRole("menuitem", { name: label, exact: true }).click()
-  // Once a type is selected the form appears; this anchor lets us chain fills
-  // without race conditions.
   await expect(
     page.locator('[data-onboarding="files-data-structure-form"]'),
   ).toBeVisible()
 }
 
+/**
+ * Season used by `fillUploadForm` when a spec doesn't pass one.
+ *
+ * Season replaced the silently-derived "Year" path slot in 2026-05, so it is
+ * also the FIRST SEGMENT of every uploaded object key:
+ *   `Raw/{season}/{experiment}/{site}/{population}/{date}/{platform}/{sensor}/`
+ * Specs that assert on object paths must build the prefix from this constant
+ * (or from the season they passed), never from the flight date's year.
+ */
+export const DEFAULT_E2E_SEASON = "S1"
+
 export interface UploadFormValues {
   experiment?: string
+  season?: string
   location?: string
   population?: string
   date?: string
@@ -37,16 +46,41 @@ export interface UploadFormValues {
 }
 
 /**
- * Fill the DataStructureForm. TextField renders `<label htmlFor={id}>` with id
- * equal to the field name, so getByLabel() with an exact match hits the right
- * input. Fields that don't apply to the current data type are skipped.
+ * Fill the DataStructureForm. The form is now a stack of entity dropdowns
+ * (Experiment / Site / Population / Sensor platform / Sensor) where each
+ * field can either pick an existing row or "+ Create new…" with a typed
+ * name. Date stays a free-text date input.
+ *
+ * Helper behavior: every value passed in is treated as a *new entity name*
+ * — that's what the existing test suite needs, since each spec generates
+ * unique-stamped names and expects them to be created on the fly. The
+ * first time the spec runs, the create-new path executes; on re-runs, the
+ * resolveScope hook's search-by-name dedupes them.
  */
+const FORM_FIELD_TO_SELECT_TESTID: Record<string, string> = {
+  experiment: "entity-select-experiment",
+  season: "entity-select-season",
+  location: "entity-select-site",
+  population: "entity-select-population",
+  platform: "entity-select-sensorplatform",
+  sensor: "entity-select-sensor",
+}
+const FORM_FIELD_TO_NEW_INPUT_TESTID: Record<string, string> = {
+  experiment: "entity-new-experiment",
+  season: "entity-new-season",
+  location: "entity-new-site",
+  population: "entity-new-population",
+  platform: "entity-new-sensorplatform",
+  sensor: "entity-new-sensor",
+}
+
 export async function fillUploadForm(
   page: Page,
   values: UploadFormValues,
 ): Promise<void> {
   const fieldOrder: (keyof UploadFormValues)[] = [
     "experiment",
+    "season",
     "location",
     "population",
     "date",
@@ -54,35 +88,59 @@ export async function fillUploadForm(
     "sensor",
   ]
   for (const field of fieldOrder) {
-    const value = values[field]
+    // Season replaced the silently-derived "Year" slot in 2026-05. Most
+    // pre-existing specs don't pass one; default to "S1" so the dropzone
+    // gate clears. Safe across specs because Season is experiment-scoped
+    // (Season FK includes experiment_id) and every spec uses a stamped
+    // experiment, so "S1" never collides. Specs that care about season
+    // identity (e.g. season-rename, multi-season selection) can still
+    // pass an explicit value.
+    const value =
+      field === "season" && !values.season ? DEFAULT_E2E_SEASON : values[field]
     if (!value) continue
-    const input = page.locator(`input#${field}`)
-    if (!(await input.count())) continue
-    await expect(input).toBeEnabled()
-    await input.fill(value)
-    // The cascade (experiment → location → …) means the next input only
-    // enables after the previous value is committed. Wait for it briefly.
-    await page.waitForTimeout(50)
+
+    if (field === "date") {
+      const input = page.locator("input#date")
+      if (!(await input.count())) continue
+      await expect(input).toBeEnabled()
+      await input.fill(value)
+      continue
+    }
+
+    const selectTestId = FORM_FIELD_TO_SELECT_TESTID[field]
+    const newInputTestId = FORM_FIELD_TO_NEW_INPUT_TESTID[field]
+    if (!selectTestId || !newInputTestId) continue
+
+    const trigger = page.getByTestId(selectTestId)
+    if (!(await trigger.count())) continue
+    await expect(trigger).toBeEnabled()
+    await trigger.click()
+    // Pick the "+ Create new…" sentinel and then fill the new-name input.
+    await page
+      .getByTestId(
+        `entity-create-${selectTestId.replace("entity-select-", "")}`,
+      )
+      .click()
+    const newInput = page.getByTestId(newInputTestId)
+    await expect(newInput).toBeVisible()
+    await newInput.fill(value)
   }
 }
 
 /**
- * Inject file paths via the test-mode hook in platform.ts::pickFiles and click
- * the upload zone. UploadZone calls pickFiles on click; our hook returns the
- * injected paths synchronously so onFilesAdded receives them exactly like
- * Tauri's native file dialog would.
+ * Select files via the hidden <input type="file"> inside UploadZone.
+ *
+ * The Phase-6 dropzone is browser-native: clicking it opens a file picker.
+ * Playwright can't drive that picker, so we `setInputFiles` on the input
+ * directly — which fires the same change event the picker would. Files
+ * are passed as absolute host paths (e.g. fixtures) because Playwright's
+ * setInputFiles reads them from disk.
  */
-export async function dropFiles(page: Page, filePaths: string[]): Promise<void> {
-  await page.evaluate((paths) => {
-    ;(window as unknown as { __E2E_PICK_FILES__?: string[] }).__E2E_PICK_FILES__ =
-      paths
-  }, filePaths)
-
-  const zone = page.getByRole("button", {
-    name: /click to browse or drag & drop files/i,
-  })
-  await zone.click()
-
+export async function dropFiles(
+  page: Page,
+  filePaths: string[],
+): Promise<void> {
+  await page.locator('[data-testid="upload-input"]').setInputFiles(filePaths)
   await expect(
     page.getByRole("heading", {
       name: new RegExp(`^Selected Files \\(${filePaths.length}\\)$`, "i"),
@@ -91,22 +149,77 @@ export async function dropFiles(page: Page, filePaths: string[]): Promise<void> 
 }
 
 /**
- * Click submit and wait for the streaming upload endpoint plus the
- * ProcessPanel card that shows the final "Uploaded N file(s)" title.
+ * Click submit and wait for the upload to leave the client side.
+ *
+ * Always asserts:
+ *   1. /api/files/upload_chunk fires (upload reached the API).
+ *   2. ProcessPanel shows the expected "Uploading …" title.
+ *
+ * If `waitForDone !== false` (default), the helper also waits for the
+ * process to reach a terminal state. That state depends on whether a
+ * follow-up extraction job was kicked off:
+ *   - Plain (non-bin) uploads have no follow-up — `useUploadQueue` flips
+ *     the process to `status: "completed"` the moment every chunk lands,
+ *     and ProcessPanel renders "Done". This covers per-item completion
+ *     transitively: "Done" is unreachable unless every item.status went
+ *     to "completed".
+ *   - .bin uploads chain an EXTRACT_BINARY job; "Done" only appears once
+ *     wsManager streams a terminal status from the worker.
+ *
+ * If `waitForDone === false`, the helper instead asserts the per-upload
+ * completion signal — the ProcessPanel message flips from no message to
+ * "Queued for extraction (N file)" exactly when the client side
+ * finished every chunk *and* `JobsService.submitJob` returned a real
+ * job id. A regression that dropped the final completion call (or lost
+ * the follow-up job submission) would not produce that text. This is
+ * the assertion that protects callers who skip the worker wait.
  */
 export async function submitUploadAndWait(
   page: Page,
   expectedFileCount: number,
+  opts: { timeoutMs?: number; waitForDone?: boolean } = {},
 ): Promise<void> {
-  const streamPromise = waitForResponseOk(
+  // Wait for at least one /upload_chunk response to confirm the upload
+  // actually started; individual chunks happen in a loop afterwards.
+  const firstChunk = waitForResponseOk(
     page,
     "POST",
-    /\/api\/v1\/files\/copy-local-stream$/,
+    /\/api\/files\/upload_chunk$/,
     60_000,
   )
-  await page.getByRole("button", { name: /^upload \d+ file/i }).click()
-  await streamPromise
+  await page.locator('[data-testid="upload-submit"]').click()
+  await firstChunk
+
+  // Confirm the expected ProcessPanel title. Two title shapes:
+  //   • .bin uploads → "Processing N .bin file(s)"
+  //   • plain uploads → "Uploading N file(s)"
   await expect(
-    page.getByText(new RegExp(`^Uploaded ${expectedFileCount} file`, "i")),
-  ).toBeVisible({ timeout: 120_000 })
+    page.getByText(
+      new RegExp(
+        `^(Processing ${expectedFileCount} \\.bin file|Uploading ${expectedFileCount} file)`,
+        "i",
+      ),
+    ),
+  ).toBeVisible({ timeout: 15_000 })
+
+  if (opts.waitForDone === false) {
+    // The "Queued for extraction (N file)" message is set by
+    // useUploadQueue right after every chunk lands and the
+    // EXTRACT_BINARY job submission returns a non-empty job id.
+    // Asserting on it confirms the upload really finished client-
+    // side, not just that some chunks reached MinIO.
+    await expect(
+      page.getByText(
+        new RegExp(`^Queued for extraction \\(${expectedFileCount} file`, "i"),
+      ),
+    ).toBeVisible({ timeout: opts.timeoutMs ?? 60_000 })
+    return
+  }
+
+  // Terminal "Done" — set when the process status flips to "completed".
+  // For plain uploads this happens the moment chunks land; for extraction
+  // it happens when the worker reports COMPLETED via wsManager.
+  await expect(page.getByText(/^Done$/i).first()).toBeVisible({
+    timeout: opts.timeoutMs ?? 120_000,
+  })
 }

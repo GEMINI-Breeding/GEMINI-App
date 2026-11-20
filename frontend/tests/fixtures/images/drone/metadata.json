@@ -4,14 +4,8 @@
   "images": [
     {
       "filename": "2022-06-27_100MEDIA_DJI_0876.JPG",
-      "original_size": [
-        5472,
-        3078
-      ],
-      "downscaled_size": [
-        1368,
-        769
-      ],
+      "original_size": [5472, 3078],
+      "downscaled_size": [1368, 769],
       "file_size_bytes": 196772,
       "gps": {
         "lat": 38.53371714656669,
@@ -21,14 +15,8 @@
     },
     {
       "filename": "2022-06-27_100MEDIA_DJI_0877.JPG",
-      "original_size": [
-        5472,
-        3078
-      ],
-      "downscaled_size": [
-        1368,
-        769
-      ],
+      "original_size": [5472, 3078],
+      "downscaled_size": [1368, 769],
       "file_size_bytes": 194339,
       "gps": {
         "lat": 38.53367572134107,
@@ -38,14 +26,8 @@
     },
     {
       "filename": "2022-06-27_100MEDIA_DJI_0878.JPG",
-      "original_size": [
-        5472,
-        3078
-      ],
-      "downscaled_size": [
-        1368,
-        769
-      ],
+      "original_size": [5472, 3078],
+      "downscaled_size": [1368, 769],
       "file_size_bytes": 192257,
       "gps": {
         "lat": 38.53363547776861,
@@ -55,14 +37,8 @@
     },
     {
       "filename": "2022-06-27_100MEDIA_DJI_0879.JPG",
-      "original_size": [
-        5472,
-        3078
-      ],
-      "downscaled_size": [
-        1368,
-        769
-      ],
+      "original_size": [5472, 3078],
+      "downscaled_size": [1368, 769],
       "file_size_bytes": 196561,
       "gps": {
         "lat": 38.533594664551,
@@ -72,14 +48,8 @@
     },
     {
       "filename": "2022-06-27_100MEDIA_DJI_0880.JPG",
-      "original_size": [
-        5472,
-        3078
-      ],
-      "downscaled_size": [
-        1368,
-        769
-      ],
+      "original_size": [5472, 3078],
+      "downscaled_size": [1368, 769],
       "file_size_bytes": 198090,
       "gps": {
         "lat": 38.533553399114155,

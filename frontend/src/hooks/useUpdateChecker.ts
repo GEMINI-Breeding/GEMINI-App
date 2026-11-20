@@ -10,13 +10,16 @@
  *
  * Configuration:
  *   Set VITE_UPDATE_CHECK_URL in your .env to the GitHub releases API endpoint.
- *   Default: https://api.github.com/repos/eranario/GEMINI-App/releases/latest
+ *   Default: https://api.github.com/repos/GEMINI-Breeding/GEMINI-App/releases/latest
  *   The JSON response must have { tag_name: string, html_url: string }.
  */
 
 import { useEffect } from "react"
 
-export const CURRENT_VERSION = "0.0.4"
+/** This build's version, from src-tauri/tauri.conf.json (see vite.config.ts).
+ * It was a hand-edited constant that fell behind: the new app then told
+ * users an older release was "available". */
+export const CURRENT_VERSION: string = __APP_VERSION__
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
 const LS_KEY = "gemi_last_update_check"
 const LS_DISMISSED_KEY = "gemi_dismissed_version"
@@ -26,6 +29,24 @@ const RELEASES_PAGE = "https://github.com/GEMINI-Breeding/GEMINI-App/releases"
 const UPDATE_CHECK_URL =
   (import.meta.env.VITE_UPDATE_CHECK_URL as string | undefined) ??
   "https://api.github.com/repos/GEMINI-Breeding/GEMINI-App/releases/latest"
+
+/**
+ * Opt-out switch for the periodic check (`VITE_DISABLE_UPDATE_CHECK=1`).
+ *
+ * Playwright sets this on its dev server. Without it every E2E run makes a
+ * live call to the GitHub releases API and — because CURRENT_VERSION is
+ * behind the published release — raises a persistent "update available"
+ * toast that sits above the page and swallows clicks on whatever is
+ * underneath. That is a real failure we hit: the toast intercepted the
+ * import wizard's Continue button. It also makes the suite depend on a
+ * rate-limited third-party endpoint.
+ *
+ * Only the automatic on-mount check is suppressed. `checkForUpdates()`
+ * stays callable, so the manual "Check for updates" button in Application
+ * Settings still works.
+ */
+const UPDATE_CHECK_DISABLED =
+  (import.meta.env.VITE_DISABLE_UPDATE_CHECK as string | undefined) === "1"
 
 /** Parse "vX.Y.Z" or "X.Y.Z" into [major, minor, patch]. */
 function parseVersion(tag: string): [number, number, number] {
@@ -59,18 +80,26 @@ export async function checkForUpdates(): Promise<CheckUpdateResult> {
       headers: { Accept: "application/vnd.github+json" },
       signal: AbortSignal.timeout(10_000),
     })
-    if (!res.ok) return { status: "error", message: `GitHub API returned ${res.status}` }
+    if (!res.ok)
+      return { status: "error", message: `GitHub API returned ${res.status}` }
 
     const data = await res.json()
     const remoteTag: string = data.tag_name ?? ""
     if (!remoteTag) return { status: "error", message: "No release tag found" }
 
     if (isNewer(CURRENT_VERSION, remoteTag)) {
-      return { status: "update_available", version: remoteTag, downloadUrl: RELEASES_PAGE }
+      return {
+        status: "update_available",
+        version: remoteTag,
+        downloadUrl: RELEASES_PAGE,
+      }
     }
     return { status: "up_to_date", version: remoteTag }
   } catch (err) {
-    return { status: "error", message: err instanceof Error ? err.message : "Network error" }
+    return {
+      status: "error",
+      message: err instanceof Error ? err.message : "Network error",
+    }
   }
 }
 
@@ -78,8 +107,11 @@ interface UseUpdateCheckerOptions {
   onUpdateAvailable: (version: string, downloadUrl: string) => void
 }
 
-export function useUpdateChecker({ onUpdateAvailable }: UseUpdateCheckerOptions) {
+export function useUpdateChecker({
+  onUpdateAvailable,
+}: UseUpdateCheckerOptions) {
   useEffect(() => {
+    if (UPDATE_CHECK_DISABLED) return
     async function check() {
       const now = Date.now()
       const lastCheck = Number(localStorage.getItem(LS_KEY) ?? "0")

@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
   COL_KEY_SET,
-  POSITION_KEY_SET,
-  PLOT_FILTER_FIELDS,
-  ROW_KEY_SET,
   deduplicateKeys,
   lookupProperty,
   matchesTextFilter,
   orderColumns,
+  PLOT_FILTER_FIELDS,
+  POSITION_KEY_SET,
+  ROW_KEY_SET,
 } from "./traitAliases"
 
 describe("alias key sets", () => {
@@ -64,7 +64,10 @@ describe("deduplicateKeys", () => {
   })
 
   it("treats COL and ROW groups independently", () => {
-    expect(deduplicateKeys(["col", "row", "COLUMN", "tier"])).toEqual(["col", "row"])
+    expect(deduplicateKeys(["col", "row", "COLUMN", "tier"])).toEqual([
+      "col",
+      "row",
+    ])
   })
 
   it("preserves ordering of non-alias keys interleaved with aliases", () => {
@@ -85,7 +88,11 @@ describe("orderColumns", () => {
   })
 
   it("works when only col (no row) is present", () => {
-    const out = orderColumns(["col", "plot", "yield"], ["plot", "col"], ["yield"])
+    const out = orderColumns(
+      ["col", "plot", "yield"],
+      ["plot", "col"],
+      ["yield"],
+    )
     expect(out).toEqual(["col", "plot", "yield"])
   })
 
@@ -96,7 +103,11 @@ describe("orderColumns", () => {
 
   it("excludes keys that are not members of the dedup'd allKeys list", () => {
     // metaCols / numCols may be stale — orderColumns should intersect with allKeys
-    const out = orderColumns(["plot", "yield"], ["plot", "stale"], ["yield", "also_stale"])
+    const out = orderColumns(
+      ["plot", "yield"],
+      ["plot", "stale"],
+      ["yield", "also_stale"],
+    )
     expect(out).toEqual(["plot", "yield"])
   })
 
@@ -178,9 +189,9 @@ describe("matchesTextFilter", () => {
   })
 
   it("ignores null/undefined candidate values and keeps scanning", () => {
-    expect(
-      matchesTextFilter({ plot: null, plot_id: "P1" }, "plot", "p1"),
-    ).toBe(true)
+    expect(matchesTextFilter({ plot: null, plot_id: "P1" }, "plot", "p1")).toBe(
+      true,
+    )
   })
 
   it("returns false when nothing matches", () => {

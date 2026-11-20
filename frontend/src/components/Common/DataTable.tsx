@@ -1,4 +1,4 @@
-import { type Table as TanStackTable, flexRender } from "@tanstack/react-table"
+import { flexRender, type Table as TanStackTable } from "@tanstack/react-table"
 import {
   ChevronLeft,
   ChevronRight,

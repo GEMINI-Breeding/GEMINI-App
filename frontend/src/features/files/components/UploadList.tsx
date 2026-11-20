@@ -1,138 +1,1049 @@
-import { Eye, File, X, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
-import { useState } from "react";
-import { UploadZone } from "./UploadZone";
-import { Button } from "@/components/ui/button";
-import { dataTypes } from "@/config/dataTypes";
-import { useFileUpload } from "@/features/files/hooks/useFileUpload";
-import { isExtensionAllowed } from "@/features/files/utils/extensions";
-import { FilePreviewDialog } from "./FilePreviewDialog";
-import { OpenAPI } from "@/client";
-import useCustomToast from "@/hooks/useCustomToast";
+import { useNavigate } from "@tanstack/react-router"
+import { ChevronDown, ChevronUp, File, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
+
+import { DatasetsService, type FileMetadata, FilesService } from "@/client"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { dataTypes } from "@/config/dataTypes"
+import { idAsString } from "@/features/admin/lib/ids"
+import type { EntityChoice } from "@/features/files/components/EntitySelectField"
+import {
+  type PostUploadJob,
+  type UploadTask,
+  useUploadQueue,
+} from "@/features/files/hooks/useUploadQueue"
+import {
+  type ResolvedScope,
+  type UploadScopeChoices,
+  useResolveScope,
+} from "@/features/files/hooks/useUploadScope"
+import {
+  createOrGetDatasetForUpload,
+  extractDatasetShortId,
+} from "@/features/files/lib/datasetForUpload"
+import { existingUploadNames } from "@/features/files/lib/duplicates"
+import { readExifAutofill } from "@/features/files/lib/exifAutofill"
+import {
+  dateFromFolder,
+  dateFromName,
+  dateOf,
+  groupByDate,
+} from "@/features/files/lib/fileDates"
+import {
+  humanFieldLabel,
+  missingFormFields,
+  requiredFormFields,
+} from "@/features/files/lib/uploadFieldRequirements"
+import {
+  batchInfo,
+  batchLabelText,
+  batchNameSuffix,
+  duplicateLabels,
+  type FolderGroup,
+  type FolderMeaning,
+  folderOf,
+  foldersOf,
+  groupByFolder,
+} from "@/features/files/lib/uploadGroups"
+import { isExtensionAllowed } from "@/features/files/utils/extensions"
+import type {
+  SensorClassification,
+  ThermalCalibration,
+  ThermalCalibrationMode,
+} from "@/features/import/lib/types"
+import { fileUploadAsRun } from "@/features/process/lib/fileUpload"
+import type { Run } from "@/features/process/lib/runStore"
+import useCustomToast from "@/hooks/useCustomToast"
+import { DataFormat, DataType, SensorType } from "@/lib/geminiEnums"
+import { probeFilesForThermal } from "@/lib/thermalProbe"
+import { DateCheckDialog, type DateCheckGroup } from "./DateCheckDialog"
+import { ThermalCalibrationField } from "./ThermalCalibrationField"
+import { UploadZone } from "./UploadZone"
+
+// Form-field key (the dataTypes config language) → scope key (the entity
+// language). Used to translate the scope map the parent passes in.
+const FORM_FIELD_TO_SCOPE_KEY: Record<string, keyof UploadScopeChoices> = {
+  experiment: "experiment",
+  season: "season",
+  location: "site",
+  population: "population",
+  platform: "sensorPlatform",
+  sensor: "sensor",
+}
 
 interface UploadListProps {
-  dataType: string | null;
-  formValues: Record<string, string>;
-  onFilesSelected?: (paths: string[]) => void;
-  onUploadComplete?: (destPaths: string[]) => void;
-  onDockerError?: (message: string) => void;
-  /** Optional label shown above the upload zone */
-  label?: string;
-  /** Optional sub-path appended to the target directory (e.g. "DEM") */
-  subDir?: string;
+  dataType: string | null
+  formValues: Record<string, string>
+  /**
+   * Per-form-field entity choice (existing/new/none). The upload click
+   * resolves any "new" choice via the scope-resolver hook before chunked
+   * upload starts, so the experiment/site/etc. row exists in the DB by
+   * the time the file lands in MinIO.
+   */
+  scope?: Record<string, EntityChoice>
+  onFilesSelected?: (files: File[]) => void
+  /** Fired with the MinIO object paths of the successfully uploaded files. */
+  /** destPaths: uploaded now; alreadyStored: skipped as already there. */
+  onUploadComplete?: (destPaths: string[], alreadyStored?: string[]) => void
+  /** Optional label shown above the upload zone. */
+  label?: string
+  /** Optional sub-path appended to the target directory (e.g. "DEM"). */
+  subDir?: string
+  /** When true, the inner UploadZone refuses clicks and drops, and
+   *  shows `disabledReason` in place of the usual instructions. Used
+   *  by the Files page to gate the upload affordance behind required
+   *  scope fields (data type, experiment). */
+  disabled?: boolean
+  disabledReason?: string
+  /** Another list's Upload button sends these files too (the DEM beside an
+   *  orthomosaic): no button of its own. */
+  hideUploadButton?: boolean
+  /** Upload now: the parent bumps this (e.g. once the orthomosaic is in). */
+  uploadSignal?: number
+  /** How many files are waiting to upload. */
+  onSelectionChange?: (count: number) => void
+  /** Text for the Upload button (default "Upload N file(s)"). */
+  uploadLabel?: string
 }
 
-function fileNameFromPath(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
+/**
+ * Build the MinIO directory uploads land in.
+ *
+ * For data types whose `directory` config ends in the literal `Images`
+ * (today: just "Image Data"), the dataset's 8-char short-id is spliced
+ * in just before that segment so two uploads at the same scope land in
+ * distinct subdirectories — `Raw/.../{sensor}/{shortId}/Images/` rather
+ * than the pre-migration `Raw/.../{sensor}/Images/` shape.
+ *
+ * Other data types (Trait Data, Genomic Data, Ardupilot Logs, etc.)
+ * are unchanged: each is keyed by a different DB entity and doesn't
+ * have the commingling problem.
+ */
+function buildTargetRootDir(
+  dataType: string,
+  formValues: Record<string, string>,
+  datasetShortId: string | null,
+  subDir?: string,
+): string | null {
+  const cfg = dataTypes[dataType as keyof typeof dataTypes]
+  if (!cfg) return null
+  // Preserve the existing MinIO path convention so the new FilesService
+  // listing endpoints find the uploads under a predictable prefix.
+  // Each template segment lower-cases to a form field key
+  // (`"Season"` → `values.season`, `"Date"` → `values.date`, etc.).
+  // Pre-A.1: the first slot was "Year" and was silently filled with
+  // `values.date.split("-")[0]`, coupling season identity to the
+  // upload date. The slot is now "Season" and `values.season` carries
+  // the season name the user picked or created.
+  const segs = cfg.directory.map(
+    (field) => formValues[field.toLowerCase()] || field,
+  )
+  // Only data types whose tail bucket is `Images` get the per-dataset
+  // segment — others have their own per-entity DB keying that already
+  // prevents disk-level commingling.
+  if (datasetShortId && segs[segs.length - 1] === "Images") {
+    segs.splice(segs.length - 1, 0, datasetShortId)
+  }
+  let root = segs.join("/")
+  if (subDir) root += `/${subDir}`
+  return root
 }
 
-interface PendingUpload {
-  filePaths: string[];
-  dataType: string;
-  targetRootDir: string;
-  formValues: Record<string, string>;
-  existingFiles: string[];
+function followUpForDataType(dataType: string): UploadTask["followUpJob"] {
+  // Amiga .bin files auto-extract via the amiga worker. Everything else
+  // drops onto MinIO and is done.
+  if (dataType === "Farm-ng Binary File") return { kind: "extract_binary" }
+  return { kind: "none" }
 }
 
-export function UploadList({ dataType, formValues, onFilesSelected, onUploadComplete, onDockerError, label, subDir }: UploadListProps) {
-  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [previewPath, setPreviewPath] = useState<string | null>(null);
-  const [isChecking, setIsChecking] = useState(false);
-  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
-  const { uploadFiles } = useFileUpload();
-  const { showErrorToast } = useCustomToast();
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`
+}
 
-  const addFiles = (paths: string[]) => {
-    if (dataType) {
-      const cfg = dataTypes[dataType as keyof typeof dataTypes]
-      if (cfg?.fileType) {
-        const rejected = paths.filter((p) => !isExtensionAllowed(p, cfg.fileType))
-        if (rejected.length > 0) {
-          const names = rejected.map((p) => p.split(/[\\/]/).pop()).join(", ")
-          showErrorToast(`Wrong file type for "${dataType}": ${names}`)
-          const accepted = paths.filter((p) => isExtensionAllowed(p, cfg.fileType))
-          if (accepted.length === 0) return
-          setSelectedPaths((prev) => [...prev, ...accepted]);
-          onFilesSelected?.(accepted);
-          return
-        }
+/**
+ * Browsers represent a dropped *folder* as a single 0-byte File entry whose
+ * name is the folder name (no extension, type === ""). UploadZone.tsx now
+ * walks `webkitGetAsEntry()` to expand directories into their files, so any
+ * 0-byte / type-less entry that reaches us here is a real upload artifact
+ * we deliberately want to flag — not a folder mis-detected as a file.
+ */
+function looksLikeFolderArtifact(f: File): boolean {
+  return f.size === 0 && (f.type === "" || !f.name.includes("."))
+}
+
+type RejectionDetails = {
+  title: string
+  description: string
+  /** Per-file lines so the user sees exactly what was rejected. */
+  rejectedNames: string[]
+  /** Optional remediation hint shown under the description. */
+  remediation?: string
+}
+
+/** The device the files came from (EXIF maker and model) and the camera named on the
+ * form: kept on the upload's record for processing that depends on it. */
+function deviceInfo(values: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (values.device_make?.trim()) out.device_make = values.device_make.trim()
+  if (values.device_model?.trim()) out.device_model = values.device_model.trim()
+  if (values.sensor_camera_mode === "other" && values.sensor_camera?.trim())
+    out.camera = values.sensor_camera.trim()
+  return out
+}
+
+export function UploadList({
+  dataType,
+  formValues,
+  scope,
+  onFilesSelected,
+  onUploadComplete,
+  label,
+  subDir,
+  disabled = false,
+  disabledReason,
+  hideUploadButton = false,
+  uploadSignal = 0,
+  onSelectionChange,
+  uploadLabel,
+}: UploadListProps) {
+  const [selected, setSelected] = useState<File[]>([])
+  useEffect(() => {
+    onSelectionChange?.(selected.length)
+  }, [selected.length, onSelectionChange])
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [resolveStatus, setResolveStatus] = useState<string | null>(null)
+  const [rejection, setRejection] = useState<RejectionDetails | null>(null)
+  // Same-named files already at the destination: ask before overwriting.
+  const [duplicatePrompt, setDuplicatePrompt] = useState<{
+    names: string[]
+    total: number
+    dir: string
+    /** Per-batch image folders: a repeat is a second copy, not an overwrite. */
+    earlierBatch: boolean
+    resolve: (choice: "skip" | "replace" | "cancel") => void
+  } | null>(null)
+  // Dates read from the files, shown for checking before the upload.
+  const [datePrompt, setDatePrompt] = useState<{
+    groups: DateCheckGroup[]
+    resolve: (dates: string[] | null) => void
+  } | null>(null)
+  const askDates = (groups: DateCheckGroup[]) =>
+    new Promise<string[] | null>((resolve) =>
+      setDatePrompt({ groups, resolve }),
+    )
+  const askAboutDuplicates = (
+    names: string[],
+    total: number,
+    dir: string,
+    earlierBatch: boolean,
+  ) =>
+    new Promise<"skip" | "replace" | "cancel">((resolve) =>
+      setDuplicatePrompt({ names, total, dir, earlierBatch, resolve }),
+    )
+  // Thermal-detection state. `defaultMode` seeds the calibration
+  // picker; `calibration` is what gets forwarded as the
+  // postUploadJob's parameters. `hint` carries the probe's hint so
+  // sensor-create can pick the right DataFormat (TIFF vs JPEG). All
+  // three reset to null when the batch is cleared or every thermal
+  // file is removed.
+  const [thermalDefaultMode, setThermalDefaultMode] =
+    useState<ThermalCalibrationMode | null>(null)
+  const [thermalCalibration, setThermalCalibration] =
+    useState<ThermalCalibration | null>(null)
+  const [thermalHint, setThermalHint] = useState<
+    "flir_jpeg" | "boson_tiff" | null
+  >(null)
+  // Whole directories dropped: what do the folders stand for? Each folder can
+  // be its own upload batch (a run of the day, or a treatment), or the folders
+  // can be ignored and everything uploaded as one batch.
+  const [folderMeaning, setFolderMeaning] = useState<FolderMeaning>("one")
+  const [folderEdits, setFolderEdits] = useState<
+    Record<string, { run?: string; treatment?: string; include?: boolean }>
+  >({})
+  const canSplit =
+    dataType === "Image Data" || dataType === "Farm-ng Binary File"
+  const droppedFolders = useMemo(() => foldersOf(selected), [selected])
+  const baseLabels = {
+    run: formValues.diurnal === "1" ? (formValues.run_of_day ?? "") : "",
+    treatment: formValues.treatment ?? "",
+  }
+  const batches = (
+    canSplit && droppedFolders.length > 1
+      ? groupByFolder(selected, folderMeaning, baseLabels)
+      : groupByFolder(selected, "one", baseLabels)
+  ).map((g) => ({ ...g, ...(folderEdits[g.folder] ?? {}) }))
+  const labelClashes =
+    batches.length > 1 ? duplicateLabels(batches) : ([] as string[])
+  const { showErrorToastWithCopy, showSuccessToast } = useCustomToast()
+  const navigate = useNavigate()
+  const { run } = useUploadQueue()
+  const { resolveScope } = useResolveScope()
+
+  const acceptAttr = useMemo(() => {
+    if (!dataType) return undefined
+    const cfg = dataTypes[dataType as keyof typeof dataTypes]
+    return cfg?.fileType && cfg.fileType !== "*" ? cfg.fileType : undefined
+  }, [dataType])
+
+  const addFiles = (files: File[]) => {
+    if (!dataType) {
+      setRejection({
+        title: "Pick a data type first",
+        description:
+          "Choose a data type (e.g. Image Data, Orthomosaic) before adding files. " +
+          "The data type controls where the files land in storage and which extensions are allowed.",
+        rejectedNames: files.map((f) => f.name),
+      })
+      return
+    }
+
+    const cfg = dataTypes[dataType as keyof typeof dataTypes]
+    const accepted: File[] = []
+    const folderArtifacts: File[] = []
+    const wrongType: File[] = []
+
+    for (const f of files) {
+      if (looksLikeFolderArtifact(f)) {
+        folderArtifacts.push(f)
+        continue
+      }
+      if (cfg?.fileType && !isExtensionAllowed(f.name, cfg.fileType)) {
+        wrongType.push(f)
+        continue
+      }
+      accepted.push(f)
+    }
+
+    if (
+      folderArtifacts.length > 0 &&
+      accepted.length === 0 &&
+      wrongType.length === 0
+    ) {
+      // Pure folder drop where the dropzone walker couldn't expand them.
+      // This happens on browsers without webkitGetAsEntry (rare) or when
+      // a user drops a folder that the browser refuses to read for
+      // permission reasons.
+      setRejection({
+        title: "Couldn't read that folder",
+        description:
+          "Folders should expand into the files they contain, but the browser " +
+          "passed them through as zero-byte entries. Try dropping the contents " +
+          "of the folder instead, or click the dropzone to pick files via the " +
+          "file picker.",
+        rejectedNames: folderArtifacts.map((f) => f.name),
+        remediation:
+          "Open the folder in Finder, select all the files inside, and drop those.",
+      })
+      return
+    }
+
+    // iPhone photos in Apple's HEIC format: nothing downstream reads them.
+    const heic = wrongType.filter((f) => /\.(heic|heif)$/i.test(f.name))
+    if (
+      heic.length > 0 &&
+      heic.length === wrongType.length &&
+      folderArtifacts.length === 0
+    ) {
+      setRejection({
+        title:
+          accepted.length > 0
+            ? `${heic.length} HEIC photo(s) skipped — ${accepted.length} accepted`
+            : "HEIC photos can't be processed",
+        description:
+          "These are iPhone photos in Apple's HEIC format, which the processing (stitching, plot images, models) can't read. Their GPS would be lost too.",
+        rejectedNames: heic.map((f) => f.name),
+        remediation:
+          "On the iPhone: Settings → Camera → Formats → Most Compatible, then take the photos again; or export these as JPEG (Photos → Export → JPEG, with location included) and upload those.",
+      })
+    } else if (wrongType.length > 0 || folderArtifacts.length > 0) {
+      const allowed = cfg?.fileType ?? "(any)"
+      const names = [...folderArtifacts, ...wrongType].map((f) => f.name)
+      const desc =
+        folderArtifacts.length > 0
+          ? `Some entries weren't usable. Folders need to be expanded into their files; other files don't match the allowed extensions for "${dataType}" (${allowed}).`
+          : `These files don't match the allowed extensions for "${dataType}" (${allowed}).`
+      setRejection({
+        title:
+          accepted.length > 0
+            ? `${names.length} file(s) skipped — ${accepted.length} accepted`
+            : "No files matched the selected data type",
+        description: desc,
+        rejectedNames: names,
+        remediation:
+          accepted.length > 0
+            ? "The accepted files are ready to upload. Press Upload to continue, or pick again."
+            : "Pick a different data type, or pick files whose extensions match the current one.",
+      })
+    }
+
+    if (accepted.length > 0) {
+      setSelected((prev) => [...prev, ...accepted])
+      onFilesSelected?.(accepted)
+      // Auto-detect thermal content when uploading Image Data. Runs
+      // byte-peek probes on the dropped batch; if any file is a FLIR
+      // JPEG or a 16-bit BlackIsZero TIFF, the calibration picker
+      // appears below the file list. No "This is thermal data"
+      // checkbox: missing the manual flag was a silent-failure mode
+      // (worker never ran, viewer showed gray box).
+      if (dataType === "Image Data") {
+        void probeFilesForThermal(accepted).then((res) => {
+          if (!res.hasThermal) return
+          // Boson default is centikelvin — what BosonUSB / farm-ng's
+          // Amiga rig emit. See backend BOSON_PRESETS. The two
+          // TLinear modes remain selectable for cameras genuinely
+          // configured that way, but the auto-default has to match
+          // the most common source.
+          const seed: ThermalCalibrationMode =
+            res.hint === "flir_jpeg" ? "flir_one_pro" : "boson_centikelvin"
+          setThermalDefaultMode((prev) => prev ?? seed)
+          setThermalHint((prev) => prev ?? res.hint)
+        })
       }
     }
-    setSelectedPaths((prev) => [...prev, ...paths]);
-    onFilesSelected?.(paths);
-  };
+  }
 
   const removeFile = (index: number) => {
-    setSelectedPaths((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  function buildUploadParams() {
-    if (!dataType) return null;
-    const selectedDataType = dataTypes[dataType as keyof typeof dataTypes];
-    if (!selectedDataType) return null;
-    const values = { ...formValues };
-    if (values["date"]) values["year"] = values["date"].split("-")[0];
-    let targetRootDir = selectedDataType.directory
-      .map((field) => values[field.toLowerCase()] || field)
-      .join("/");
-    if (subDir) targetRootDir += `/${subDir}`;
-    return { values, targetRootDir };
+    setSelected((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      // If the user emptied the staged list entirely, drop the
+      // thermal banner along with it so the next batch can start
+      // clean.
+      if (next.length === 0) {
+        setThermalDefaultMode(null)
+        setThermalCalibration(null)
+        setThermalHint(null)
+      }
+      return next
+    })
   }
 
   const handleUploadClick = async () => {
-    const params = buildUploadParams();
-    if (!params) return;
-    const { values, targetRootDir } = params;
-
-    const fileNames = selectedPaths.map(fileNameFromPath);
-    setIsChecking(true);
-    try {
-      const res = await fetch(`${OpenAPI.BASE}/api/v1/files/check-existing`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("access_token") || ""}`,
-        },
-        body: JSON.stringify({ target_root_dir: targetRootDir, file_names: fileNames, data_type: dataType, date: values.date || null }),
-      });
-      const data = res.ok ? await res.json() : { existing: [] };
-      const existing: string[] = data.existing ?? [];
-
-      if (existing.length > 0) {
-        setPendingUpload({ filePaths: selectedPaths, dataType: dataType!, targetRootDir, formValues: values, existingFiles: existing });
-      } else {
-        doUpload(selectedPaths, dataType!, targetRootDir, values, false);
-      }
-    } catch {
-      // Check failed — proceed without warning
-      doUpload(selectedPaths, dataType!, params.targetRootDir, values, false);
-    } finally {
-      setIsChecking(false);
+    if (!dataType) {
+      setRejection({
+        title: "No data type selected",
+        description:
+          "Pick a data type from the dropdown above before uploading.",
+        rejectedNames: [],
+      })
+      return
     }
-  };
+    if (selected.length === 0) return
 
-  function doUpload(filePaths: string[], dt: string, targetRootDir: string, values: Record<string, string>, reupload: boolean) {
-    uploadFiles({ filePaths, dataType: dt, targetRootDir, reupload, formValues: values, onComplete: onUploadComplete, onDockerError });
-    setSelectedPaths([]);
-    setPendingUpload(null);
+    const required = requiredFormFields(dataType)
+    const missing = missingFormFields(dataType, formValues, scope)
+    if (missing.length > 0) {
+      setRejection({
+        title: "Required fields are blank",
+        description:
+          `Fill in the following before uploading "${dataType}": ${missing.map(humanFieldLabel).join(", ")}. ` +
+          `Each scope field must either pick an existing entity or "+ Create new…" with a name.`,
+        rejectedNames: [],
+        remediation:
+          "These fields control which database entities the files associate with. Without them, the files would land in storage but be invisible from the rest of the app.",
+      })
+      return
+    }
+
+    if (labelClashes.length > 0) {
+      setRejection({
+        title: "Folders with the same labels",
+        description:
+          `More than one folder would be uploaded as ${labelClashes.join("; ")}. ` +
+          "Give each folder its own run of the day or treatment, or choose to upload everything as one batch.",
+        rejectedNames: [],
+        remediation:
+          "The labels are the only thing that tells same-day uploads apart later, in the Process tab and in results.",
+      })
+      return
+    }
+
+    // Dates read from the files: one upload per date, checked by the person first.
+    let work: (FolderGroup & { date?: string })[] = batches.filter(
+      (b) => b.include && b.files.length > 0,
+    )
+    if (formValues.date_mode === "files") {
+      const photo = new Map<File, string>()
+      // Photo dates only where neither the name nor the folder carries one.
+      const needPhoto = work
+        .flatMap((b) => b.files)
+        .filter(
+          (f) =>
+            !dateFromName(f.name) &&
+            !dateFromFolder(folderOf(f)) &&
+            /\.(jpe?g|tiff?|dng)$/i.test(f.name),
+        )
+      for (let i = 0; i < needPhoto.length; i += 8) {
+        await Promise.all(
+          needPhoto.slice(i, i + 8).map(async (f) => {
+            const m = await readExifAutofill(f)
+            if (m.date) photo.set(f, m.date)
+          }),
+        )
+      }
+      const fallback =
+        formValues.date?.trim() || new Date().toISOString().slice(0, 10)
+      const split = work.flatMap((b) =>
+        groupByDate(
+          b.files,
+          (f) =>
+            dateOf({
+              name: f.name,
+              folder: folderOf(f),
+              photoDate: photo.get(f),
+              modified: f.lastModified,
+            }),
+          fallback,
+        ).map((g) => ({
+          ...b,
+          files: g.items,
+          date: g.date,
+          source: g.source,
+        })),
+      )
+      const dates = await askDates(
+        split.map((b) => ({
+          date: b.date,
+          source: b.source,
+          count: b.files.length,
+          samples: b.files.slice(0, 3).map((f) => f.name),
+          label:
+            [b.run && `run ${b.run}`, b.treatment, b.folder]
+              .filter(Boolean)
+              .join(" · ") || undefined,
+        })),
+      )
+      if (!dates) return
+      work = split.map((b, i) => ({ ...b, date: dates[i] }))
+    }
+
+    setIsUploading(true)
+    // Hoisted into the outer scope so the catch handler can decide
+    // whether to auto-delete the dataset we just created. Set inside
+    // the try block; only populated if `createOrGetDatasetForUpload`
+    // *created* the dataset (not got an existing one).
+    let createdDatasetIdForCleanup: string | undefined
+    try {
+      // 1. Resolve any "+ Create new…" entity choices via search-or-create.
+      //    On success the resolved names land in formValues so the path
+      //    builder picks them up.
+      const resolved = await resolveScopeForFields(required)
+
+      // Build the merged form values: resolved entity names override any
+      // mirrored copy from the parent.
+      const merged: Record<string, string> = { ...formValues }
+      for (const field of required) {
+        const r = resolved[FORM_FIELD_TO_SCOPE_KEY[field]]
+        if (r) merged[field] = r.name
+      }
+
+      // Create the dataset BEFORE the path build so we can splice the
+      // dataset's 8-char short-id into the upload prefix
+      // (`Raw/.../{sensor}/{shortId}/Images/`). One submit click = one
+      // dataset row. The chunked-upload finalize stamps every
+      // `experiment_files` row with the resulting dataset_id; for
+      // farm-ng .bin uploads the same id is forwarded to the
+      // EXTRACT_BINARY job so the amiga worker can register its
+      // extracted outputs against the same batch. End result: the user
+      // can delete just this submission via the per-dataset trash icon
+      // in Manage Data, and two uploads at the same scope no longer
+      // commingle on disk.
+      const allUploaded: string[] = []
+      const alreadyStored: string[] = []
+      // Field data (rover logs, images) becomes a run on the Process tab.
+      const filedRuns: { run: Run; created: boolean }[] = []
+      for (const batch of work) {
+        // The batch's own date (dates read from the files), else the form's.
+        const scoped = batch.date ? { ...merged, date: batch.date } : merged
+        setResolveStatus(null)
+        const experimentName =
+          resolved.experiment?.name ?? merged.experiment ?? ""
+        let datasetId: string | undefined
+        let datasetShortId: string | null = null
+        if (experimentName) {
+          try {
+            const ds = await createOrGetDatasetForUpload({
+              experimentName,
+              dataTypeLabel: dataType,
+              // Every upload records where it belongs (season, site, date…),
+              // so Manage Data can list it by season and find its files.
+              info: {
+                ...(canSplit
+                  ? batchInfo(batch, scoped, batch.folder || undefined)
+                  : batchInfo({ run: "", treatment: "" }, scoped)),
+                ...deviceInfo(formValues),
+              },
+              nameSuffix: canSplit ? batchNameSuffix(batch) : undefined,
+            })
+            datasetId = idAsString(ds.dataset.id) ?? undefined
+            if (datasetId) {
+              datasetShortId = extractDatasetShortId(datasetId)
+            }
+            // Only flag for cleanup if we *created* the row. An
+            // existing row (name collision) may already own data
+            // from a prior submission; auto-deleting that on failure
+            // would clobber data the user expected to keep.
+            if (ds.wasCreated && datasetId) {
+              createdDatasetIdForCleanup = datasetId
+            }
+          } catch (err) {
+            // Soft-failure: the upload still works; it just lands as
+            // legacy "experiment-owned, dataset-orphaned" and the user
+            // can only delete it via the experiment cascade. Without
+            // a dataset short-id the upload uses the legacy shape
+            // (`Raw/.../{sensor}/Images/`) — at the cost of
+            // commingling with any prior upload at the same scope.
+            // Surfaced as a toast so the user sees what happened.
+            const message = err instanceof Error ? err.message : String(err)
+            showErrorToastWithCopy(
+              `Could not create the upload's dataset (${message}). ` +
+                `The upload will continue without per-batch grouping.`,
+            )
+          }
+        }
+
+        const targetRootDir = buildTargetRootDir(
+          dataType,
+          scoped,
+          datasetShortId,
+          subDir,
+        )
+        if (!targetRootDir) {
+          setRejection({
+            title: `Unknown data type: ${dataType}`,
+            description:
+              "The selected data type isn't configured for upload. Pick a different one, or report this — the data-types config may be out of sync with the dropdown.",
+            rejectedNames: [],
+          })
+          return
+        }
+
+        const followUpJob = followUpForDataType(dataType)
+        // Duplicate check (see lib/duplicates). Image batches get their own
+        // folder, so look for the same names in earlier batches at this
+        // scope; everything else writes into one folder and would overwrite.
+        // (Farm-ng .bin files are deleted after extraction, so never match.)
+        let toUpload = batch.files
+        const batchSuffix = datasetShortId ? `/${datasetShortId}/Images` : null
+        const batchRoot =
+          batchSuffix && targetRootDir.endsWith(batchSuffix)
+            ? targetRootDir.slice(0, -batchSuffix.length)
+            : undefined
+        const listed =
+          ((await FilesService.apiFilesListFilePathListFiles({
+            filePath: `gemini/${batchRoot ?? targetRootDir}/`,
+          })) as FileMetadata[] | null) ?? []
+        const existing = existingUploadNames(
+          batch.files.map((f) => f.name),
+          listed.map((f) => f.object_name),
+          targetRootDir,
+          batchRoot,
+        )
+        if (existing.length > 0) {
+          const choice = await askAboutDuplicates(
+            existing,
+            batch.files.length,
+            batchRoot ?? targetRootDir,
+            batchRoot !== undefined,
+          )
+          if (choice === "cancel") {
+            if (createdDatasetIdForCleanup) {
+              await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+                datasetId: createdDatasetIdForCleanup,
+              }).catch(() => {})
+            }
+            return
+          }
+          if (choice === "skip") {
+            const skip = new Set(existing)
+            toUpload = batch.files.filter((f) => !skip.has(f.name))
+            // Already stored in this folder: still passed on, so a step
+            // after the upload (e.g. mapping weather columns) can use them.
+            if (!batchRoot)
+              alreadyStored.push(
+                ...existing.map((n) => `${targetRootDir}/${n}`),
+              )
+            if (toUpload.length === 0) {
+              showSuccessToast(
+                batches.length > 1
+                  ? `${batch.folder || "This batch"}: every file is already uploaded.`
+                  : "Every file is already uploaded — nothing to do.",
+              )
+              if (createdDatasetIdForCleanup) {
+                await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+                  datasetId: createdDatasetIdForCleanup,
+                }).catch(() => {})
+                createdDatasetIdForCleanup = undefined
+              }
+              continue
+            }
+          }
+        }
+
+        const tasks: UploadTask[] = toUpload.map((file) => ({
+          file,
+          objectPath: `${targetRootDir}/${file.name}`,
+          followUpJob,
+        }))
+
+        // The experiment is required by the Files-page UI gate, so by the
+        // time we get here `resolved.experiment` exists. Forward its id
+        // so the chunked-upload finalize handler can write the
+        // `experiment_files` pointer row that the Experiment.delete()
+        // cascade reads from.
+        // Build the per-batch THERMAL_EXTRACT submission when the
+        // upload form's calibration block is set. The worker expects
+        // the *dataset* prefix (the per-batch directory whose siblings
+        // are `Images/` and `RawThermal/`), not the `…/Images/`
+        // directory the files themselves landed in. `buildTargetRootDir`
+        // appends `Images` for the "Image Data" data type — strip it.
+        const datasetPrefix = `${targetRootDir.replace(/\/Images$/, "")}/`
+        const postUploadJob: PostUploadJob | undefined = thermalCalibration
+          ? {
+              jobType: "THERMAL_EXTRACT",
+              parameters: {
+                dataset_prefix: datasetPrefix,
+                thermal_calibration: thermalCalibration,
+              },
+            }
+          : undefined
+
+        const batchLabel = batchLabelText(batchInfo(batch, {}, undefined))
+        const result = await run(tasks, {
+          title:
+            (followUpJob?.kind === "extract_binary"
+              ? `Processing ${toUpload.length} .bin file${toUpload.length === 1 ? "" : "s"}`
+              : thermalCalibration
+                ? `Uploading ${toUpload.length} thermal file${toUpload.length === 1 ? "" : "s"}`
+                : `Uploading ${toUpload.length} file${toUpload.length === 1 ? "" : "s"}`) +
+            (batchLabel ? ` (${batchLabel})` : ""),
+          experimentId: resolved.experiment?.id,
+          datasetId,
+          postUploadJob,
+        })
+        // Upload succeeded — clear the cleanup flag so the catch
+        // branch below (which only runs on a throw) won't trigger.
+        // Belt-and-suspenders; the try wouldn't reach this line on
+        // failure anyway, but explicit is better than implicit.
+        createdDatasetIdForCleanup = undefined
+        allUploaded.push(...result.uploaded.map((u) => u.objectPath))
+        if (result.uploaded.length > 0) {
+          try {
+            const filed = fileUploadAsRun({
+              path: targetRootDir,
+              experimentId:
+                resolved.experiment?.id != null
+                  ? String(resolved.experiment.id)
+                  : undefined,
+              batchLabel,
+              ...(() => {
+                const i = batchInfo(batch, {}, undefined) as Record<
+                  string,
+                  unknown
+                >
+                return {
+                  runOfDay:
+                    typeof i.run_of_day === "string" ? i.run_of_day.trim() : "",
+                  treatment:
+                    typeof i.treatment === "string" ? i.treatment.trim() : "",
+                }
+              })(),
+            })
+            if (filed) filedRuns.push(filed)
+          } catch (e) {
+            // The upload itself is done; only the Process-tab entry is missing.
+            console.warn("[UploadList] could not file the upload as a run", e)
+          }
+        }
+      }
+      if (filedRuns.length > 0) {
+        const first = filedRuns[0].run
+        const fresh = filedRuns.filter((f) => f.created).length
+        toast.success(
+          filedRuns.length === 1
+            ? fresh
+              ? `Ready to process: ${first.name ?? "new run"}`
+              : `Added to the run ${first.name ?? ""}`
+            : `${filedRuns.length} uploads ready to process (${fresh} new run${fresh === 1 ? "" : "s"})`,
+          {
+            description:
+              "Process lists it under its experiment; open it to start the first step.",
+            duration: 15_000,
+            action: {
+              label: filedRuns.length === 1 ? "Open the run" : "Open Process",
+              onClick: () =>
+                filedRuns.length === 1
+                  ? navigate({
+                      to: "/process/$workspaceId/run/$runId",
+                      params: {
+                        workspaceId: first.workspaceId,
+                        runId: first.id,
+                      },
+                    })
+                  : navigate({ to: "/process" }),
+            },
+          },
+        )
+      }
+      onUploadComplete?.(allUploaded, alreadyStored)
+      setSelected([])
+      setFolderEdits({})
+      setFolderMeaning("one")
+      setThermalDefaultMode(null)
+      setThermalCalibration(null)
+      setThermalHint(null)
+    } catch (err) {
+      // Surface the *server's* error verbatim in the modal dialog and
+      // keep it on screen until the user dismisses it. The dialog is
+      // the canonical surface for upload failures (long, multi-line
+      // S3 error bodies don't fit a toast); we deliberately skip
+      // `showErrorToastWithCopy` here so the message isn't truncated
+      // twice. The modal renders with `break-words` so the full body
+      // is selectable + scrollable.
+      const message = err instanceof Error ? err.message : String(err)
+      setRejection({
+        title: resolveStatus
+          ? `Failed while ${resolveStatus}`
+          : "Upload failed",
+        description: resolveStatus
+          ? `The upload was blocked because the entity creation step failed. ` +
+            `The error from the backend is shown below.`
+          : `The upload was interrupted by an error. The first failing chunk's response is below ` +
+            `(each chunk was retried a few times before giving up). Files that finished are kept; ` +
+            `the unfinished ones need to be uploaded again.`,
+        rejectedNames: [message],
+        remediation: resolveStatus
+          ? "Try a different name (the entity may already exist with conflicting attributes), or check that the parent entity (experiment) is the one you intended."
+          : "Common causes: backend container restarted, JWT expired (try refreshing the page to re-login), or a 5xx upstream from MinIO.",
+      })
+      // Auto-clean the empty dataset row we just created. Without
+      // this, every failed upload leaves an empty shell in Manage
+      // Data — confusing UX. Only safe when we *created* the
+      // dataset (not got an existing one — see wasCreated above)
+      // AND the file_count is still 0 (defense against a partial
+      // upload that managed to finalize some chunks before the
+      // throw). Best-effort: a failure to clean up is logged but
+      // does not propagate.
+      if (createdDatasetIdForCleanup) {
+        try {
+          const countResp =
+            await DatasetsService.apiDatasetsIdDatasetIdFileCountGetDatasetFileCount(
+              { datasetId: createdDatasetIdForCleanup },
+            )
+          const fc = (countResp as { file_count?: number } | null)?.file_count
+          if (typeof fc === "number" && fc === 0) {
+            await DatasetsService.apiDatasetsIdDatasetIdDeleteDataset({
+              datasetId: createdDatasetIdForCleanup,
+            })
+          }
+        } catch (cleanupErr) {
+          // Don't mask the original upload error — just log. The
+          // user can trash the empty dataset from Manage Data
+          // themselves.
+          // eslint-disable-next-line no-console
+          console.warn(
+            "Failed to auto-clean empty dataset after upload error:",
+            cleanupErr,
+          )
+        }
+      }
+    } finally {
+      setIsUploading(false)
+      setResolveStatus(null)
+    }
+  }
+  // Uploaded together with another list (the parent signals when).
+  const lastSignal = useRef(uploadSignal)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once per signal
+  useEffect(() => {
+    if (uploadSignal === lastSignal.current) return
+    lastSignal.current = uploadSignal
+    if (selected.length > 0 && !isUploading) void handleUploadClick()
+  }, [uploadSignal])
+
+  /**
+   * Translate the per-form-field scope map into the EntityChoice map the
+   * resolver expects, then run the create-or-get pipeline.
+   */
+  async function resolveScopeForFields(
+    fields: string[],
+  ): Promise<ResolvedScope> {
+    if (!scope) return {}
+    const choices: UploadScopeChoices = {}
+    for (const field of fields) {
+      const scopeKey = FORM_FIELD_TO_SCOPE_KEY[field]
+      if (!scopeKey) continue
+      const c = scope[field]
+      if (c) choices[scopeKey] = c
+    }
+    if (Object.keys(choices).length === 0) return {}
+    setResolveStatus("registering entities")
+    // Derive the sensor classification from what the probe found.
+    // Thermal: (Thermal=3, Image=4, TIFF=12 or JPEG=8). Plain Image
+    // Data with no thermal hit: (RGB=1, Image=4, JPEG=8). Anything
+    // else (Ardupilot Logs, etc.) doesn't pass classification.
+    let sensorClassification: SensorClassification | null = null
+    if (dataType === "Image Data") {
+      if (thermalHint !== null) {
+        sensorClassification = {
+          sensorTypeId: SensorType.Thermal,
+          dataTypeId: DataType.Image,
+          dataFormatId:
+            thermalHint === "boson_tiff" ? DataFormat.TIFF : DataFormat.JPEG,
+        }
+      } else {
+        sensorClassification = {
+          sensorTypeId: SensorType.RGB,
+          dataTypeId: DataType.Image,
+          dataFormatId: DataFormat.JPEG,
+        }
+      }
+    }
+    return resolveScope(choices, { sensorClassification })
   }
 
   return (
-    <>
     <div data-onboarding="files-upload-zone" className="space-y-6">
       {label && (
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
       )}
-      <UploadZone onFilesAdded={addFiles} />
+      <UploadZone
+        onFilesAdded={addFiles}
+        accept={acceptAttr}
+        disabled={disabled}
+        disabledReason={disabledReason}
+      />
 
-      {selectedPaths.length > 0 && (
+      {canSplit && droppedFolders.length > 1 && (
+        <div
+          className="border-border bg-card space-y-3 rounded-lg border p-6"
+          data-testid="upload-folder-mapping"
+        >
+          <div>
+            <h3 className="text-foreground">
+              {droppedFolders.length} folders: what do they stand for?
+            </h3>
+            <p className="text-muted-foreground text-sm">
+              Each folder can be kept as its own upload, labelled so it can be
+              told apart later. All of them go under the experiment, site,
+              population and date chosen on the left.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["one", "Nothing: upload as one batch"],
+                ["runs", "Runs of the day (diurnal)"],
+                ["treatments", "Treatments"],
+              ] as const
+            ).map(([value, text]) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={folderMeaning === value ? "default" : "outline"}
+                data-testid={`upload-folders-${value}`}
+                onClick={() => {
+                  setFolderMeaning(value)
+                  setFolderEdits({})
+                }}
+              >
+                {text}
+              </Button>
+            ))}
+          </div>
+          {folderMeaning !== "one" && (
+            <div className="space-y-2">
+              <div className="text-muted-foreground grid grid-cols-[auto_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 text-xs">
+                <span />
+                <span>Folder</span>
+                <span>Run of the day</span>
+                <span>Treatment</span>
+              </div>
+              {batches.map((b) => (
+                <div
+                  key={b.folder}
+                  className="grid grid-cols-[auto_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 text-sm"
+                  data-testid="upload-folder-row"
+                >
+                  <Checkbox
+                    checked={b.include}
+                    aria-label={`Upload ${b.folder || "loose files"}`}
+                    onCheckedChange={(v) =>
+                      setFolderEdits((prev) => ({
+                        ...prev,
+                        [b.folder]: { ...prev[b.folder], include: v === true },
+                      }))
+                    }
+                  />
+                  <span className="truncate" title={b.folder}>
+                    {b.folder || "(files not in a folder)"}{" "}
+                    <span className="text-muted-foreground text-xs">
+                      {b.files.length} file{b.files.length === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                  <Input
+                    value={b.run}
+                    placeholder="—"
+                    disabled={!b.include}
+                    onChange={(e) =>
+                      setFolderEdits((prev) => ({
+                        ...prev,
+                        [b.folder]: { ...prev[b.folder], run: e.target.value },
+                      }))
+                    }
+                  />
+                  <Input
+                    value={b.treatment}
+                    placeholder="—"
+                    disabled={!b.include}
+                    onChange={(e) =>
+                      setFolderEdits((prev) => ({
+                        ...prev,
+                        [b.folder]: {
+                          ...prev[b.folder],
+                          treatment: e.target.value,
+                        },
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+              {labelClashes.length > 0 && (
+                <p className="text-destructive text-sm">
+                  More than one folder has the same labels (
+                  {labelClashes.join("; ")}). Give each its own run or
+                  treatment, or they cannot be told apart later.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {selected.length > 0 && (
         <div className="border-border bg-card rounded-lg border p-6">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex w-full items-center justify-between text-left"
+            type="button"
           >
             <h3 className="text-foreground">
-              Selected Files ({selectedPaths.length})
+              Selected Files ({selected.length})
             </h3>
             {isExpanded ? (
               <ChevronUp className="text-muted-foreground h-5 w-5" />
@@ -143,30 +1054,28 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
 
           {isExpanded && (
             <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
-              {selectedPaths.map((filePath, index) => (
+              {selected.map((file, index) => (
                 <div
-                  key={index}
+                  key={`${file.name}:${file.lastModified}:${index}`}
                   className="border-border bg-muted flex items-center justify-between rounded border p-2"
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <File className="text-muted-foreground h-4 w-4 flex-shrink-0" />
                     <span className="text-foreground truncate">
-                      {fileNameFromPath(filePath)}
+                      {file.name}
+                    </span>
+                    <span className="text-muted-foreground text-xs flex-shrink-0">
+                      {formatBytes(file.size)}
                     </span>
                   </div>
                   <button
-                    onClick={(e) => { e.stopPropagation(); setPreviewPath(filePath); }}
-                    className="hover:bg-accent ml-2 flex-shrink-0 rounded p-1"
-                    title="Preview file"
-                  >
-                    <Eye className="text-muted-foreground h-4 w-4" />
-                  </button>
-                  <button
                     onClick={(e) => {
-                      e.stopPropagation();
-                      removeFile(index);
+                      e.stopPropagation()
+                      removeFile(index)
                     }}
                     className="hover:bg-accent ml-1 flex-shrink-0 rounded p-1"
+                    aria-label="Remove file"
+                    type="button"
                   >
                     <X className="text-muted-foreground h-4 w-4" />
                   </button>
@@ -175,69 +1084,170 @@ export function UploadList({ dataType, formValues, onFilesSelected, onUploadComp
             </div>
           )}
 
+          {thermalDefaultMode !== null && (
+            <div className="mt-3">
+              <ThermalCalibrationField
+                defaultMode={thermalDefaultMode}
+                onChange={setThermalCalibration}
+              />
+            </div>
+          )}
+
           <div className="mt-4 flex gap-2">
             <Button
               variant="outline"
+              className={hideUploadButton ? "hidden" : undefined}
               onClick={handleUploadClick}
-              disabled={isChecking}
+              disabled={
+                isUploading ||
+                // Thermal was detected but the user-defined inputs are
+                // still invalid → field emits null. Block submit until
+                // they're valid so we don't fire a THERMAL_EXTRACT
+                // with bad calibration constants.
+                (thermalDefaultMode !== null && thermalCalibration === null)
+              }
+              data-testid="upload-submit"
             >
-              {isChecking ? "Checking…" : `Upload ${selectedPaths.length} file(s)`}
+              {isUploading
+                ? resolveStatus
+                  ? `Registering entities…`
+                  : "Uploading…"
+                : (uploadLabel ?? `Upload ${selected.length} file(s)`)}
             </Button>
             <Button
               variant="ghost"
-              onClick={() => setSelectedPaths([])}
+              onClick={() => {
+                setSelected([])
+                setThermalDefaultMode(null)
+                setThermalCalibration(null)
+                setThermalHint(null)
+              }}
+              disabled={isUploading}
             >
               Clear
             </Button>
           </div>
         </div>
       )}
-    </div>
 
-      {previewPath && (
-        <FilePreviewDialog filePath={previewPath} onClose={() => setPreviewPath(null)} />
-      )}
+      <DateCheckDialog
+        groups={datePrompt?.groups ?? null}
+        onConfirm={(dates) => {
+          datePrompt?.resolve(dates)
+          setDatePrompt(null)
+        }}
+        onCancel={() => {
+          datePrompt?.resolve(null)
+          setDatePrompt(null)
+        }}
+      />
+      <Dialog
+        open={duplicatePrompt !== null}
+        onOpenChange={(open) => {
+          if (!open && duplicatePrompt) {
+            duplicatePrompt.resolve("cancel")
+            setDuplicatePrompt(null)
+          }
+        }}
+      >
+        <DialogContent data-testid="duplicate-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              {duplicatePrompt?.names.length} of {duplicatePrompt?.total} files
+              already uploaded
+            </DialogTitle>
+            <DialogDescription>
+              {duplicatePrompt?.earlierBatch
+                ? "An earlier upload for this scope already has these images. Uploading them again stores a second copy that the orthomosaic would use twice."
+                : "These names already exist in the destination folder. Uploading them again overwrites the stored copies."}{" "}
+              <code className="break-all text-xs">{duplicatePrompt?.dir}</code>
+            </DialogDescription>
+          </DialogHeader>
+          <ul
+            className="max-h-40 overflow-auto rounded border p-2 font-mono text-xs"
+            data-testid="duplicate-names"
+          >
+            {duplicatePrompt?.names.slice(0, 50).map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+            {(duplicatePrompt?.names.length ?? 0) > 50 && (
+              <li className="text-muted-foreground">
+                …and {(duplicatePrompt?.names.length ?? 0) - 50} more
+              </li>
+            )}
+          </ul>
+          <DialogFooter className="gap-2">
+            {(["cancel", "replace", "skip"] as const).map((choice) => (
+              <Button
+                key={choice}
+                variant={
+                  choice === "skip"
+                    ? "default"
+                    : choice === "replace"
+                      ? "destructive"
+                      : "outline"
+                }
+                data-testid={`duplicate-${choice}`}
+                onClick={() => {
+                  duplicatePrompt?.resolve(choice)
+                  setDuplicatePrompt(null)
+                }}
+              >
+                {choice === "skip"
+                  ? "Skip existing"
+                  : choice === "replace"
+                    ? duplicatePrompt?.earlierBatch
+                      ? "Upload again"
+                      : "Replace"
+                    : "Cancel"}
+              </Button>
+            ))}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Conflict warning dialog */}
-      {pendingUpload && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-background w-full max-w-md rounded-xl border p-6 shadow-xl">
-            <div className="mb-3 flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-500" />
-              <h2 className="text-base font-semibold">Files already exist</h2>
-            </div>
-            <p className="text-muted-foreground mb-3 text-sm">
-              {pendingUpload.existingFiles.length === pendingUpload.filePaths.length
-                ? "All selected files already exist in the destination folder."
-                : `${pendingUpload.existingFiles.length} of ${pendingUpload.filePaths.length} selected files already exist in the destination folder.`}
+      <Dialog
+        open={rejection !== null}
+        onOpenChange={(open) => !open && setRejection(null)}
+      >
+        <DialogContent data-testid="upload-error-dialog">
+          <DialogHeader>
+            <DialogTitle>{rejection?.title}</DialogTitle>
+            <DialogDescription>{rejection?.description}</DialogDescription>
+          </DialogHeader>
+          {rejection?.remediation && (
+            <p className="text-sm text-muted-foreground">
+              {rejection.remediation}
             </p>
-            <div className="bg-muted mb-4 max-h-36 overflow-y-auto rounded-md px-3 py-2">
-              {pendingUpload.existingFiles.map((name) => (
-                <p key={name} className="text-muted-foreground py-0.5 font-mono text-xs">{name}</p>
+          )}
+          {rejection && rejection.rejectedNames.length > 0 && (
+            <div className="max-h-64 overflow-y-auto rounded border bg-muted/40 p-2 text-xs font-mono">
+              {rejection.rejectedNames.map((n, i) => (
+                // `break-words` so long server-error strings (e.g. the
+                // multi-line S3 NoSuchKey response that includes the
+                // bucket/object path and request ids) wrap and stay
+                // legible. The previous `truncate` made these
+                // single-line ellipsified, which hid the part of the
+                // message the user actually needed.
+                <div
+                  key={`${i}:${n}`}
+                  className="whitespace-pre-wrap break-words py-0.5"
+                >
+                  {n}
+                </div>
               ))}
             </div>
-            <p className="text-muted-foreground mb-4 text-sm">
-              Do you want to replace the existing files, or skip them and only upload new ones?
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button variant="ghost" onClick={() => setPendingUpload(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => doUpload(pendingUpload.filePaths, pendingUpload.dataType, pendingUpload.targetRootDir, pendingUpload.formValues, false)}
-              >
-                Skip existing
-              </Button>
-              <Button
-                onClick={() => doUpload(pendingUpload.filePaths, pendingUpload.dataType, pendingUpload.targetRootDir, pendingUpload.formValues, true)}
-              >
-                Replace all
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+          )}
+          <DialogFooter>
+            <Button
+              data-testid="upload-error-dismiss"
+              onClick={() => setRejection(null)}
+            >
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }

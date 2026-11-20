@@ -53,7 +53,11 @@ describe("featuresToCsv", () => {
     // features. Not great, but documenting the current behaviour so future
     // changes are intentional.
     const csv = featuresToCsv([
-      { type: "Feature", geometry: { type: "Point", coordinates: [0, 0] }, properties: null },
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [0, 0] },
+        properties: null,
+      },
       feature({}),
     ])
     expect(csv).toBe("\n\n")

@@ -1,0 +1,1410 @@
+/**
+ * LabelingWorkspace — label plot images by hand, as quickly as possible,
+ * for training or fine-tuning a model later.
+ *
+ * The idea: show one example, let the models do the rest, confirm.
+ *   1. Start from a model's detections (dashed: proposed) or a blank image.
+ *   2. Draw a box (B) or click (P) on ONE object; F finds every similar
+ *      object (YOLOE visual prompt) as proposals. Or describe it in words
+ *      (D): SAM 3 proposes every match, with outlines (zero-shot).
+ *   3. Enter keeps all proposals; clicking one keeps or drops it.
+ *   4. M turns kept boxes into exact masks (SAM 2).
+ *   5. → saves the image and moves on. Objects kept so far are examples for
+ *      the next images: their similar objects are proposed on arrival.
+ *
+ * Prompts run as LOCATE_PLANTS jobs with `prompted` (worker prompted.py).
+ * The set is saved as versions next to the plot images; COCO export, or
+ * Train → a YOLO model fine-tuned on it (TrainModelDialog, TRAIN_MODEL).
+ */
+import { useMutation, useQuery } from "@tanstack/react-query"
+import {
+  BoxSelect,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  GraduationCap,
+  Loader2,
+  Maximize,
+  MousePointer2,
+  Plus,
+  Redo2,
+  Save,
+  Sparkles,
+  SquareDashedMousePointer,
+  Trash2,
+  Type,
+  Undo2,
+  WandSparkles,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
+
+import { type JobOutput, JobsService, PlotGeometryService } from "@/client"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { LabelingWorker } from "@/features/process/components/LabelingWorker"
+import {
+  classColour,
+  useAuthedBlobUrl,
+} from "@/features/process/components/predictionView"
+import { TrainModelDialog } from "@/features/process/components/TrainModelDialog"
+import type { InferenceModel } from "@/features/process/lib/inferenceModels"
+import { useUploadedWeights } from "@/features/process/lib/knownModels"
+import {
+  type Ann,
+  fromPrediction,
+  type LabelSet,
+  labelSetDirectory,
+  newId,
+  newProposals,
+  toCoco,
+} from "@/features/process/lib/labelSet"
+import { useAllPipelines } from "@/features/process/lib/runStore"
+import {
+  PROMPT_TIPS,
+  promptClasses,
+  ZERO_SHOT_PRESETS,
+} from "@/features/process/lib/zeroShot"
+import { useCredentials } from "@/lib/credentials"
+
+type Tool = "select" | "box" | "point"
+
+/** Submit a prompted job and wait for its predictions (about a second
+ *  once the worker has the model loaded). */
+async function prompt(
+  experimentId: string | undefined,
+  image: string,
+  prompted: Record<string, unknown>,
+  onWait?: (note: string) => void,
+): Promise<
+  {
+    class: string
+    confidence?: number
+    x: number
+    y: number
+    width: number
+    height: number
+    points?: { x: number; y: number }[]
+  }[]
+> {
+  const job = (await JobsService.apiJobsSubmitSubmitJob({
+    requestBody: {
+      job_type: "LOCATE_PLANTS",
+      parameters: { image_path: image, prompted },
+      ...(experimentId ? { experiment_id: experimentId } : {}),
+    } as Parameters<
+      typeof JobsService.apiJobsSubmitSubmitJob
+    >[0]["requestBody"],
+  })) as JobOutput
+  const id = String(job?.id ?? "")
+  if (!id) throw new Error("The prompt job was not accepted")
+  const started = Date.now()
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1000))
+    const j = (await JobsService.apiJobsJobIdGetJob({ jobId: id })) as JobOutput
+    // Not picked up yet: no ML worker is running. The first one has to be
+    // started on the cluster and fetch the models, which takes minutes.
+    if (j.status === "PENDING" && Date.now() - started > 8_000)
+      onWait?.(
+        "Waiting for an ML worker on the cluster (see above; the first start takes a few minutes)…",
+      )
+    const stage = (j as { progress_detail?: { stage?: string } })
+      .progress_detail?.stage
+    if (j.status === "RUNNING" && stage?.startsWith("Downloading"))
+      onWait?.(`${stage}…`)
+    if (j.status === "COMPLETED")
+      return (
+        ((j as { result?: { predictions?: unknown } }).result
+          ?.predictions as never) ?? []
+      )
+    if (j.status === "FAILED" || j.status === "CANCELLED")
+      throw new Error(
+        String(
+          (j as { error_message?: string }).error_message ??
+            "The prompt failed",
+        ),
+      )
+    if (Date.now() - started > 600_000)
+      throw new Error(
+        "No answer after 10 minutes: is an ML worker running? (Settings → Compute)",
+      )
+  }
+}
+
+interface WorkspaceProps {
+  /** Object names of the images to label. */
+  images: string[]
+  /** A model's detections per image, offered as proposals. */
+  initial?: Record<string, Parameters<typeof fromPrediction>[0][]>
+  experimentId?: string
+  onClose: () => void
+  /** Add a model trained from these labels to the pipeline. */
+  onUseTrained?: (m: InferenceModel) => void
+}
+
+/** The labelled sets these images already have (one per object, e.g.
+ *  "flowers", "pods"; made here or by the agent), and which one is open. A
+ *  new set is started by naming it. Switching opens that set afresh. */
+export function LabelingWorkspace(props: WorkspaceProps) {
+  const base = labelSetDirectory(props.images[0] ?? "", "")
+  const sets = useQuery({
+    queryKey: ["label-sets", base],
+    queryFn: async () => {
+      const all =
+        ((await PlotGeometryService.apiPlotGeometryVersionsAllListAllVersions().catch(
+          () => [],
+        )) ?? []) as { directory?: string }[]
+      const names = new Set<string>()
+      for (const v of all) {
+        const d = String(v.directory ?? "")
+        if (
+          d.startsWith(base) &&
+          d.length > base.length &&
+          !d.slice(base.length).includes("/")
+        )
+          names.add(d.slice(base.length))
+      }
+      return [...names].sort()
+    },
+    staleTime: 30_000,
+  })
+  const [chosen, setChosen] = useState<string | null>(null)
+  const names = sets.data ?? []
+  const current =
+    chosen ??
+    (names.length === 0 || names.includes("default") ? "default" : names[0])
+  if (sets.isLoading)
+    return (
+      <p className="text-muted-foreground flex items-center gap-1 p-2 text-xs">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Finding labelled sets…
+      </p>
+    )
+  return (
+    <LabelingSession
+      key={current}
+      {...props}
+      setName={current}
+      setNames={names.includes(current) ? names : [...names, current].sort()}
+      onSetName={setChosen}
+    />
+  )
+}
+
+function LabelingSession({
+  images,
+  initial,
+  experimentId,
+  onClose,
+  onUseTrained,
+  setName,
+  setNames,
+  onSetName,
+}: WorkspaceProps & {
+  setName: string
+  setNames: string[]
+  onSetName: (name: string) => void
+}) {
+  const directory = labelSetDirectory(images[0] ?? "", setName)
+  const saved = useQuery({
+    queryKey: ["label-set", directory],
+    queryFn: async () => {
+      try {
+        const r =
+          (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion({
+            requestBody: { directory },
+          })) as { state_snapshot?: LabelSet }
+        return r.state_snapshot ?? null
+      } catch {
+        return null
+      }
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const [set, setSet] = useState<LabelSet>({ classes: [], images: {} })
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    if (loaded || saved.isLoading) return
+    const base: LabelSet = saved.data ?? { classes: [], images: {} }
+    const classes = new Set(base.classes)
+    for (const preds of Object.values(initial ?? {}))
+      for (const p of preds) if (p.class) classes.add(p.class)
+    setSet({ ...base, classes: [...classes] })
+    setLoaded(true)
+  }, [saved.isLoading, saved.data, initial, loaded])
+
+  const [idx, setIdx] = useState(() =>
+    Math.max(
+      0,
+      images.findIndex((p) => !saved.data?.images[p]?.done),
+    ),
+  )
+  const image = images[idx]
+  const [tool, setTool] = useState<Tool>("box")
+  const [cls, setCls] = useState<string>("")
+  const activeClass = cls || set.classes[0] || "object"
+  const [busy, setBusy] = useState<string | null>(null)
+  // The last prompt or save that failed, kept on screen (a toast is gone in a
+  // few seconds, and a slow prompt may fail while the person looks elsewhere).
+  const [failed, setFailed] = useState<string | null>(null)
+  const fail = useCallback((msg: string) => {
+    setFailed(msg)
+    toast.error(msg)
+  }, [])
+  const ask = useCallback(
+    (img: string, prompted: Record<string, unknown>) =>
+      prompt(experimentId, img, prompted, setBusy),
+    [experimentId],
+  )
+  const [selected, setSelected] = useState<string | null>(null)
+  const [newClass, setNewClass] = useState("")
+  const [dirty, setDirty] = useState(false)
+
+  const img = set.images[image]
+  const anns = img?.annotations ?? []
+  // Undo / redo, per image: each change to the boxes is one step.
+  const history = useRef(new Map<string, { undo: Ann[][]; redo: Ann[][] }>())
+  const [, setHistoryTick] = useState(0)
+  const stacks = useCallback((key: string) => {
+    let h = history.current.get(key)
+    if (!h) {
+      h = { undo: [], redo: [] }
+      history.current.set(key, h)
+    }
+    return h
+  }, [])
+  const setAnns = useCallback(
+    (fn: (a: Ann[]) => Ann[]) => {
+      setSet((s) => {
+        const cur = s.images[image] ?? {
+          width: 0,
+          height: 0,
+          annotations: [],
+          done: false,
+        }
+        const next = fn(cur.annotations)
+        if (JSON.stringify(next) === JSON.stringify(cur.annotations)) return s
+        const h = stacks(image)
+        // The same state twice (React may run this twice): one step.
+        if (h.undo.at(-1) !== cur.annotations) {
+          h.undo.push(cur.annotations)
+          if (h.undo.length > 200) h.undo.shift()
+          h.redo = []
+        }
+        return {
+          ...s,
+          images: {
+            ...s.images,
+            [image]: { ...cur, annotations: next },
+          },
+        }
+      })
+      setDirty(true)
+      setHistoryTick((t) => t + 1)
+    },
+    [image, stacks],
+  )
+  const stepHistory = useCallback(
+    (back: boolean) => {
+      const h = stacks(image)
+      const from = back ? h.undo : h.redo
+      const to = back ? h.redo : h.undo
+      const target = from.pop()
+      if (!target) return
+      setSet((s) => {
+        const cur = s.images[image]
+        if (!cur) return s
+        if (to.at(-1) !== cur.annotations) to.push(cur.annotations)
+        return {
+          ...s,
+          images: { ...s.images, [image]: { ...cur, annotations: target } },
+        }
+      })
+      setSelected(null)
+      setDirty(true)
+      setHistoryTick((t) => t + 1)
+    },
+    [image, stacks],
+  )
+  const canUndo = (history.current.get(image)?.undo.length ?? 0) > 0
+  const canRedo = (history.current.get(image)?.redo.length ?? 0) > 0
+
+  // First visit: the model's detections, as proposals.
+  useEffect(() => {
+    if (!loaded || !image || set.images[image]) return
+    const props = (initial?.[image] ?? [])
+      .map((p) => fromPrediction(p, "proposed", "model"))
+      .filter((a): a is Ann => Boolean(a))
+    setSet((s) => ({
+      ...s,
+      images: {
+        ...s.images,
+        [image]: { width: 0, height: 0, annotations: props, done: false },
+      },
+    }))
+  }, [loaded, image, initial, set.images])
+
+  // Examples kept on earlier images (newest first), for carrying over.
+  // Examples for "find similar": every kept box of the selected class on
+  // this image; with none here yet, those of the latest earlier image that
+  // has some (YOLOE reads examples from one image at a time).
+  const ownExamples = useMemo(
+    () => anns.filter((a) => a.status === "kept" && a.cls === activeClass),
+    [anns, activeClass],
+  )
+  const carriedExample = useMemo(() => {
+    for (const p of images.slice(0, idx).reverse()) {
+      const kept = (set.images[p]?.annotations ?? []).filter(
+        (a) => a.status === "kept" && a.cls === activeClass,
+      )
+      if (kept.length) {
+        const use = kept.slice(0, 12)
+        return {
+          image: p,
+          boxes: use.map((a) => a.box),
+          classes: use.map((a) => a.cls),
+        }
+      }
+    }
+    return null
+  }, [images, idx, set.images, activeClass])
+  const exampleNote = ownExamples.length
+    ? `${ownExamples.length} on this image`
+    : carriedExample
+      ? `${carriedExample.boxes.length} from ${carriedExample.image
+          .split("/")
+          .pop()
+          ?.replace(/\.[a-z]+$/i, "")}`
+      : "none yet"
+
+  const findSimilar = useCallback(
+    async (useCarried = false) => {
+      if (!image) return
+      const ex = ownExamples.length
+        ? {
+            image,
+            boxes: ownExamples.map((a) => a.box),
+            classes: ownExamples.map((a) => a.cls),
+          }
+        : carriedExample
+      if (!ex) {
+        if (!useCarried)
+          toast.info(
+            `Draw a box around one ${activeClass || "object"} first (B), then find similar (F).`,
+          )
+        return
+      }
+      setBusy("Finding similar objects…")
+      try {
+        const preds = await ask(image, {
+          mode: "similar",
+          boxes: ex.boxes,
+          classes: ex.classes,
+          ...(ex.image !== image ? { refer_image: ex.image } : {}),
+        })
+        const proposed = preds
+          .map((p) => fromPrediction(p, "proposed", "similar"))
+          .filter((a): a is Ann => Boolean(a))
+        setAnns((a) => [...a, ...newProposals(a, proposed)])
+        if (!useCarried)
+          toast.success(
+            `${proposed.length} proposed. Enter keeps them all; click any wrong one to drop it.`,
+          )
+      } catch (e) {
+        fail(e instanceof Error ? e.message : "Finding similar failed")
+      } finally {
+        setBusy(null)
+      }
+    },
+    [image, ownExamples, carriedExample, activeClass, setAnns, ask, fail],
+  )
+
+  // Carry-over: an untouched image with earlier examples gets proposals.
+  const carried = useRef(new Set<string>())
+  useEffect(() => {
+    if (!loaded || !image || carried.current.has(image)) return
+    if (!carriedExample || anns.length) return
+    carried.current.add(image)
+    void findSimilar(true)
+  }, [loaded, image, carriedExample, anns.length, findSimilar])
+
+  // Describe it (zero-shot): a written description → SAM 3 proposals with
+  // outlines. A Hugging Face token comes from any pipeline model that has one.
+  const pipelines = useAllPipelines()
+  const keys = useCredentials()
+  const hfToken = useMemo(() => {
+    if (keys.data?.hf_token) return keys.data.hf_token
+    for (const p of pipelines) {
+      const ms = p.params?.roboflow_models
+      if (Array.isArray(ms))
+        for (const m of ms as { hf_token?: string }[])
+          if (m?.hf_token?.trim()) return m.hf_token.trim()
+    }
+    return ""
+  }, [pipelines, keys.data])
+  const [describeOpen, setDescribeOpen] = useState(false)
+  // SAM 3 is gated: without a token (or sam3.pt uploaded) it can only fail,
+  // so the default is then OWLv2, which needs neither. The person's own
+  // choice wins.
+  const uploadedWeights = useUploadedWeights()
+  const hasSam3Weights = (uploadedWeights.data ?? []).some((f) =>
+    /(^|\/)sam3\.pt$/i.test(f.object_name ?? ""),
+  )
+  const [describeChoice, setDescribeModel] = useState<string | null>(null)
+  const describeModel =
+    describeChoice ?? (hfToken || hasSam3Weights ? "sam3" : "owlv2")
+  const [describeText, setDescribeText] = useState("")
+  const [lastDescribe, setLastDescribe] = useState<string | null>(null)
+  const describe = useCallback(
+    async (text: string, auto = false) => {
+      if (!image || !text.trim()) return
+      setBusy("Finding by description…")
+      setFailed(null)
+      try {
+        const preds = await ask(image, {
+          mode: "describe",
+          prompt: text,
+          model: describeModel,
+          ...(hfToken ? { hf_token: hfToken } : {}),
+        })
+        const proposed = preds
+          .map((p) => fromPrediction(p, "proposed", "model"))
+          .filter((a): a is Ann => Boolean(a))
+        const names = promptClasses(text).map((c) => c.name)
+        setSet((st) => ({
+          ...st,
+          classes: [
+            ...st.classes,
+            ...names.filter((n) => !st.classes.includes(n)),
+          ],
+        }))
+        setAnns((a) => [...a, ...newProposals(a, proposed)])
+        setLastDescribe(text)
+        if (!auto)
+          toast.success(
+            `${proposed.length} proposed. Enter keeps them all; click any wrong one to drop it.`,
+          )
+      } catch (e) {
+        fail(e instanceof Error ? e.message : "Finding by description failed")
+      } finally {
+        setBusy(null)
+      }
+    },
+    [image, ask, describeModel, hfToken, setAnns, fail],
+  )
+  // Carry-over: the next untouched image gets the same description's proposals.
+  const described = useRef(new Set<string>())
+  useEffect(() => {
+    if (!loaded || !image || !lastDescribe || described.current.has(image))
+      return
+    if (anns.length || carriedExample) return
+    described.current.add(image)
+    void describe(lastDescribe, true)
+  }, [loaded, image, lastDescribe, anns.length, carriedExample, describe])
+  const [trainOpen, setTrainOpen] = useState(false)
+
+  const segmentKept = useCallback(async () => {
+    const need = anns.filter((a) => a.status === "kept" && !a.points)
+    if (!need.length) {
+      toast.info("Every kept object already has a mask.")
+      return
+    }
+    setBusy(`Masks for ${need.length} objects…`)
+    try {
+      const preds = await ask(image, {
+        mode: "segment",
+        boxes: need.map((a) => a.box),
+      })
+      setAnns((all) =>
+        all.map((a) => {
+          const i = need.findIndex((n) => n.id === a.id)
+          const p = i >= 0 ? preds[i] : undefined
+          return p?.points?.length
+            ? {
+                ...a,
+                points: p.points.map((q) => [q.x, q.y] as [number, number]),
+              }
+            : a
+        }),
+      )
+    } catch (e) {
+      fail(e instanceof Error ? e.message : "Masks failed")
+    } finally {
+      setBusy(null)
+    }
+  }, [anns, image, setAnns, ask, fail])
+
+  const segmentPoint = useCallback(
+    async (x: number, y: number) => {
+      setBusy("Outlining the object…")
+      try {
+        const preds = await ask(image, {
+          mode: "segment",
+          points: [[x, y]],
+          point_labels: [1],
+          label: activeClass,
+        })
+        const a = preds[0]
+          ? fromPrediction({ ...preds[0], class: activeClass }, "kept", "sam")
+          : null
+        if (a) setAnns((all) => [...all, a])
+      } catch (e) {
+        fail(e instanceof Error ? e.message : "Outlining failed")
+      } finally {
+        setBusy(null)
+      }
+    },
+    [image, activeClass, setAnns, ask, fail],
+  )
+
+  const save = useMutation({
+    mutationFn: async (next: LabelSet) =>
+      PlotGeometryService.apiPlotGeometryVersionsSaveSaveVersion({
+        requestBody: {
+          directory,
+          state_snapshot: next as unknown as Record<string, unknown>,
+          name: `labels: ${Object.values(next.images).filter((i) => i.done).length} images`,
+        },
+      }),
+    onSuccess: () => setDirty(false),
+    onError: (e) =>
+      fail(e instanceof Error ? e.message : "Could not save labels"),
+  })
+
+  const markDoneAndGo = (d: number) => {
+    let next = set
+    if (img) {
+      next = {
+        ...set,
+        images: { ...set.images, [image]: { ...img, done: true } },
+      }
+      setSet(next)
+    }
+    if (dirty || img) save.mutate(next)
+    setSelected(null)
+    setIdx((i) => Math.max(0, Math.min(images.length - 1, i + d)))
+  }
+
+  // Keyboard: the whole flow without the mouse leaving the image.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return
+      const k = e.key.toLowerCase()
+      // ⌘Z / Ctrl+Z undo; ⇧⌘Z / Ctrl+Shift+Z / Ctrl+Y redo.
+      if ((e.metaKey || e.ctrlKey) && (k === "z" || k === "y")) {
+        e.preventDefault()
+        stepHistory(k === "z" && !e.shiftKey)
+        return
+      }
+      // Other shortcuts are plain keys: leave ⌘/Ctrl combinations to the browser.
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (busy) return
+      if (k === "b") setTool("box")
+      else if (k === "p") setTool("point")
+      else if (k === "v") setTool("select")
+      else if (k === "f") void findSimilar()
+      else if (k === "d") setDescribeOpen((v) => !v)
+      else if (k === "m") void segmentKept()
+      else if (e.key === "Enter")
+        setAnns((a) => a.map((x) => ({ ...x, status: "kept" as const })))
+      else if (e.key === "Escape")
+        setAnns((a) => a.filter((x) => x.status === "kept"))
+      else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+        setAnns((a) => a.filter((x) => x.id !== selected))
+        setSelected(null)
+      } else if (e.key === "ArrowRight") markDoneAndGo(1)
+      else if (e.key === "ArrowLeft") markDoneAndGo(-1)
+      else if (e.key === "+" || e.key === "=") zoomTo(scale * 1.5)
+      else if (e.key === "-" || e.key === "_") zoomTo(scale / 1.5)
+      else if (e.key === "0") zoomTo(null)
+      else if (/^[1-9]$/.test(e.key)) {
+        const c = set.classes[Number(e.key) - 1]
+        if (c) setCls(c)
+      } else return
+      e.preventDefault()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  })
+
+  // Drawing
+  const url = useAuthedBlobUrl(image ? `gemini/${image}` : null)
+  const imgRef = useRef<HTMLImageElement | null>(null)
+  const viewRef = useRef<HTMLDivElement | null>(null)
+  const [natural, setNatural] = useState<[number, number] | null>(null)
+  const [fit, setFit] = useState(1)
+  // null: fit the whole image in the view; else image pixels per screen pixel.
+  const [zoom, setZoom] = useState<number | null>(null)
+  const scale = zoom ?? fit
+  const [drag, setDrag] = useState<[number, number, number, number] | null>(
+    null,
+  )
+  const refit = useCallback(() => {
+    const v = viewRef.current
+    if (!v || !natural) return
+    setFit(
+      Math.min(
+        (v.clientWidth - 2) / natural[0],
+        (v.clientHeight - 2) / natural[1],
+      ),
+    )
+  }, [natural])
+  useEffect(() => {
+    refit()
+    const v = viewRef.current
+    if (!v) return
+    const ro = new ResizeObserver(refit)
+    ro.observe(v)
+    return () => ro.disconnect()
+  }, [refit])
+  const onImgLoad = () => {
+    const el = imgRef.current
+    if (!el) return
+    setNatural([el.naturalWidth, el.naturalHeight])
+    if (img && (!img.width || !img.height))
+      setSet((s) => ({
+        ...s,
+        images: {
+          ...s.images,
+          [image]: {
+            ...s.images[image],
+            width: el.naturalWidth,
+            height: el.naturalHeight,
+          },
+        },
+      }))
+  }
+  // Each image opens fitted to the view.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on image change only
+  useEffect(() => setZoom(null), [image])
+
+  /** Zoom to `next` (null: fit), keeping the point under (cx, cy) — view
+   *  coordinates, default the view's middle — where it is. */
+  const zoomTo = useCallback(
+    (next: number | null, cx?: number, cy?: number) => {
+      const v = viewRef.current
+      const target = next === null ? null : Math.min(8, Math.max(fit, next))
+      if (!v || target === null) {
+        setZoom(null)
+        return
+      }
+      const px = cx ?? v.clientWidth / 2
+      const py = cy ?? v.clientHeight / 2
+      // Image point under the pointer, before.
+      const imgEl = imgRef.current
+      const r = imgEl?.getBoundingClientRect()
+      const vr = v.getBoundingClientRect()
+      const ix = r ? (vr.left + px - r.left) / scale : 0
+      const iy = r ? (vr.top + py - r.top) / scale : 0
+      setZoom(target)
+      requestAnimationFrame(() => {
+        const r2 = imgRef.current?.getBoundingClientRect()
+        if (!r2) return
+        v.scrollLeft += r2.left + ix * target - (vr.left + px)
+        v.scrollTop += r2.top + iy * target - (vr.top + py)
+      })
+    },
+    [fit, scale],
+  )
+  // Ctrl/⌘ + wheel (or trackpad pinch) zooms at the pointer; a plain wheel scrolls.
+  useEffect(() => {
+    const v = viewRef.current
+    if (!v) return
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      const vr = v.getBoundingClientRect()
+      zoomTo(
+        scale * Math.exp(-e.deltaY * 0.0025),
+        e.clientX - vr.left,
+        e.clientY - vr.top,
+      )
+    }
+    v.addEventListener("wheel", onWheel, { passive: false })
+    return () => v.removeEventListener("wheel", onWheel)
+  }, [scale, zoomTo])
+  // Space + drag pans the zoomed image.
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const pan = useRef<[number, number, number, number] | null>(null)
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (
+        e.code === "Space" &&
+        !(t && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName))
+      ) {
+        e.preventDefault()
+        setSpaceHeld(true)
+      }
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") setSpaceHeld(false)
+    }
+    window.addEventListener("keydown", down)
+    window.addEventListener("keyup", up)
+    return () => {
+      window.removeEventListener("keydown", down)
+      window.removeEventListener("keyup", up)
+    }
+  }, [])
+  const toImage = (e: React.MouseEvent) => {
+    const r = (e.currentTarget as SVGElement).getBoundingClientRect()
+    return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale] as const
+  }
+
+  const kept = anns.filter((a) => a.status === "kept").length
+  const proposed = anns.length - kept
+  const doneCount = Object.values(set.images).filter((i) => i.done).length
+
+  const exportCoco = () => {
+    const blob = new Blob([JSON.stringify(toCoco(set), null, 1)], {
+      type: "application/json",
+    })
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = href
+    a.download = "annotations.coco.json"
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(href), 1000)
+  }
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="labeling">
+      <LabelingWorker experimentId={experimentId} />
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Button size="sm" variant="ghost" className="h-7" onClick={onClose}>
+          ← Back to results
+        </Button>
+        <span className="font-medium">
+          {image?.split("/").pop()} · {idx + 1} / {images.length}
+        </span>
+        <label className="text-muted-foreground flex items-center gap-1">
+          Set
+          <select
+            className="bg-background h-7 rounded border px-1 text-foreground"
+            value={setName}
+            data-testid="labeling-set"
+            title="Labelled sets of these images: one per object (flowers, pods…). Pick one, or start a new one."
+            onChange={(e) => {
+              if (
+                dirty &&
+                !window.confirm(
+                  "Leave this set without saving the current image?",
+                )
+              )
+                return
+              if (e.target.value !== "__new__") return onSetName(e.target.value)
+              const n = window
+                .prompt("Name of the new set (the object, e.g. flowers)")
+                ?.trim()
+                .replace(/[^A-Za-z0-9._-]+/g, "-")
+              if (n) onSetName(n)
+            }}
+          >
+            {setNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+            <option value="__new__">New set…</option>
+          </select>
+        </label>
+        <span className="text-muted-foreground">
+          {doneCount} labelled · {kept} kept
+          {proposed ? ` · ${proposed} proposed` : ""}
+        </span>
+        {busy && (
+          <span className="flex items-center gap-1 text-primary">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {busy}
+          </span>
+        )}
+        {!busy && failed && (
+          <span
+            className="text-destructive flex max-w-xl items-center gap-1"
+            data-testid="labeling-failed"
+            title={failed}
+          >
+            <span className="truncate">{failed}</span>
+            <button
+              type="button"
+              className="hover:text-foreground shrink-0 underline"
+              onClick={() => setFailed(null)}
+            >
+              dismiss
+            </button>
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7"
+            disabled={!doneCount}
+            onClick={exportCoco}
+            title="The kept objects of every saved image, as COCO JSON for training"
+          >
+            <Download className="mr-1 h-3.5 w-3.5" /> COCO
+          </Button>
+          <Button
+            size="sm"
+            className="h-7"
+            disabled={!doneCount}
+            onClick={() => {
+              if (dirty) save.mutate(set)
+              setTrainOpen(true)
+            }}
+            title="Fine-tune a detector on the saved images (runs on the ML worker)"
+            data-testid="labeling-train"
+          >
+            <GraduationCap className="mr-1 h-3.5 w-3.5" /> Train
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7"
+            disabled={save.isPending}
+            onClick={() => save.mutate(set)}
+          >
+            <Save className="mr-1 h-3.5 w-3.5" />
+            {save.isPending ? "Saving…" : dirty ? "Save" : "Saved"}
+          </Button>
+        </span>
+      </div>
+
+      {describeOpen && (
+        <form
+          className="bg-muted/40 flex flex-wrap items-start gap-2 rounded-md border p-2 text-xs"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void describe(describeText)
+          }}
+          data-testid="labeling-describe-row"
+        >
+          <select
+            className="bg-background h-7 rounded border px-1"
+            value={describeModel}
+            onChange={(e) => setDescribeModel(e.target.value)}
+            title="SAM 3 found the most cowpea pods and flowers in the lab's tests and draws outlines; OWLv2 draws boxes and needs no token"
+          >
+            {ZERO_SHOT_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <textarea
+            className="bg-background min-w-72 flex-1 rounded border px-2 py-1 font-mono"
+            rows={Math.min(3, Math.max(1, describeText.split("\n").length))}
+            value={describeText}
+            onChange={(e) => setDescribeText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                void describe(describeText)
+              }
+            }}
+            placeholder="pod: one mottled cowpea pod, not a leaf, not a stem"
+            title={PROMPT_TIPS.join("\n")}
+          />
+          <Button
+            size="sm"
+            className="h-7"
+            disabled={Boolean(busy)}
+            type="submit"
+          >
+            Find
+          </Button>
+          <span className="text-muted-foreground basis-full">
+            One object per line, as name: description; say what it is not (“…,
+            not a leaf”). Kept proposals carry to the next image.
+            {describeModel === "sam3" && !hfToken && !hasSam3Weights
+              ? " SAM 3 needs a Hugging Face token: save one in Settings → Keys & tokens (or upload sam3.pt to Models/weights)."
+              : ""}
+            {!hfToken && !hasSam3Weights && describeModel === "owlv2"
+              ? " Using OWLv2: SAM 3 (outlines, usually better) needs a Hugging Face token in Settings → Keys & tokens."
+              : ""}
+          </span>
+        </form>
+      )}
+
+      <div className="flex flex-wrap items-center gap-1 text-xs">
+        {(
+          [
+            [
+              "box",
+              "B",
+              "Box",
+              BoxSelect,
+              "Drag a box around one object: it is kept, and is an example for Find similar",
+            ],
+            [
+              "point",
+              "P",
+              "Click → outline",
+              MousePointer2,
+              "Click inside one object: its exact outline (SAM 2) is kept",
+            ],
+            [
+              "select",
+              "V",
+              "Select",
+              SquareDashedMousePointer,
+              "Click an object to select it (Delete removes it)",
+            ],
+          ] as const
+        ).map(([t, key, label, Icon, hint]) => (
+          <Button
+            key={t}
+            size="sm"
+            variant={tool === t ? "default" : "outline"}
+            className="h-7 px-2"
+            onClick={() => setTool(t)}
+            title={`${hint} (${key})`}
+          >
+            <Icon className="mr-1 h-3.5 w-3.5" /> {label}
+          </Button>
+        ))}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2"
+          disabled={Boolean(busy)}
+          onClick={() => void findSimilar()}
+          title={`Propose every object like the examples (F). Examples: every kept ${activeClass || "object"} box on this image, or, with none here yet, those of the latest image you labelled. One is enough to start; a few varied ones find more.`}
+          data-testid="labeling-find-similar"
+        >
+          <Sparkles className="mr-1 h-3.5 w-3.5" /> Find similar
+          <span className="text-muted-foreground ml-1 font-normal">
+            · {exampleNote}
+          </span>
+        </Button>
+        <Button
+          size="sm"
+          variant={describeOpen ? "default" : "outline"}
+          className="h-7 px-2"
+          onClick={() => {
+            setDescribeOpen((v) => !v)
+            if (!describeText)
+              setDescribeText(
+                `${activeClass}: one ${activeClass === "object" ? "plant" : activeClass}`,
+              )
+          }}
+          title="Describe the object in words: SAM 3 proposes every match, with outlines (D)"
+          data-testid="labeling-describe"
+        >
+          <Type className="mr-1 h-3.5 w-3.5" /> Describe
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2"
+          disabled={Boolean(busy) || !kept}
+          onClick={() => void segmentKept()}
+          title="Exact outlines (SAM 2) for every kept box that has none yet (M)"
+        >
+          <WandSparkles className="mr-1 h-3.5 w-3.5" /> Masks
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 w-7 p-0"
+          disabled={!canUndo}
+          onClick={() => stepHistory(true)}
+          title="Undo (⌘Z / Ctrl+Z)"
+          aria-label="Undo"
+          data-testid="label-undo"
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 w-7 p-0"
+          disabled={!canRedo}
+          onClick={() => stepHistory(false)}
+          title="Redo (⇧⌘Z / Ctrl+Y)"
+          aria-label="Redo"
+          data-testid="label-redo"
+        >
+          <Redo2 className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2"
+          disabled={!proposed}
+          onClick={() =>
+            setAnns((a) => a.map((x) => ({ ...x, status: "kept" as const })))
+          }
+          title="Keep every proposal (Enter)"
+        >
+          Keep all
+        </Button>
+        {selected && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2"
+            onClick={() => {
+              setAnns((a) => a.filter((x) => x.id !== selected))
+              setSelected(null)
+            }}
+          >
+            <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
+          </Button>
+        )}
+        <span className="text-muted-foreground mx-2">Class</span>
+        {set.classes.map((c, i) => (
+          <Button
+            key={c}
+            size="sm"
+            variant={activeClass === c ? "default" : "outline"}
+            className="h-7 px-2"
+            onClick={() => setCls(c)}
+            title={`${c} (${i + 1})`}
+          >
+            <span
+              className="mr-1 inline-block h-2 w-2 rounded-full"
+              style={{ background: classColour(c) }}
+            />
+            {c}
+          </Button>
+        ))}
+        <form
+          className="flex items-center gap-1"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const c = newClass.trim()
+            if (!c) return
+            setSet((s) =>
+              s.classes.includes(c) ? s : { ...s, classes: [...s.classes, c] },
+            )
+            setCls(c)
+            setNewClass("")
+          }}
+        >
+          <Input
+            value={newClass}
+            onChange={(e) => setNewClass(e.target.value)}
+            placeholder="new class"
+            className="h-7 w-28 text-xs"
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            type="submit"
+            aria-label="Add class"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </form>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1 text-xs">
+        <span className="text-muted-foreground mr-1">Zoom</span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 w-7 p-0"
+          aria-label="Zoom out"
+          title="Zoom out (−)"
+          onClick={() => zoomTo(scale / 1.5)}
+        >
+          <ZoomOut className="h-3.5 w-3.5" />
+        </Button>
+        <span className="w-12 text-center tabular-nums">
+          {Math.round(scale * 100)}%
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 w-7 p-0"
+          aria-label="Zoom in"
+          title="Zoom in (+)"
+          onClick={() => zoomTo(scale * 1.5)}
+        >
+          <ZoomIn className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant={zoom === null ? "secondary" : "outline"}
+          className="h-7"
+          title="Fit the whole image in the view (0)"
+          onClick={() => zoomTo(null)}
+        >
+          <Maximize className="mr-1 h-3.5 w-3.5" /> Fit
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7"
+          title="One image pixel per screen pixel"
+          onClick={() => zoomTo(1)}
+        >
+          100%
+        </Button>
+        <span className="text-muted-foreground ml-2">
+          Ctrl/⌘ + scroll zooms at the pointer · scroll or hold Space and drag
+          to move around
+        </span>
+      </div>
+
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Space-drag panning; the view also scrolls by keyboard and scrollbars */}
+      <div
+        ref={viewRef}
+        className="flex h-[70vh] overflow-auto rounded border bg-black"
+        style={{
+          cursor: spaceHeld ? (pan.current ? "grabbing" : "grab") : undefined,
+        }}
+        onMouseDownCapture={(e) => {
+          if (!spaceHeld || !viewRef.current) return
+          e.preventDefault()
+          e.stopPropagation()
+          const v = viewRef.current
+          pan.current = [e.clientX, e.clientY, v.scrollLeft, v.scrollTop]
+        }}
+        onMouseMoveCapture={(e) => {
+          if (!pan.current || !viewRef.current) return
+          e.stopPropagation()
+          const [x0, y0, l0, t0] = pan.current
+          viewRef.current.scrollLeft = l0 - (e.clientX - x0)
+          viewRef.current.scrollTop = t0 - (e.clientY - y0)
+        }}
+        onMouseUpCapture={(e) => {
+          if (!pan.current) return
+          e.stopPropagation()
+          pan.current = null
+        }}
+        onMouseLeave={() => {
+          pan.current = null
+        }}
+      >
+        {url ? (
+          // m-auto centres the image while it is smaller than the view, and
+          // lets it scroll from its edge once it is larger.
+          <div className="relative m-auto shrink-0">
+            <img
+              ref={imgRef}
+              src={url}
+              alt=""
+              onLoad={onImgLoad}
+              className="block max-w-none"
+              style={
+                natural
+                  ? { width: natural[0] * scale, height: natural[1] * scale }
+                  : { maxWidth: "100%", maxHeight: "100%" }
+              }
+              draggable={false}
+            />
+            {/* biome-ignore lint/a11y/useKeyWithClickEvents: drawing surface; every action has a key (B, P, F, M, Enter, arrows) */}
+            <svg
+              className="absolute inset-0 h-full w-full"
+              style={{ cursor: tool === "select" ? "default" : "crosshair" }}
+              onMouseDown={(e) => {
+                if (tool !== "box" || busy) return
+                const [x, y] = toImage(e)
+                setDrag([x, y, x, y])
+              }}
+              onMouseMove={(e) => {
+                if (!drag) return
+                const [x, y] = toImage(e)
+                setDrag([drag[0], drag[1], x, y])
+              }}
+              onMouseUp={() => {
+                if (!drag) return
+                const [x1, y1, x2, y2] = drag
+                setDrag(null)
+                if (Math.abs(x2 - x1) < 4 || Math.abs(y2 - y1) < 4) return
+                setAnns((a) => [
+                  ...a,
+                  {
+                    id: newId(),
+                    cls: activeClass,
+                    box: [
+                      Math.min(x1, x2),
+                      Math.min(y1, y2),
+                      Math.max(x1, x2),
+                      Math.max(y1, y2),
+                    ],
+                    status: "kept",
+                    source: "hand",
+                  },
+                ])
+              }}
+              onClick={(e) => {
+                if (tool !== "point" || busy) return
+                const [x, y] = toImage(e)
+                void segmentPoint(x, y)
+              }}
+            >
+              <title>Labels</title>
+              {anns.map((a) => {
+                const colour = classColour(a.cls)
+                const [x1, y1, x2, y2] = a.box.map((v) => v * scale)
+                const isSel = a.id === selected
+                return (
+                  // biome-ignore lint/a11y/noStaticElementInteractions: SVG shapes; the keyboard flow covers the same actions
+                  <g
+                    key={a.id}
+                    onClick={(e) => {
+                      if (tool !== "select") return
+                      e.stopPropagation()
+                      if (a.status === "proposed")
+                        setAnns((all) =>
+                          all.map((x) =>
+                            x.id === a.id ? { ...x, status: "kept" } : x,
+                          ),
+                        )
+                      else setSelected(isSel ? null : a.id)
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setAnns((all) => all.filter((x) => x.id !== a.id))
+                    }}
+                    style={{
+                      cursor: tool === "select" ? "pointer" : undefined,
+                    }}
+                  >
+                    {a.points && (
+                      <polygon
+                        points={a.points
+                          .map(([px, py]) => `${px * scale},${py * scale}`)
+                          .join(" ")}
+                        fill={colour}
+                        fillOpacity={a.status === "kept" ? 0.3 : 0.12}
+                        stroke="none"
+                      />
+                    )}
+                    <rect
+                      x={x1}
+                      y={y1}
+                      width={x2 - x1}
+                      height={y2 - y1}
+                      fill="transparent"
+                      stroke={colour}
+                      strokeWidth={isSel ? 3 : 2}
+                      strokeDasharray={
+                        a.status === "proposed" ? "5 4" : undefined
+                      }
+                    />
+                  </g>
+                )
+              })}
+              {drag && (
+                <rect
+                  x={Math.min(drag[0], drag[2]) * scale}
+                  y={Math.min(drag[1], drag[3]) * scale}
+                  width={Math.abs(drag[2] - drag[0]) * scale}
+                  height={Math.abs(drag[3] - drag[1]) * scale}
+                  fill="transparent"
+                  stroke={classColour(activeClass)}
+                  strokeWidth={2}
+                />
+              )}
+            </svg>
+          </div>
+        ) : (
+          <div className="flex h-64 items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-white/60" />
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 text-xs">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7"
+          disabled={idx === 0}
+          onClick={() => markDoneAndGo(-1)}
+        >
+          <ChevronLeft className="mr-1 h-3.5 w-3.5" /> Previous
+        </Button>
+        <Button
+          size="sm"
+          className="h-7"
+          disabled={idx >= images.length - 1}
+          onClick={() => markDoneAndGo(1)}
+        >
+          Save &amp; next <ChevronRight className="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {trainOpen && (
+        <TrainModelDialog
+          open={trainOpen}
+          onOpenChange={setTrainOpen}
+          set={set}
+          directory={directory}
+          experimentId={experimentId}
+          defaultName={`${set.classes.join(" ") || (setName !== "default" ? setName : "objects")} detector`}
+          onUse={onUseTrained}
+        />
+      )}
+      <details
+        className="text-muted-foreground rounded-md border px-3 py-2 text-xs"
+        data-testid="labeling-help"
+      >
+        <summary className="text-foreground cursor-pointer font-medium">
+          How labelling works
+        </summary>
+        <ol className="mt-2 list-decimal space-y-1.5 pl-4">
+          <li>
+            <span className="text-foreground">Class.</span> Pick the class you
+            are labelling (or add one; keys 1–9 switch). Find similar and the
+            examples work per class.
+          </li>
+          <li>
+            <span className="text-foreground">One example (B).</span> Drag a box
+            around one object. It is kept (solid) and is an example.
+          </li>
+          <li>
+            <span className="text-foreground">Find similar (F).</span> Uses{" "}
+            <em>every</em> kept box of the class on this image together as
+            examples. One is enough to start. If it misses some (other sizes,
+            angles, light), box one or two of those as well and run it again:
+            more varied examples find more. With no example on this image yet,
+            it uses the kept boxes of the class from the latest image you
+            labelled. The button shows which it will use.
+          </li>
+          <li>
+            <span className="text-foreground">Review.</span> Proposals are
+            dashed. Enter keeps them all; click one to keep it, right-click to
+            drop it. Select (V) a kept one and Delete to remove it.
+          </li>
+          <li>
+            <span className="text-foreground">Outlines.</span> Click → outline
+            (P): click inside one object for its exact outline. Masks (M):
+            outlines for every kept box at once. Boxes alone are enough to train
+            a detector; outlines are for segmentation.
+          </li>
+          <li>
+            <span className="text-foreground">Next (→).</span> Saves this image
+            and moves on. The next image gets proposals from this one's examples
+            by itself: check them, fix, next.
+          </li>
+          <li>
+            <span className="text-foreground">Or describe it (D).</span> Write
+            what to find (“pod: one mottled cowpea pod, not a leaf”): SAM 3
+            proposes every match with outlines, here and on the next images.
+            Review as above. Good for a first pass; Find similar for what it
+            misses.
+          </li>
+          <li>
+            <span className="text-foreground">Train.</span> Fine-tunes a YOLO
+            model on the saved images, from a general or agricultural starting
+            model. With few labels choose “Few labels”. The result appears under
+            “Your weights” in every pipeline. COCO exports the same set for
+            training elsewhere.
+          </li>
+        </ol>
+        <p className="mt-2">
+          Made a mistake? ⌘Z / Ctrl+Z undoes the last change to this image's
+          boxes (drawn, deleted, kept or dropped); ⇧⌘Z / Ctrl+Y redoes it.
+        </p>
+      </details>
+    </div>
+  )
+}

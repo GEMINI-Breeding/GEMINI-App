@@ -2,15 +2,17 @@
  * React Query hooks for reference dataset access in dashboard widgets.
  */
 
-import { useQuery, useQueries } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
+import { getToken } from "@/lib/auth"
 
 function apiUrl(path: string): string {
-  const base = (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
+  const base =
+    (window as any).__GEMI_BACKEND_URL__ ?? import.meta.env.VITE_API_URL ?? ""
   return base ? `${base}${path}` : path
 }
 
 function authHeaders() {
-  const token = localStorage.getItem("access_token") || ""
+  const token = getToken()
   return { Authorization: `Bearer ${token}` }
 }
 
@@ -27,13 +29,19 @@ async function get<T>(path: string): Promise<T> {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Mirrors `ReferenceDatasetOutput` in the backend's rest_api/models.py.
+ * Note `dataset_date`, not `date` — the old `/api/v1` surface used `date`,
+ * and this type still said so while pointing at a 404, so the mismatch was
+ * invisible.
+ */
 export interface ReferenceDataset {
   id: string
   name: string
   experiment: string | null
   location: string | null
   population: string | null
-  date: string | null
+  dataset_date: string | null
   plot_count: number
   trait_columns: string[]
   created_at: string
@@ -59,13 +67,23 @@ export interface ReferenceAggregate {
 
 // ── Hooks ──────────────────────────────────────────────────────────────────────
 
-/** All reference datasets (global list — used for the config UI picker). */
-export function useReferenceDatasets() {
+/**
+ * All reference datasets (global list — used for the config UI picker).
+ *
+ * These hooks used to call the old backend's `/api/v1/reference-data/...`
+ * paths, which 404 on GEMINIbase, so the query was disabled by default to
+ * keep the dashboard mount clean — reference data could be uploaded but was
+ * readable nowhere. The routes do exist, just at `/api/reference_data/`
+ * with an `/id/` segment, so they are now repointed and enabled.
+ */
+export function useReferenceDatasets(options: { enabled?: boolean } = {}) {
   return useQuery<ReferenceDataset[]>({
     queryKey: ["reference-datasets"],
-    queryFn: () => get<ReferenceDataset[]>("/api/v1/reference-data/"),
+    queryFn: () => get<ReferenceDataset[]>("/api/reference_data/"),
+    enabled: options.enabled ?? true,
     staleTime: 5 * 60_000,
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    retry: (failureCount, error: any) =>
+      error?.status !== 404 && failureCount < 2,
   })
 }
 
@@ -75,11 +93,12 @@ export function useReferencePlots(datasetId: string | null) {
     queryKey: ["reference-plots-all", datasetId],
     queryFn: () =>
       get<{ data: ReferencePlotRow[]; count: number }>(
-        `/api/v1/reference-data/${datasetId}/plots-all`
+        `/api/reference_data/id/${datasetId}/plots-all`,
       ).then((r) => r.data),
     enabled: !!datasetId,
     staleTime: 10 * 60_000,
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    retry: (failureCount, error: any) =>
+      error?.status !== 404 && failureCount < 2,
   })
 }
 
@@ -87,33 +106,39 @@ export function useReferencePlots(datasetId: string | null) {
 export function useReferenceAggregate(
   datasetId: string | null,
   metric: string | null,
-  aggregation: "avg" | "min" | "max" = "avg"
+  aggregation: "avg" | "min" | "max" = "avg",
 ) {
   return useQuery<ReferenceAggregate>({
     queryKey: ["reference-aggregate", datasetId, metric, aggregation],
     queryFn: () =>
       get<ReferenceAggregate>(
-        `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric!)}&aggregation=${aggregation}`
+        `/api/reference_data/id/${datasetId}/aggregate?metric=${encodeURIComponent(metric!)}&aggregation=${aggregation}`,
       ),
     enabled: !!datasetId && !!metric,
     staleTime: 10 * 60_000,
-    retry: (failureCount, error: any) => error?.status !== 404 && failureCount < 2,
+    retry: (failureCount, error: any) =>
+      error?.status !== 404 && failureCount < 2,
   })
 }
 
 /** Batch-fetch aggregates for multiple (datasetId, metric, aggregation) combos. */
 export function useMultiReferenceAggregates(
-  requests: Array<{ datasetId: string; metric: string; aggregation: "avg" | "min" | "max" }>
+  requests: Array<{
+    datasetId: string
+    metric: string
+    aggregation: "avg" | "min" | "max"
+  }>,
 ) {
   return useQueries({
     queries: requests.map(({ datasetId, metric, aggregation }) => ({
       queryKey: ["reference-aggregate", datasetId, metric, aggregation],
       queryFn: () =>
         get<ReferenceAggregate>(
-          `/api/v1/reference-data/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`
+          `/api/reference_data/id/${datasetId}/aggregate?metric=${encodeURIComponent(metric)}&aggregation=${aggregation}`,
         ),
       staleTime: 10 * 60_000,
-      retry: (failureCount: number, error: any) => error?.status !== 404 && failureCount < 2,
+      retry: (failureCount: number, error: any) =>
+        error?.status !== 404 && failureCount < 2,
     })),
   })
 }
