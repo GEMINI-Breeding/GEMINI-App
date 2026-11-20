@@ -69,3 +69,15 @@ assert hook.decide({"tool_name": "mcp__gemi-agent__hpc", "tool_input": {"action"
 assert hook.decide({"tool_name": "mcp__gemi-agent__status", "tool_input": {}}) is None
 assert hook.decide({"tool_name": "Read", "tool_input": {"file_path": "x"}}) is None
 print("hook ok")
+
+# ── the guard's own files ───────────────────────────────────────────────────
+for f in ("/repo/.claude/settings.json", "C:\\repo\\.claude\\settings.local.json", "agent/work/guard-auto.json",
+          "scripts/hooks/remote_guard.py", "/x/agent/gemi_agent/policy.py"):
+    assert hook.decide({"tool_name": "Write", "tool_input": {"file_path": f}})[0] == "ask", f
+    assert hook.decide({"tool_name": "Edit", "tool_input": {"file_path": f}})[0] == "ask", f
+for f in ("README.md", "agent/gemi_agent/tools.py", ".claude/skills/contribute/SKILL.md", "my_policy.py"):
+    assert hook.decide({"tool_name": "Write", "tool_input": {"file_path": f}}) is None, f
+assert asks("echo '{\"until\": 9999999999}' > agent/work/guard-auto.json")
+assert asks("python -c \"open('.claude/settings.json','w').write('{}')\"")
+assert sh("cat agent/work/guard-auto.json") is None and sh("git diff .claude/settings.json") is None
+print("guard files ok")

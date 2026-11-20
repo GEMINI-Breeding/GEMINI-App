@@ -3,7 +3,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
-# Converts the stack's Docker images to .sif files (skips ones already there).
+# Converts the stack's Docker images to .sif files (skips ones already there). Third-party images
+# are pinned by digest; GEMINIbase's are tagged by the commit they were built from.
 # Submitted by `gemi-hpc pull`, which adds --partition/--account/--output and
 # exports GEMI_HPC_ROOT, GEMI_IMAGE_REGISTRY, GEMI_IMAGE_VERSION.
 
@@ -23,7 +24,7 @@ worker-geo=$R/geminibase-worker-geo:$V
 worker-odm=$R/geminibase-worker-odm:$V
 worker-ml=$R/geminibase-worker-ml:$V
 worker-gwas=$R/geminibase-worker-gwas:$V
-titiler=ghcr.io/developmentseed/titiler:2.0.1
+titiler=ghcr.io/developmentseed/titiler:2.0.1@sha256:539a00dc24f17df686a546c9f9a781602d848c7c4a19f846554650362980440f
 nodeodm=opendronemap/nodeodm@sha256:cb07d06e21fd6189cfad287c6fedfa0b72568100355635cd9035cb86eed42ee2
 "
 failed=0

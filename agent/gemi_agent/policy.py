@@ -97,6 +97,22 @@ def _cli_args(text: str) -> dict:
     return out
 
 
+# Files that decide what an agent may do without asking: the guard hook and its settings, the
+# rules themselves, and the switch that turns the questions off. An agent editing them would be
+# answering its own questions, so editing them asks the person.
+GUARD_FILES = re.compile(r"(^|[\\/])(\.claude[\\/]settings(\.local)?\.json|guard-auto\.json|remote_guard\.py|"
+                         r"gemi_agent[\\/]policy\.py)$")
+_GUARD_WORDS = re.compile(r"guard-auto\.json|\.claude[\\/]settings|remote_guard\.py|gemi_agent[\\/]policy\.py")
+
+
+def file_decision(path: str) -> Optional[tuple[str, str]]:
+    """("ask", reason) for writing a file that governs the guard; None for any other file."""
+    if GUARD_FILES.search(str(path or "").strip()):
+        return "ask", ("this file decides what the agent may do without asking (the guard and its "
+                       "settings); changing it needs your approval")
+    return None
+
+
 def shell_decision(command: str, host: Optional[str] = None,
                    site_rules: Optional[list[str]] = None) -> Optional[tuple[str, str]]:
     """("allow" | "ask" | "deny", reason) for a shell command that touches the
@@ -105,6 +121,10 @@ def shell_decision(command: str, host: Optional[str] = None,
     `site_rules` names the rules the cluster's administrators publish for agents
     (skills the site publishes). When there are some, those rules govern: raw
     remote and Slurm commands ask the person instead of being denied."""
+    if _GUARD_WORDS.search(command) and not re.match(r"^\s*(cat|less|head|tail|grep|ls|git (diff|log|show|status))\b",
+                                                    command):
+        return "ask", ("the command touches the guard or its settings (what the agent may do without "
+                       "asking); needs your approval")
     m = _GEMI_HPC.match(command)
     if m:
         sub = m.group("sub") or "help"

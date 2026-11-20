@@ -7,7 +7,8 @@ cluster's administrators publish their own rules for agents (SITE_RULES in its
 launch.conf, or found by `gemi-hpc site-skills`): then those rules govern and raw
 commands ask the person instead. The same rules
 ask before the agent tools (CLI or MCP) that change the cluster session or delete
-data. Everything else is left alone.
+data, and before edits to the guard's own files and settings (so an agent cannot
+switch its questions off by itself). Everything else is left alone.
 
 The rules themselves live in agent/gemi_agent/policy.py, shared with the in-app
 agent, so a Claude Code session and the app's own agent ask for the same things.
@@ -33,9 +34,9 @@ def _policy():
 
 def _active() -> str:
     try:
-        return (REPO / "hpc" / "clusters" / "active").read_text().strip() or "farm"
+        return (REPO / "hpc" / "clusters" / "active").read_text().strip()
     except OSError:
-        return "farm"
+        return ""
 
 
 def _conf(key: str) -> str | None:
@@ -74,6 +75,8 @@ def decide(data: dict) -> tuple[str, str] | None:
     args = data.get("tool_input") or {}
     if tool in ("Bash", "PowerShell"):
         return policy.shell_decision(str(args.get("command") or ""), site_host(), site_rules())
+    if tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+        return policy.file_decision(str(args.get("file_path") or args.get("notebook_path") or ""))
     m = re.match(r"^mcp__gemi[-_]agent__(.+)$", tool)
     if m:
         why = policy.tool_approval(m.group(1), args)

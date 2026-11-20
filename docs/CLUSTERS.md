@@ -12,6 +12,24 @@ With a cluster, the whole stack runs as Slurm jobs, driven from this computer ov
 
 These are speed bumps against an agent running away with shared compute without you noticing, not a wall against someone who sets out to get around them.
 
+- **Job limits.** Each job is held to 32 CPUs, 128 GB, 1 GPU and 2 days, at most 10 jobs, and all GEMI jobs together to 128 CPUs, 512 GB and 4 GPUs. A cluster's `launch.conf` can lower these. Raising them is for a person: write the same settings (`GEMI_MAX_CPUS=64`, `GEMI_MAX_TOTAL_GPUS=8`, …) into `limits.conf` in the GEMI folder on the cluster. That file is never copied from your computer, so no tool there can raise them.
+
+## Optional: a key that can only reach the gate
+
+The gate keeps GEMI's own commands to its menu, but an agent holding your SSH key could still log in and run anything. For a hard limit, give GEMI its own key and restrict it on the cluster to the gate:
+
+1. Set GEMI up once as usual (the setup survey and the first `sync` need an unrestricted login).
+2. Make a key for GEMI on your computer: `ssh-keygen -t ed25519 -f ~/.ssh/gemi_ed25519`.
+3. On the cluster, add its public key to `~/.ssh/authorized_keys` on one line, with your GEMI folder:
+
+   ```
+   command="/path/to/GEMI/folder/hpc/remote/gemi-gate",restrict,port-forwarding ssh-ed25519 AAAA… gemi
+   ```
+
+4. In GEMI, Settings → Compute, change the key to `~/.ssh/gemi_ed25519`.
+
+With that key, every login runs the gate (its menu, limits and log), and port forwards for the app's tunnels still work. Anything else is refused.
+
 ## From a terminal
 
 With the repository checked out:

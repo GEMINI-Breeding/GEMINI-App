@@ -32,7 +32,7 @@ WORKER_RES_ml="cpus=8 mem=32G gpus=0"
 LOCAL_API_PORT=auto
 
 # Local LLM for the agent (vLLM, OpenAI-compatible API).
-LLM_IMAGE=vllm/vllm-openai:latest
+LLM_IMAGE=vllm/vllm-openai:v0.31.0   # a tested version, not "latest"
 LLM_MODEL=google/gemma-4-31B-it-qat-w4a16-ct
 LLM_NAME=gemma4
 LLM_TRY="gpu-part:labgrp:gpu:1 shared:general:gpu:1 gpu-part2:labgrp:gpu:1"
@@ -42,13 +42,18 @@ LLM_ARGS='--max-model-len 32768 --gpu-memory-utilization 0.92'
 LLM_PULL_PARTITION=gpu-part
 LLM_PULL_ACCOUNT=labgrp
 
-# Job limits the gate enforces (defaults shown). Lower them freely; raising them, or
-# GEMI_ALLOW_UNSAFE=1, is a deliberate choice for a person to make, never a tool.
+# Job limits the gate enforces (defaults shown): per job, and for all GEMI jobs together.
+# Here they can only be LOWERED. To raise them, or to switch the checks off (GEMI_ALLOW_UNSAFE=1),
+# a person writes the same lines into <GEMI_HPC_ROOT>/limits.conf on the cluster by hand:
+# that file is never synced from here, so no tool on this computer can raise them.
 # GEMI_MAX_CPUS=32
 # GEMI_MAX_MEM_GB=128
 # GEMI_MAX_GPUS=1
 # GEMI_MAX_TIME=2-00:00:00
 # GEMI_MAX_JOBS=10
+# GEMI_MAX_TOTAL_CPUS=128
+# GEMI_MAX_TOTAL_MEM_GB=512
+# GEMI_MAX_TOTAL_GPUS=4
 # More placements the Compute panel and the agent may use ("partition:account ..."):
 # GEMI_EXTRA_PLACES=""
 

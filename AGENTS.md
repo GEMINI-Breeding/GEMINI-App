@@ -26,6 +26,14 @@ In short:
 - Never push to the default branch, merge your own pull request, or change
   tests or CI to make them pass.
 
+## Shared clusters
+
+Reach a cluster only through `bash hpc/gemi-hpc <command>` (or the agent's `hpc` tools), never with
+raw `ssh`, `scp`, `rsync` or Slurm commands: the cluster's storage is shared and often not backed
+up, and `gemi-hpc` runs everything through a gate with a fixed menu and job limits. Ask the person
+before commands that change the cluster session (`sync`, `up`, `down`, `worker`, `llm`). Where the
+cluster's administrators publish rules for agents (`bash hpc/gemi-hpc site-skills`), follow them.
+
 ## Layout
 
 | Path | What it is |

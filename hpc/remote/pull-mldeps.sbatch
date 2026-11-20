@@ -23,10 +23,12 @@ rm -rf "$NEW"; mkdir -p "$NEW" "$DATA/pip-cache"
 REQ=$SRC/gemini/workers/ml/requirements-models.txt
 log "installing model backends into $NEW (then swapped in for $DEPS)"
 apptainer exec --cleanenv --no-home --writable-tmpfs -B "$NEW:/pydeps" -B "$DATA/pip-cache:/pipcache" \
-  -B "$REQ:/requirements-models.txt:ro" --env "PIP_CACHE_DIR=/pipcache,PYTHONNOUSERSITE=1" \
+  -B "$REQ:/requirements-models.txt:ro" -B "$HPC/remote/mldeps.lock:/mldeps.lock:ro" \
+  --env "PIP_CACHE_DIR=/pipcache,PYTHONNOUSERSITE=1,PIP_CONSTRAINT=/mldeps.lock" \
   "$IMAGES/worker-ml.sif" bash -c '
     set -e
-    # numpy/Pillow/opencv stay the ones in the image (the worker pins them).
+    # numpy/Pillow/opencv stay the ones in the image (the worker pins them). Every other version
+    # comes from mldeps.lock (PIP_CONSTRAINT): the set known to work, not whatever is newest today.
     pip install --no-warn-script-location --target /pydeps --upgrade \
         --extra-index-url https://download.pytorch.org/whl/cu124 torch torchvision
     # numpy<2 alongside: the image keeps numpy 1.x, so every package must be a

@@ -73,17 +73,20 @@ if [ "${1:-}" = join ]; then
     for k in "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ecdsa"; do [ -f "$k" ] && { key=$k; break; }; done
   fi
   [ -n "$key" ] && [ -f "$key" ] || { echo "no SSH key found${key:+ at $key}: give it with -i keyfile" >&2; exit 2; }
+  case "$key$HOME" in *[\'\"\$\`]*) echo "the key's path has a quote or \$ in it: move the key elsewhere" >&2; exit 2 ;; esac
   known="$HOME/.ssh/known_hosts"
   # The first login to this host records its key (accept-new); after that a changed key is refused.
   conf=$(ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new \
            -o UserKnownHostsFile="$known" "$login" "$root/hpc/remote/gemi-gate conf" 2>&1 | sed -n '/^@@gemi@@$/,$p' | sed 1d)
+  # Sourced here later: only plain settings lines, no command substitution or backquotes.
+  conf=$(printf '%s\n' "$conf" | grep -E '^([A-Za-z_][A-Za-z0-9_]*=|#|$)' | grep -v -e '\$(' -e '`')
   printf '%s\n' "$conf" | grep -q '^CORE_PARTITION=' || {
     echo "could not read the settings from $login:$root (is the folder right, and was it synced from the other computer?)" >&2
     printf '%s\n' "$conf" | tail -3 >&2; exit 1; }
   mkdir -p "$CLUSTERS/$name"
   [ -f "$CLUSTERS/$name/launch.conf" ] && cp "$CLUSTERS/$name/launch.conf" "$CLUSTERS/$name/launch.conf.bak"
   { echo "# Joined $(date +%Y-%m-%d) from the settings on $login (gemi-hpc join); this computer's own login below."
-    echo "HPC_HOST=$login"; echo "HPC_KEY=$key"; echo "HPC_KNOWN_HOSTS=$known"; echo "GEMI_HPC_ROOT=$root"; echo
+    echo "HPC_HOST=$login"; echo "HPC_KEY='$key'"; echo "HPC_KNOWN_HOSTS='$known'"; echo "GEMI_HPC_ROOT=$root"; echo
     printf '%s\n' "$conf"; } > "$CLUSTERS/$name/launch.conf"
   echo "$name" > "$CLUSTERS/active"
   echo "joined: cluster '$name' ($login, $root) is active here. Next: gemi-hpc status, then gemi-hpc app"
@@ -393,6 +396,7 @@ case "$cmd" in
     done
     [ "$ok" = 1 ] && echo "gate       refuses commands off its menu (4 probes)" || exit 1
     echo "limits     $(gate limits | tr '\n' ' ')"
+    echo "cluster:"; gate survey 2>/dev/null | sed 's/^/  /' || echo "  (survey needs a gate from this version: gemi-hpc sync)"
     rules=$(gate site-skills 2>/dev/null | cut -d'|' -f1 | tr '\n' ' ')
     echo "site rules ${rules:-none found (set SITE_SKILL_DIRS in launch.conf if the admins publish skills elsewhere)}"
     echo "in flight:"; gate status | sed 's/^/  /'

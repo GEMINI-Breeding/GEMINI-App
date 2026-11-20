@@ -13,7 +13,7 @@
 #
 # Menu (arguments in <> are checked; [where=partition:account[:gres]] must be
 # a placement named in the cluster's launch.conf):
-#   ps | status | session | login | limits | selftest
+#   ps | status | session | login | limits | survey | selftest
 #   logs <name> [lines]
 #   core-submit [where=…] | core-state | core-log | down
 #   worker <amiga|stitch|geo|ml|odm|gwas> [where=…] | stop-worker <name>
@@ -162,8 +162,32 @@ main() {
       ;;
     limits)
       nwords 0 0; audit ALLOW
-      echo "max_cpus=$GEMI_MAX_CPUS max_mem_gb=$GEMI_MAX_MEM_GB max_gpus=$GEMI_MAX_GPUS max_time=$GEMI_MAX_TIME max_jobs=$GEMI_MAX_JOBS allow_unsafe=${GEMI_ALLOW_UNSAFE:-0}"
+      effective_limits
+      echo "max_cpus=$L_MAX_CPUS max_mem_gb=$L_MAX_MEM_GB max_gpus=$L_MAX_GPUS max_time=$L_MAX_TIME max_jobs=$L_MAX_JOBS allow_unsafe=$L_UNSAFE"
+      echo "total_cpus=$L_MAX_TOTAL_CPUS total_mem_gb=$L_MAX_TOTAL_MEM_GB total_gpus=$L_MAX_TOTAL_GPUS in_use=$(gemi_usage | awk '{print $1 "cpus," $2 "G," $3 "gpus"}')"
+      echo "raised_by=$([ -f "$ROOT/limits.conf" ] && echo "$ROOT/limits.conf" || echo none)"
       echo "places=$(places | tr '\n' ' ')"
+      ;;
+    survey)
+      # Read-only, light (login node): what this cluster offers that GEMI's jobs depend on, so a
+      # missing piece shows before the first job fails on it.
+      nwords 0 0; audit ALLOW
+      local rt="none" v
+      if command -v apptainer >/dev/null 2>&1 || module load apptainer >/dev/null 2>&1; then
+        rt="apptainer $(apptainer --version 2>/dev/null | awk '{print $NF}')"
+      elif command -v singularity >/dev/null 2>&1 || module load singularity >/dev/null 2>&1; then
+        rt="singularity $(singularity --version 2>/dev/null | awk '{print $NF}') (used in apptainer's place; 3.6+ needed)"
+      fi
+      echo "runtime=$rt"
+      echo "python3=$(command -v python3 >/dev/null && python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' || echo missing)"
+      echo "module=$(type module >/dev/null 2>&1 && echo yes || echo no)"
+      echo "scrontab=$(command -v scrontab >/dev/null && echo yes || echo 'no (the keeper cannot run)')"
+      v=$(sacctmgr -nP show assoc user="$USER" format=account,partition,qos 2>/dev/null | head -20 | tr '\n' ' ')
+      echo "associations=${v:-unknown}"
+      echo "qos_required=$(scontrol show config 2>/dev/null | grep -i '^AccountingStorageEnforce' | grep -qi qos && echo 'maybe (AccountingStorageEnforce includes qos)' || echo no)"
+      echo "internet_login=$(curl -s -m 8 -o /dev/null -w '%{http_code}' https://ghcr.io/v2/ 2>/dev/null | grep -q '^[234]' && echo yes || echo no)"
+      echo "tmp_free_login=$(df -Ph /tmp 2>/dev/null | awk 'NR==2 {print $4}')"
+      echo "note=compute nodes may lack internet (image and model downloads then fail) and may have little /tmp (the database runs there): the pull jobs and the core's log say so"
       ;;
     selftest)
       # Proves the gate refuses: run by `gemi-hpc doctor`, which also sends a command that must fail.

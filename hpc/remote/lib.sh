@@ -40,19 +40,23 @@ if is_owner && ! shared; then chmod 700 "$RUN" "$DATA" 2>/dev/null || true; fi  
 share_perms() {
   is_owner || return 0
   if shared; then
-    mkdir -p "$RUN/share" "$DATA/models" "$INCOMING"
+    mkdir -p "$RUN/share" "$DATA/models" "$DATA/members" "$INCOMING"
     # Group permissions only help files that belong to the group: the owner's own files may
     # carry the owner's personal group (a folder without setgid). Give them the GEMI folder's.
     local grp; grp=$(stat -c %G "$GEMI_HPC_ROOT")
-    chgrp "$grp" "$RUN" "$DATA" "$RUN/share" "$LOGS" "$DATA/models" "$INCOMING" \
+    chgrp "$grp" "$RUN" "$DATA" "$RUN/share" "$LOGS" "$DATA/models" "$DATA/members" "$INCOMING" \
       "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
     chgrp -R "$grp" "$IMAGES" "$HPC" "$SRC" "$DATA/models" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
     chmod 750 "$RUN" "$DATA"
     chmod 640 "$RUN/session.env" "$RUN/stack.env" "$SHARE_CONF" 2>/dev/null
     chmod 600 "$RUN/secrets.env" "$RUN/api.env" "$RUN/rclone.conf" "$RUN/llm.env" 2>/dev/null
-    chmod 2770 "$RUN/share" "$LOGS" "$DATA/models" "$INCOMING"
+    chmod 2770 "$RUN/share" "$LOGS" "$INCOMING"
+    # The owner's model cache: the group may read it, never write it. Model weights can run code
+    # when loaded, so the owner's ML worker must load only what the owner's jobs put there. A
+    # member's worker keeps its own cache under data/members/<user> (sticky: theirs alone).
+    chmod 2750 "$DATA/models"; chmod 3770 "$DATA/members"
     touch "$LOGS/gate.log"; chgrp "$grp" "$LOGS/gate.log" 2>/dev/null; chmod 660 "$LOGS/gate.log"
-    chmod -R g+rwX "$DATA/models" 2>/dev/null
+    chmod -R g-w,g+rX "$DATA/models" 2>/dev/null
     chmod -R g+rX "$IMAGES" "$HPC" "$SRC" "$DATA/pydeps" "$(dirname "$RCLONE")" 2>/dev/null
     chmod o-rwx "$GEMI_HPC_ROOT"
   else
@@ -64,7 +68,21 @@ share_perms() {
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
-load_apptainer() { command -v apptainer >/dev/null 2>&1 || module load apptainer; }
+# Apptainer, or on clusters that still have only Singularity (3.6 or newer), a stand-in that
+# runs it: the same commands and flags, with APPTAINERENV_* passed on as SINGULARITYENV_*.
+load_apptainer() {
+  command -v apptainer >/dev/null 2>&1 && return 0
+  module load apptainer >/dev/null 2>&1 && command -v apptainer >/dev/null 2>&1 && return 0
+  if command -v singularity >/dev/null 2>&1 || { module load singularity >/dev/null 2>&1 && command -v singularity >/dev/null 2>&1; }; then
+    apptainer() {
+      local v
+      for v in $(compgen -e | grep '^APPTAINERENV_' || true); do export "SINGULARITYENV_${v#APPTAINERENV_}=${!v}"; done
+      singularity "$@"
+    }
+    return 0
+  fi
+  log "neither apptainer nor singularity found (module load apptainer failed too)"; return 1
+}
 
 # A TCP port nobody is listening on (nodes are shared with other users).
 free_port() {
@@ -98,11 +116,12 @@ wait_for() {  # wait_for <seconds> <description> <command...>
 }
 
 # ── limits ───────────────────────────────────────────────────────────────────
-# The cluster is shared: no GEMI job may ask for more than this, whatever a
-# launch.conf, the app or an agent says. A cluster's launch.conf may set its
-# own (lower or higher) values; GEMI_ALLOW_UNSAFE=1 there switches the checks
-# off, and is meant to be written by a person on purpose, never by a tool.
-: "${GEMI_MAX_CPUS:=32}" "${GEMI_MAX_MEM_GB:=128}" "${GEMI_MAX_GPUS:=1}" "${GEMI_MAX_TIME:=2-00:00:00}" "${GEMI_MAX_JOBS:=10}"
+# The cluster is shared: no GEMI job may ask for more than this, and all of this tooling's jobs
+# together no more than the totals, whatever a launch.conf, the app or an agent says.
+# launch.conf can only LOWER these (it is written by tools and synced from a computer). Raising
+# them, or GEMI_ALLOW_UNSAFE=1 (no checks), is read only from <GEMI folder>/limits.conf: a file
+# on the cluster that sync never touches, for a person to write there by hand.
+GEMI_DEFAULT_LIMITS="GEMI_MAX_CPUS=32 GEMI_MAX_MEM_GB=128 GEMI_MAX_GPUS=1 GEMI_MAX_TIME=2-00:00:00 GEMI_MAX_JOBS=10 GEMI_MAX_TOTAL_CPUS=128 GEMI_MAX_TOTAL_MEM_GB=512 GEMI_MAX_TOTAL_GPUS=4"
 
 _mem_gb() {  # 56G | 16000M | 1T -> whole GB, rounded up
   local v=${1%[bB]}; local n=${v%[kKmMgGtT]} u=${v: -1}
@@ -117,18 +136,60 @@ _seconds() {  # [D-]HH:MM:SS | MM:SS | minutes -> seconds
   echo $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
 }
 
+# effective_limits: sets L_<NAME> for each limit: launch.conf's value where it is lower than the
+# default, the default otherwise; limits.conf's values (a person's, on the cluster) over both.
+# L_UNSAFE=1 only from limits.conf.
+effective_limits() {
+  local kv name def cur
+  for kv in $GEMI_DEFAULT_LIMITS; do
+    name=${kv%%=*}; def=${kv#*=}; cur=${!name:-$def}
+    case "$name" in
+      GEMI_MAX_TIME) [ "$(_seconds "$cur")" -le "$(_seconds "$def")" ] || cur=$def ;;
+      *) [[ "$cur" =~ ^[0-9]+$ ]] && [ "$cur" -le "$def" ] || cur=$def ;;
+    esac
+    printf -v "L_${name#GEMI_}" '%s' "$cur"
+  done
+  L_UNSAFE=0
+  local f="$GEMI_HPC_ROOT/limits.conf" line k v
+  if [ -f "$f" ] && [ "$(stat -c %U "$f")" = "$OWNER" ]; then
+    while IFS= read -r line; do
+      [[ "$line" =~ ^(GEMI_MAX_[A-Z_]+|GEMI_ALLOW_UNSAFE)=([0-9:-]+)$ ]] || continue
+      k=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+      if [ "$k" = GEMI_ALLOW_UNSAFE ]; then L_UNSAFE=$v; else printf -v "L_${k#GEMI_}" '%s' "$v"; fi
+    done < "$f"
+  fi
+}
+
+# gemi_usage: CPUs, GB of memory and GPUs held or asked for by this user's gemi-* jobs.
+gemi_usage() {
+  squeue -h -u "$USER" -o '%j|%C|%m|%b|%D' 2>/dev/null | awk -F'|' '
+    $1 ~ /^gemi-/ {
+      c += $2
+      m = $3; mult = 1
+      if (m ~ /[Tt]$/) mult = 1024; else if (m ~ /[Mm]$/) mult = 1/1024; else if (m ~ /[Kk]$/) mult = 1/1048576
+      gsub(/[^0-9.]/, "", m); mem += m * mult * ($5 > 0 ? $5 : 1)
+      if (match($4, /gpu[^,]*:[0-9]+/)) { g = substr($4, RSTART, RLENGTH); sub(/.*:/, "", g); gpus += g }
+    }
+    END { printf "%d %d %d\n", c, mem + 0.999, gpus }'
+}
+
 # check_job <cpus> <mem> <gpus> <time>: non-zero (with the reason on stderr) if over a limit.
 check_job() {
-  [ "${GEMI_ALLOW_UNSAFE:-0}" = 1 ] && return 0
-  local why=""
-  [ "$1" -le "$GEMI_MAX_CPUS" ] || why="$why cpus $1 > $GEMI_MAX_CPUS;"
-  [ "$(_mem_gb "$2")" -le "$GEMI_MAX_MEM_GB" ] || why="$why mem $2 > ${GEMI_MAX_MEM_GB}G;"
-  [ "$3" -le "$GEMI_MAX_GPUS" ] || why="$why gpus $3 > $GEMI_MAX_GPUS;"
-  [ "$(_seconds "$4")" -le "$(_seconds "$GEMI_MAX_TIME")" ] || why="$why time $4 > $GEMI_MAX_TIME;"
+  effective_limits
+  [ "$L_UNSAFE" = 1 ] && return 0
+  local why="" mem_gb; mem_gb=$(_mem_gb "$2")
+  [ "$1" -le "$L_MAX_CPUS" ] || why="$why cpus $1 > $L_MAX_CPUS;"
+  [ "$mem_gb" -le "$L_MAX_MEM_GB" ] || why="$why mem $2 > ${L_MAX_MEM_GB}G;"
+  [ "$3" -le "$L_MAX_GPUS" ] || why="$why gpus $3 > $L_MAX_GPUS;"
+  [ "$(_seconds "$4")" -le "$(_seconds "$L_MAX_TIME")" ] || why="$why time $4 > $L_MAX_TIME;"
   local n; n=$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c '^gemi-')
-  [ "$n" -lt "$GEMI_MAX_JOBS" ] || why="$why $n GEMI jobs already queued or running (limit $GEMI_MAX_JOBS);"
+  [ "$n" -lt "$L_MAX_JOBS" ] || why="$why $n GEMI jobs already queued or running (limit $L_MAX_JOBS);"
+  local uc um ug; read -r uc um ug <<< "$(gemi_usage)"
+  [ $(( ${uc:-0} + $1 )) -le "$L_MAX_TOTAL_CPUS" ] || why="$why GEMI jobs would hold $(( ${uc:-0} + $1 )) CPUs in all (limit $L_MAX_TOTAL_CPUS);"
+  [ $(( ${um:-0} + mem_gb )) -le "$L_MAX_TOTAL_MEM_GB" ] || why="$why GEMI jobs would hold $(( ${um:-0} + mem_gb ))G in all (limit ${L_MAX_TOTAL_MEM_GB}G);"
+  [ $(( ${ug:-0} + $3 )) -le "$L_MAX_TOTAL_GPUS" ] || why="$why GEMI jobs would hold $(( ${ug:-0} + $3 )) GPUs in all (limit $L_MAX_TOTAL_GPUS);"
   [ -z "$why" ] && return 0
-  echo "refused by the job limits:$why set GEMI_MAX_* (or GEMI_ALLOW_UNSAFE=1) in the cluster's launch.conf to change them" >&2
+  echo "refused by the job limits:$why lower values in launch.conf, or a person raises them in $GEMI_HPC_ROOT/limits.conf on the cluster" >&2
   return 1
 }
 

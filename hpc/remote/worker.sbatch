@@ -32,8 +32,11 @@ if [ "$W" = gwas ]; then
         --env "GEMINI_WORKER_ID=$WORKER_ID,PYTHONPATH=/geminibase" -B "$SRC/gemini:/geminibase/gemini")
 fi
 if [ "$W" = ml ]; then
-  mkdir -p "$DATA/models"
-  ARGS+=(-B "$DATA/models:/models" --env "GEMINI_MODEL_CACHE_DIR=/models,HF_HOME=/models/huggingface")
+  # The owner's cache, or a member's own (a shared session): see share_perms in lib.sh.
+  MODELS=$DATA/models
+  is_owner || { MODELS=$DATA/members/$USER/models; mkdir -p "$MODELS"; chmod 700 "$DATA/members/$USER"; }
+  mkdir -p "$MODELS"
+  ARGS+=(-B "$MODELS:/models" --env "GEMINI_MODEL_CACHE_DIR=/models,HF_HOME=/models/huggingface")
   [ "${GEMI_GPUS:-0}" -gt 0 ] && ARGS+=(--nv)
   # Hugging Face / local-weights backends, if installed (gemi-hpc pull ml-deps).
   # Appended to sys.path, so the image's own numpy / Pillow / OpenCV still win.

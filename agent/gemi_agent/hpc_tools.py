@@ -264,6 +264,8 @@ def _find_key(target: str, key: Optional[str], port: Optional[int]) -> Optional[
         r = subprocess.run(_ssh_args(target, k, port) + ["echo ok"], capture_output=True, text=True, timeout=60)
         if r.returncode == 0 and "ok" in r.stdout:
             return k or ""
+        if "gemi-gate: refused" in (r.stderr + r.stdout):
+            return k or ""      # logged in with a key restricted to the gate (docs/CLUSTERS.md)
         last = (r.stderr or r.stdout).strip().splitlines()[-1:] or [""]
         last = last[0]
     if locked:
@@ -512,7 +514,7 @@ WORKER_RES_ml="cpus=8 mem=32G gpus={ml_gpus}"
 LOCAL_API_PORT=auto
 
 # Local LLM for the agent (vLLM, OpenAI-compatible API).
-LLM_IMAGE=vllm/vllm-openai:latest
+LLM_IMAGE=vllm/vllm-openai:v0.31.0   # a tested version, not "latest"
 LLM_MODEL={llm_model}
 LLM_NAME=gemma4
 LLM_TRY="{llm_try}"
@@ -522,6 +524,29 @@ LLM_ARGS='--max-model-len 32768 --gpu-memory-utilization 0.92'
 LLM_PULL_PARTITION={pull_partition}
 LLM_PULL_ACCOUNT={pull_account}
 """
+
+
+# launch.conf is sourced as bash, on this computer and on the cluster: every value written into it
+# from a tool call must be plain (a newline or a $( ) in a partition name would run as code, or
+# add a setting such as GEMI_ALLOW_UNSAFE=1).
+_PLACE = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
+_PLACE_GRES = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(:[A-Za-z0-9_.:-]+)?$")
+_ROOT = re.compile(r"^/[A-Za-z0-9_./-]+$")
+_MODEL = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$")
+_VERSION = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _plain(value: str, pattern: re.Pattern, what: str) -> str:
+    if not pattern.match(value):
+        raise ValueError(f"{what}: {value!r} has characters a cluster setting cannot hold")
+    return value
+
+
+def _quoted_path(path: str, what: str) -> str:
+    """A local file path for launch.conf, single-quoted (Windows home folders have spaces)."""
+    if any(c in path for c in "'\"$`\\\n\r"):
+        raise ValueError(f"{what}: {path!r} has characters a cluster setting cannot hold")
+    return f"'{path}'"
 
 
 def hpc_configure(args: dict) -> dict:
@@ -536,20 +561,31 @@ def hpc_configure(args: dict) -> dict:
     worker_try = args["workers_try"] if isinstance(args["workers_try"], list) else str(args["workers_try"]).split()
     llm_try = args.get("llm_try") or []
     llm_try = llm_try if isinstance(llm_try, list) else str(llm_try).split()
+    if not worker_try:
+        raise ValueError("workers_try: at least one partition:account")
     for entry in worker_try:
-        if entry.count(":") != 1:
-            raise ValueError(f"workers_try entries are partition:account, got {entry!r}")
-    core_partition, core_account = str(args["core"]).split(":")
-    version = (REPO / "frontend" / "src-tauri" / "stack-version") if RESOURCES is None else (REPO / "stack-version")
+        _plain(entry, _PLACE, "workers_try entries are partition:account")
+    for entry in llm_try:
+        _plain(entry, _PLACE_GRES, "llm_try entries are partition:account[:gpu:N]")
+    core_partition, core_account = _plain(str(args["core"]).strip(), _PLACE, "core is partition:account").split(":")
+    root = _plain(str(args["data_root"]).strip().rstrip("/"), _ROOT, "data_root (an absolute path without spaces)")
+    if ".." in root or root.count("/") < 3:
+        raise ValueError("data_root: an absolute path at least three levels deep")
+    llm_model = _plain(str(args.get("llm_model") or "google/gemma-4-31B-it-qat-w4a16-ct").strip(), _MODEL,
+                       "llm_model (a Hugging Face name such as org/model)")
+    version_file = (REPO / "frontend" / "src-tauri" / "stack-version") if RESOURCES is None else (REPO / "stack-version")
+    if not version_file.exists():
+        raise ValueError("this copy of GEMI has no stack-version file: the image version to install is unknown")
+    stack_version = _plain(version_file.read_text().strip(), _VERSION, "stack-version")
     folder = CLUSTERS / name
     folder.mkdir(parents=True, exist_ok=True)
     conf = CONF_TEMPLATE.format(
-        name=name, when=time.strftime("%Y-%m-%d"), login=ssh["target"], key=_posix(key_path),
-        known=_posix(_home() / ".ssh" / "known_hosts"), root=str(args["data_root"]).rstrip("/"),
-        version=version.read_text().strip() if version.exists() else "latest",
+        name=name, when=time.strftime("%Y-%m-%d"), login=ssh["target"], key=_quoted_path(_posix(key_path), "SSH key"),
+        known=_quoted_path(_posix(_home() / ".ssh" / "known_hosts"), "known_hosts"), root=root,
+        version=stack_version,
         core_partition=core_partition, core_account=core_account, worker_try=" ".join(worker_try),
         ml_gpus=1 if args.get("ml_gpu") else 0,
-        llm_model=args.get("llm_model") or "google/gemma-4-31B-it-qat-w4a16-ct", llm_try=" ".join(llm_try),
+        llm_model=llm_model, llm_try=" ".join(llm_try),
         pull_partition=worker_try[0].split(":")[0], pull_account=worker_try[0].split(":")[1])
     (folder / "launch.conf").write_text(conf, newline="\n")
     (CLUSTERS / "active").write_text(name + "\n", newline="\n")
