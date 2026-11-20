@@ -174,11 +174,11 @@ case "$cmd" in
     fi
     # Only this cluster's settings go up (not other clusters', not the `active` marker).
     # The agent's uploader goes too: `ingest` runs it in a cluster job.
-    # The local handover (AGENTS.md, git-ignored) and patches of uncommitted work
+    # The local handover (CLAUDE.local.md, git-ignored) and patches of uncommitted work
     # (handoff/patches) go too when present, for working from the cluster itself:
     # they land in <GEMI folder>/hpc/.
     handover=()
-    [ -f "$REPO/AGENTS.md" ] && handover+=(AGENTS.md)
+    [ -f "$REPO/CLAUDE.local.md" ] && handover+=(CLAUDE.local.md)
     [ -d "$REPO/handoff/patches" ] && handover+=(handoff/patches)
     [ ${#handover[@]} -gt 0 ] && handover=(-C "$REPO" "${handover[@]}")
     COPYFILE_DISABLE=1 tar -czf - --exclude='__pycache__' --exclude='*.pyc' --exclude='._*' -C "$HERE" remote tools \

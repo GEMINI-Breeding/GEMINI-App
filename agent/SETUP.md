@@ -68,6 +68,12 @@ the tools (`.mcp.json`, an MCP server) and the cluster guard
 cluster, my login is ssh you@login.cluster.edu". If your system has `python3`
 but no `python`, change the command in `.mcp.json`.
 
+To help develop the app, ask Claude Code to "report this as an issue" or
+"open a pull request for this fix". The `contribute` skill picks the right
+repository (the app, or GEMINIbase for the backend), leaves private details
+out, and shows you the text before anything is posted. Pull requests are kept
+to small, tested changes; larger ones become issues for the maintainers.
+
 ## 1. Install (once)
 
 Python 3.10+ on the computer where the agent runs:

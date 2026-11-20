@@ -8,6 +8,7 @@
 
 # Agent / planning artifacts (local only, never commit)
 CLAUDE.md
+CLAUDE.local.md
 task_plan.md
 findings.md
 progress.md
