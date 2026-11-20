@@ -139,7 +139,7 @@ export function joinTraitToPolygons(
 export function attachHoverValues(
   fc: PlotPolygonFC,
   rows: Array<{
-    plot_number?: number | null
+    plot_number?: number | string | null
     plot_row_number?: number | null
     plot_column_number?: number | null
     values: Record<string, number | null>

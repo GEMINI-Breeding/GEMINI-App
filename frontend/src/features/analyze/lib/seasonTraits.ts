@@ -4,7 +4,9 @@
  * from every run of the trait in the scope picked (experiment, year, site,
  * crop), one dataset per date.
  */
+
 import type { TraitRecordOutput } from "@/client"
+import { comparePlotNumbers } from "@/lib/plotNumber"
 
 /** The flight date a record is for (YYYY-MM-DD). */
 export function recordDate(r: TraitRecordOutput): string {
@@ -108,7 +110,7 @@ export function byDate(
 export interface SeasonRow {
   /** "12" or "12 (r3 c4)" when plot numbers repeat across rows/cols. */
   plot: string
-  plotNumber: number | null
+  plotNumber: number | string | null
   accession: string | null
   /** Value per date (the mean when a date has several readings). */
   values: Record<string, number>
@@ -172,8 +174,7 @@ export function seasonTable(
   })
   rows.sort(
     (a, b) =>
-      (a.plotNumber ?? Number.POSITIVE_INFINITY) -
-        (b.plotNumber ?? Number.POSITIVE_INFINITY) ||
+      comparePlotNumbers(a.plotNumber, b.plotNumber) ||
       a.plot.localeCompare(b.plot),
   )
   return { dates: [...dates].sort(), rows }

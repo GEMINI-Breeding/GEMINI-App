@@ -22,6 +22,7 @@ worker-stitch=$R/geminibase-worker-stitch:$V
 worker-geo=$R/geminibase-worker-geo:$V
 worker-odm=$R/geminibase-worker-odm:$V
 worker-ml=$R/geminibase-worker-ml:$V
+worker-gwas=$R/geminibase-worker-gwas:$V
 titiler=ghcr.io/developmentseed/titiler:2.0.1
 nodeodm=opendronemap/nodeodm@sha256:cb07d06e21fd6189cfad287c6fedfa0b72568100355635cd9035cb86eed42ee2
 "

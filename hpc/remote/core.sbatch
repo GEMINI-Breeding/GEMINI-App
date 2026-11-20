@@ -146,6 +146,41 @@ apptainer exec --cleanenv --no-home --writable-tmpfs \
 rm -rf "/tmp/gemi-mc-$SLURM_JOB_ID"
 log "storage initialised"
 
+# --- Database migrations: the synced backend source can be newer than the database ---
+# Every core brings the schema up to the source's Alembic head before the API
+# starts, so an update reaches everyone who runs a core. A dump is taken first
+# (into $DATA, beside the snapshots); a failed upgrade stops the core rather
+# than start the API on a schema it does not match. macOS resource forks
+# (._*) in a synced versions folder stop Alembic loading it: removed first.
+find "$SRC/alembic" -name '._*' -delete 2>/dev/null || true
+migrate() {
+  apptainer exec --cleanenv --no-home --writable-tmpfs --env-file "$RUN/stack.env" \
+    -B "$SRC/gemini:/geminibase/gemini" -B "$SRC/alembic:/geminibase/alembic" -B "$SRC/alembic.ini:/geminibase/alembic.ini" \
+    --pwd /geminibase "$IMAGES/rest-api.sif" sh -c "if command -v poetry >/dev/null; then poetry run alembic $*; else alembic $*; fi"
+}
+REV_NOW=$(migrate current 2>>"$SLOG/migrate.log" | awk 'NF {print $1}' | tail -1)
+REV_HEAD=$(migrate heads 2>>"$SLOG/migrate.log" | awk 'NF {print $1}' | tail -1)
+if [ -z "$REV_HEAD" ]; then
+  log "migrations: could not read the source's Alembic head (see $SLOG/migrate.log); schema left as is"
+elif [ -z "$REV_NOW" ]; then
+  log "migrations: the database has no Alembic revision; schema left as is (stamp it, then restart)"
+elif [ "$REV_NOW" != "$REV_HEAD" ]; then
+  DUMP="pgdump-pre-$REV_HEAD-$(date +%Y%m%d-%H%M).dump"
+  log "migrations: database at $REV_NOW, source at $REV_HEAD: dumping to $DATA/$DUMP, then upgrading"
+  if apptainer exec --cleanenv --no-home --env "PGPASSWORD=$GEMINI_DB_PASSWORD" -B "$DATA:/dump" "$IMAGES/db.sif" \
+      pg_dump -h 127.0.0.1 -p "$DB_PORT" -U "$GEMINI_DB_USER" -d "$GEMINI_DB_NAME" -Fc -f "/dump/$DUMP" >>"$SLOG/migrate.log" 2>&1 \
+     && migrate upgrade head >>"$SLOG/migrate.log" 2>&1; then
+    log "migrations: database upgraded to $REV_HEAD"
+  else
+    log "ERROR: database migration to $REV_HEAD failed (see $SLOG/migrate.log; dump $DATA/$DUMP); core stopped"
+    tail -20 "$SLOG/migrate.log"
+    stop_all
+    exit 1
+  fi
+else
+  log "migrations: database schema current ($REV_NOW)"
+fi
+
 # --- REST API (current source over the image's /geminibase) ---
 $APT $(private_ipc "$TMP/shm-api") --env-file "$RUN/stack.env" --env GEMINI_RUN_MIGRATIONS=${GEMI_RUN_MIGRATIONS:-0} \
   -B "$SRC/gemini:/geminibase/gemini" -B "$SRC/alembic:/geminibase/alembic" -B "$SRC/alembic.ini:/geminibase/alembic.ini" \

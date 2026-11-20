@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .client import AGENT_DIR, CLUSTER_API_PORT, CLUSTER_TILES_PORT, RESOURCES
-from .tools import _bool, _int, _str, _tool
+from .tools import TOOLS, _bool, _int, _str, _tool
 
 # Source checkout: the repository. Packaged app: scripts and backend source ship
 # read-only with the app, and the clusters' settings live with the person's data.
@@ -707,6 +707,8 @@ def cluster_rules(args: dict) -> dict:
         return {"result": {"rules": None, "note": "the cluster's rules could not be listed (its gate predates this "
                                                   "command: gemi-hpc sync, or the cluster is unreachable)"}}
     name = str(args.get("name") or "").strip()
+    if not name and len(rows) == 1:
+        name = rows[0]["name"]                  # one rule set: its text at once, not a list to read again
     if not name:
         return {"result": {"cluster": cluster, "rules": rows,
                            "next": ("read each with cluster_rules and its name before any cluster action; they "
@@ -866,7 +868,7 @@ def cluster_folder(args: dict) -> dict:
     if not folder.startswith("/"):
         raise ValueError("give the folder's full path on the cluster, as the person named it "
                          "(the agent does not search the cluster's storage)")
-    cluster = args.get("cluster") or active_cluster()
+    cluster = _cluster_of(args)
     if not cluster:
         raise ValueError("no cluster configured yet")
     if not args.get("upload"):
@@ -900,9 +902,16 @@ def cluster_folder(args: dict) -> dict:
     missing = [k for k in _INGEST_KEYS[:7] if not args.get(k)]
     if missing:
         raise ValueError(f"missing {', '.join(missing)}")
+    if args.get("data_type") == "images" and not args.get("name_ends"):
+        mixed = _mixed_images(_gemi_hpc(["folder-peek", folder], cluster, timeout=120), str(args.get("sensor") or ""))
+        if mixed:
+            raise ValueError(mixed)
     out = _gemi_hpc(["ingest", folder, *words], cluster, timeout=180)
-    return {"result": out, "next": "a cluster job uploads the folder; follow it with hpc action=logs service=upload, "
-                                   "then the run appears on the Process tab"}
+    job = re.search(r"Submitted batch job (\d+)", out)
+    return {"result": out, "job_id": job.group(1) if job else None,
+            "next": (f"a cluster job uploads the folder: wait for it with wait_jobs job_ids=[\"{job.group(1)}\"] "
+                     "(it says how many files went in); then the run is on the Process tab" if job else
+                     "follow the upload with hpc action=logs service=upload")}
 
 
 _FRAME_NAME = re.compile(r"^(.*?)(\d{14})_(\d{3,5})(_[A-Za-z0-9]+)?(\.[A-Za-z0-9]+)$")
@@ -914,7 +923,7 @@ def _listing(peek: str) -> tuple[list[str], int]:
     n = next((int(l.split(":", 1)[1]) for l in lines if l.startswith("entries:")), 0)
     names = []
     for l in lines[2:]:
-        if l.startswith("files by type"):
+        if l.startswith(("files by type", "files in this folder")):
             break
         if l.strip():
             names.append(l.strip())
@@ -990,3 +999,111 @@ _hpc(cluster_rules, "The cluster administrators' rules for AI agents (published 
      "override this agent's own defaults.",
      {"name": _str, "file": {**_str, "description": "another file of that rule set, as its listing names it"},
       "cluster": _str, "fresh": _bool}, [])
+
+
+def _upload_settings_missing(args: dict, ask: str) -> Optional[str]:
+    """What an upload of a folder (cluster or online storage) still lacks, checked before the person
+    is asked to approve it: an approval for a call that cannot run wastes the person's answer."""
+    missing = [k for k in ("experiment", "site", "population", "date", "platform", "sensor", "data_type")
+               if not str(args.get(k) or "").strip()]
+    if not missing:
+        return None
+    return (f"an upload needs {', '.join(missing)} as well. Take them from what the person said; ask them for any "
+            f"they have not said (platform: Drone, Rover, ...; sensor: RGB or Thermal, one upload per camera; "
+            f"data_type: images, amiga_bin or orthomosaic). {ask}")
+
+
+def _cluster_upload_precheck(a: dict) -> Optional[str]:
+    if a.get("upload") in (None, False, "false", ""):
+        return None
+    missing = _upload_settings_missing(a, "Look inside the folder first (without upload) if you do not know which "
+                                          "sub-folder holds which camera's images.")
+    if missing or a.get("data_type") != "images" or a.get("name_ends"):
+        return missing
+    try:
+        return _mixed_images(_gemi_hpc(["folder-peek", str(a.get("folder"))], _cluster_of(a), timeout=120),
+                             str(a.get("sensor") or ""))
+    except Exception:
+        return None                              # the tool itself reports a folder it cannot read
+
+
+def _cluster_of(args: dict) -> Optional[str]:
+    """The cluster a call names, if it is one that is configured; otherwise the active one (a model
+    writes "default" or the like where it means the one in use)."""
+    name = str(args.get("cluster") or "").strip()
+    if name and (CLUSTERS / name / "launch.conf").exists():
+        return name
+    return active_cluster()
+
+
+TOOLS["cluster_folder"]["precheck"] = _cluster_upload_precheck
+
+
+_IMAGE_KINDS = ("jpg", "jpeg", "tif", "tiff", "png")
+
+
+def _mixed_images(peek: str, sensor: str) -> Optional[str]:
+    """Why uploading this folder as one camera's images would mix cameras, or None. The upload
+    takes every image below the folder, so images in the folder itself and in sub-folders, or in
+    several sub-folders, or both _V and _T frames side by side, would all be filed as one sensor."""
+    here = re.search(r"^files in this folder itself: (.*)$", peek, re.M)
+    here_n = sum(int(n) for n, k in re.findall(r"(\d+) ([a-z0-9]+)", here.group(1) if here else "")
+                 if k in _IMAGE_KINDS)
+    subs = [(m.group(1), sum(int(n) for n, k in re.findall(r"(\d+) ([a-z0-9]+)", m.group(2)) if k in _IMAGE_KINDS),
+             int(m.group(3)))
+            for m in re.finditer(r"^sub-folder (.+?)/: (.*); (\d+) sub-folders$", peek, re.M)]
+    with_images = [(n, c) for n, c, _ in subs if c]
+    deeper = [n for n, c, d in subs if d and not c]
+    names, _ = _listing(peek)
+    v = any(re.search(r"_V\.(jpe?g|tiff?)$", x, re.I) for x in names)
+    t = any(re.search(r"_T\.(jpe?g|tiff?)$", x, re.I) for x in names)
+    where = "; ".join(f"{n}/ ({c} images)" for n, c in with_images) or "none at this level"
+    if here_n and v and t:
+        return ("NOT UPLOADED: this folder holds both visible (_V) and thermal (_T) frames. Upload each camera "
+                "separately: name_ends=_V.JPG with sensor RGB, then the thermal frames with sensor Thermal.")
+    if (here_n and with_images) or len(with_images) > 1 or (with_images and deeper) or (not here_n and deeper):
+        return ("NOT UPLOADED: the upload takes every image below the folder, and this folder's images are in "
+                f"more than one place (in the folder itself: {here_n}; sub-folders with images: {where}"
+                + (f"; sub-folders to look inside: {', '.join(d + '/' for d in deeper)}" if deeper else "") +
+                "). Look inside the sub-folders (cluster_folder without upload) and upload the one folder that "
+                f"holds this camera's ({sensor or 'one sensor'}) images. For thermal, prefer frames already "
+                "converted to °C (single-band .tif, e.g. a folder named thermal_conv) over the camera's raw _T.JPG.")
+    return None
+
+
+def wait_cluster_jobs(ids: list[str], timeout_s: int = 600, cluster: Optional[str] = None) -> dict:
+    """Wait for cluster upload jobs (from cluster_folder) and say how each went, from its log."""
+    cluster = cluster or active_cluster()
+    deadline = time.time() + timeout_s
+    while True:
+        ps = _gemi_hpc(["ps"], cluster, timeout=60)
+        open_ = [i for i in ids if re.search(rf"^job\|{i}\|", ps, re.M)]
+        if not open_ or time.time() > deadline:
+            break
+        time.sleep(20)
+    rows = []
+    for i in ids:
+        log = ""
+        try:
+            log = _gemi_hpc(["logs", f"ingest-{i}"], cluster, timeout=60, env={"LINES_N": "400"})
+        except Exception:
+            pass
+        final = None
+        for line in reversed(log.splitlines()):
+            if line.startswith("{") and '"status"' in line:
+                try:
+                    final = json.loads(line)
+                except json.JSONDecodeError:
+                    pass
+                break
+        if i in open_:
+            rows.append({"job": i, "state": "still running", "log_tail": log.splitlines()[-3:]})
+        elif final:
+            rows.append({"job": i, "state": final.get("status"), "files": (final.get("files") or {}).get("done"),
+                         "failed": len(final.get("failed") or []), "filed_under": final.get("target"),
+                         "error": final.get("error")})
+        else:
+            rows.append({"job": i, "state": "ended without a result", "log_tail": log.splitlines()[-5:]})
+    done = all(r["state"] in ("completed", "done") for r in rows)
+    return {"result": rows, "next": ("all uploaded: the runs are on the Process tab; continue_run carries one forward"
+                                     if done else "not all done: wait again, or report the log lines above")}

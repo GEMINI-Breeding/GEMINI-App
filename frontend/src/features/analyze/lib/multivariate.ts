@@ -22,7 +22,7 @@ export interface MultivariateRequest {
 
 export interface MatrixRow {
   plot_id?: string | null
-  plot_number?: number | null
+  plot_number?: number | string | null
   plot_row_number?: number | null
   plot_column_number?: number | null
   experiment_name?: string | null
@@ -99,7 +99,7 @@ export interface SpatialCell {
   plot_column_number: number
   value: number
   accession_name?: string | null
-  plot_number?: number | null
+  plot_number?: number | string | null
 }
 
 export interface SpatialSite {

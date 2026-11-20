@@ -1,14 +1,11 @@
 /**
- * Genotyping Studies dashboard.
- *
- * Phase 9a: list / create / update / delete + clickable rows that route to
- * the StudyDetail page (`/genotyping/$studyId`). Rows are wrapped in a
- * `Link` so middle-click / cmd-click open in a new tab; per-row Edit and
- * Delete buttons stop click-propagation so they don't navigate.
+ * Genotyping landing page: one card per study (marker data set), with its
+ * latest GWAS results as the picture, like the Process workspaces. A card
+ * opens the study; Edit / Delete are in its corner menu.
  */
 
 import { Link } from "@tanstack/react-router"
-import { Pencil, Plus, Trash2 } from "lucide-react"
+import { Dna, Plus } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -26,15 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { idAsString } from "@/features/admin/lib/ids"
+import { StudyCard } from "@/features/genotyping/components/StudyCard"
 import { StudyFormDialog } from "@/features/genotyping/components/StudyFormDialog"
 import {
   useCreateGenotypingStudy,
@@ -42,16 +32,6 @@ import {
   useGenotypingStudies,
   useUpdateGenotypingStudy,
 } from "@/features/genotyping/hooks/useGenotypingStudies"
-
-function summariseInfo(info: GenotypingStudyOutput["study_info"]): string {
-  if (info == null) return ""
-  if (typeof info === "string") return info
-  try {
-    return JSON.stringify(info)
-  } catch {
-    return String(info)
-  }
-}
 
 export function StudiesDashboard() {
   const list = useGenotypingStudies()
@@ -107,13 +87,13 @@ export function StudiesDashboard() {
   const rows = list.data ?? []
 
   return (
-    <div className="container max-w-6xl space-y-4 px-4 py-6">
-      <header className="flex items-center justify-between">
+    <div className="flex flex-col gap-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Genotyping studies</h1>
-          <p className="text-muted-foreground text-sm">
-            Containers for genotype matrices and GWAS runs. Open a study to
-            ingest records or submit a GWAS job.
+          <h1 className="text-2xl font-bold tracking-tight">Genotyping</h1>
+          <p className="text-muted-foreground">
+            Marker data for your lines, and genome-wide association (GWAS) of
+            measured traits against it.
           </p>
         </div>
         <Button
@@ -123,89 +103,43 @@ export function StudiesDashboard() {
             setMode("add")
           }}
         >
-          <Plus className="mr-1.5 h-4 w-4" /> Add study
+          <Plus className="mr-1.5 h-4 w-4" /> New study
         </Button>
       </header>
 
-      <div className="overflow-x-auto rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>Name</TableHead>
-              <TableHead>Info</TableHead>
-              <TableHead className="w-[120px] text-right">
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isLoading ? (
-              <TableRow>
-                <TableCell
-                  colSpan={3}
-                  className="text-muted-foreground py-6 text-center text-sm"
-                >
-                  Loading…
-                </TableCell>
-              </TableRow>
-            ) : rows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={3}
-                  className="text-muted-foreground py-6 text-center text-sm"
-                >
-                  No studies yet. Click <strong>Add study</strong> to create
-                  one.
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.map((row) => {
-                const id = idAsString(row.id)
-                return (
-                  <TableRow key={id} data-testid="genotyping-study-row">
-                    <TableCell className="font-medium">
-                      <Link
-                        to="/genotyping/$studyId"
-                        params={{ studyId: id }}
-                        className="text-primary hover:underline"
-                        data-testid="genotyping-study-link"
-                      >
-                        {row.study_name ?? "(unnamed)"}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-md truncate">
-                      {summariseInfo(row.study_info)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          data-testid="genotyping-study-edit"
-                          onClick={() => {
-                            setEditing(row)
-                            setMode("edit")
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          data-testid="genotyping-study-delete"
-                          onClick={() => setDeleting(row)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {list.isLoading ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="bg-muted h-56 animate-pulse rounded-lg" />
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-20 text-center">
+          <Dna className="text-muted-foreground h-10 w-10" />
+          <p className="font-medium">No marker data yet</p>
+          <p className="text-muted-foreground max-w-md text-sm">
+            Bring a marker file in (HapMap, VCF, CSV or Excel) through{" "}
+            <Link to="/files" className="text-primary hover:underline">
+              Files → Upload → Genomic Data
+            </Link>
+            , or ask the agent to import one.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {rows.map((row) => (
+            <StudyCard
+              key={idAsString(row.id)}
+              study={row}
+              onEdit={(s) => {
+                setEditing(s)
+                setMode("edit")
+              }}
+              onDelete={setDeleting}
+            />
+          ))}
+        </div>
+      )}
 
       <StudyFormDialog
         mode={mode}
@@ -224,8 +158,8 @@ export function StudiesDashboard() {
           <DialogHeader>
             <DialogTitle>Delete study?</DialogTitle>
             <DialogDescription>
-              Records and variants attached to this study will become orphaned
-              if the backend doesn't cascade. This cannot be undone.
+              This removes the study and its marker data from the app. Its GWAS
+              runs stay listed until you delete them. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

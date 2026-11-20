@@ -137,10 +137,13 @@ export function InferenceJobView({
   job,
   modelName,
   onClose,
+  startLabeling = false,
 }: {
   job: JobOutput
   modelName: string
   onClose: () => void
+  /** Open in labelling mode, its detections as proposals ("Label & train" → from this model). */
+  startLabeling?: boolean
 }) {
   const params = (job.parameters ?? {}) as JobParams
   const result = ((job as { result?: unknown }).result ?? {}) as {
@@ -183,7 +186,7 @@ export function InferenceJobView({
   const [sortByCount, setSortByCount] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   // Labelling these images by hand (for training), from this model's results.
-  const [labeling, setLabeling] = useState(false)
+  const [labeling, setLabeling] = useState(startLabeling)
   // The image's own size (for detections that fall outside it).
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   // Boxes / names on or off and their opacity (remembered in this browser).

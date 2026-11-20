@@ -137,6 +137,19 @@ class World(Client):
             return ok([])
         raise ApiError(404, "not in the simulated app", path)
 
+    def upload_chunk(self, blob: bytes, index: int, total: int, upload_id: str, object_name: str, *a, **k) -> None:
+        # Small files the tools share through storage (run facts, field designs).
+        self.blobs = getattr(self, "blobs", {})
+        self.blobs[object_name] = bytes(blob)
+        if object_name not in self.files:
+            self.files.append(object_name)
+
+    def download(self, object_name: str) -> bytes:
+        blob = getattr(self, "blobs", {}).get(object_name)
+        if blob is None:
+            raise ApiError(404, "not found", object_name)
+        return blob
+
     def run_of(self, scope: tuple) -> dict:
         return next(r for r in self.state["runs"] if (r.get("uploadScope") or {}).get("date") == scope[4]
                     and (r.get("uploadScope") or {}).get("location") == scope[2])

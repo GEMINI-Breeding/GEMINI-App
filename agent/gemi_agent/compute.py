@@ -36,12 +36,15 @@ PARTS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("stitch", "Stitching", "Stitches one image per plot; files stitched plots by boundary.",
      ("RUN_STITCH", "ASSOCIATE_BOUNDARIES")),
     ("odm", "Orthomosaic", "Builds the field map from drone photos (OpenDroneMap).", ("RUN_ODM",)),
-    ("geo", "Map tiles and plot images", "Cuts one image per plot from the field map; makes map tiles.",
-     ("SPLIT_ORTHOMOSAIC", "CREATE_COG")),
-    ("ml", "Models and traits", "Runs detection models and trait extraction.", ("LOCATE_PLANTS", "EXTRACT_TRAITS")),
+    ("geo", "Map tiles and plot images", "Cuts one image per plot from the field map or the raw frames; "
+     "places photos by their GPS; makes map tiles.",
+     ("SPLIT_ORTHOMOSAIC", "CREATE_COG", "DATA_SYNC", "GROUND_PLOT_FRAMES")),
+    ("ml", "Models and traits", "Runs detection models, model training and trait extraction.",
+     ("LOCATE_PLANTS", "EXTRACT_TRAITS", "TRAIN_MODEL")),
+    ("gwas", "Genome-wide association", "Tests a trait against a study's markers (PLINK 2, GEMMA).", ("RUN_GWAS",)),
     ("llm", "Agent model", "The language model the agent thinks with, when it runs on the cluster.", ()),
 ]
-WORKERS = ("amiga", "stitch", "odm", "geo", "ml")
+WORKERS = ("amiga", "stitch", "odm", "geo", "ml", "gwas")
 WORKER_FOR = {jt: name for name, _, _, types in PARTS for jt in types}
 _PLACE = re.compile(r"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+(:[A-Za-z0-9_.:-]+)?$")
 
@@ -293,6 +296,22 @@ _idle_since: dict[str, float] = {}      # worker -> when it was last seen with n
 _scaled: dict[str, float] = {}          # worker -> when another copy was last asked for
 
 
+def _serve_start_request() -> None:
+    """A member of this computer's shared session asked for the core: it runs as this
+    computer's login, so it is started here (the request is cleared either way). The
+    cluster's keeper (gemi-hpc keeper on) does the same while this computer is off."""
+    ov = overview(with_jobs=False)
+    sh = ov.get("share") or {}
+    if ov.get("error") or sh.get("role") != "owner" or not sh.get("start_requested_by"):
+        return
+    core = next((r for r in ov["parts"] if r["name"] == "core"), None)
+    if core and core["state"] == "stopped" and not _busy.get("core"):
+        _last["core"] = {**start("core", background=True),
+                         "message": f"started for {sh['start_requested_by']} (shared session)"}
+        activity.note("core: " + _last["core"]["message"])
+    _gemi_hpc(["share", "clear-request"], active_cluster(), timeout=60)
+
+
 def watch(period_s: int = 45) -> None:
     """Runs in the agent service, for work nobody is watching.
 
@@ -314,22 +333,18 @@ def watch(period_s: int = 45) -> None:
             # The API as the app reaches it: under `gemi-hpc app` that is the app's own
             # tunnel (GEMI_API), not API_PORT, which was never open there, so no worker
             # was ever started for a waiting job ("a worker is being started" forever).
-            if not active_cluster() or _watch_client is None or not _api_answers():
+            if not active_cluster():
+                continue
+            # A member's start request matters exactly when the core is down, so it is served
+            # before (and without) the API: only the cluster's job list is needed.
+            _serve_start_request()
+            if _watch_client is None or not _api_answers():
                 continue
             use_client(_watch_client)
             ov = overview()
             if ov.get("error"):
                 continue
             core_up = any(r["name"] == "core" and r["state"] == "running" for r in ov["parts"])
-            sh = ov.get("share") or {}
-            if sh.get("role") == "owner" and sh.get("start_requested_by"):
-                # A member of the shared session asked for it: the core runs as this computer's
-                # login, so it is started here (the request is cleared either way).
-                if not core_up and not _busy.get("core"):
-                    _last["core"] = {**start("core", background=True),
-                                     "message": f"started for {sh['start_requested_by']} (shared session)"}
-                    activity.note("core: " + _last["core"]["message"])
-                _gemi_hpc(["share", "clear-request"], active_cluster(), timeout=60)
             for row in ov["parts"]:
                 if row["name"] not in WORKERS or row["busy"] or row.get("idle_minutes", 0) is None:
                     continue

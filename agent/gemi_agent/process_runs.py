@@ -37,7 +37,8 @@ PIPELINE_PARAMS = {
 }
 JOB_STEP = {"RUN_STITCH": "stitching", "ASSOCIATE_BOUNDARIES": "associate_boundaries", "RUN_ODM": "orthomosaic",
             "SPLIT_ORTHOMOSAIC": "split_orthomosaic", "EXTRACT_TRAITS": "trait_extraction",
-            "LOCATE_PLANTS": "inference"}
+            "LOCATE_PLANTS": "inference", "DATA_SYNC": "data_sync",
+            "GROUND_PLOT_FRAMES": "associate_boundaries"}
 
 
 def _now() -> str:
@@ -170,7 +171,7 @@ class ProcessRuns:
             upload_scope["experimentId"] = str(exp["id"])
         run = {"id": str(uuid.uuid4()), "pipelineId": pipe["id"], "workspaceId": ws["id"],
                "name": f"{scope.get('date')} · {scope.get('platform')}/{scope.get('sensor')}" + (f" · {label}" if label else ""),
-               "createdBy": "agent",
+               "createdBy": "agent", "lastBy": "agent",
                "scope": {"experimentId": upload_scope.get("experimentId"), "seasonId": None, "siteId": None,
                          "populationId": None},
                "uploadScope": upload_scope, "status": "draft", "steps": {}, "createdAt": _now(), "updatedAt": _now()}
@@ -330,7 +331,12 @@ class ProcessRuns:
 
     # -- steps ----------------------------------------------------------------
     def set_step(self, run: dict, key: str, status: str, job_id: Optional[str] = None,
-                 outputs: Optional[dict] = None, error: Optional[str] = None) -> dict:
+                 outputs: Optional[dict] = None, error: Optional[str] = None,
+                 bookkeeping: bool = False) -> dict:
+        """``bookkeeping``: only following a job's outcome (settle), not the agent's own
+        work: the run's ``lastBy`` (whose change the app's agent mark shows) is kept."""
+        if not bookkeeping:
+            run["lastBy"] = "agent"
         prev = run["steps"].get(key) or {"status": "pending", "jobIds": []}
         step = dict(prev)
         if job_id and job_id not in step["jobIds"]:
@@ -358,10 +364,21 @@ class ProcessRuns:
     def record_job(self, scope: dict, job: dict, kind: Optional[str] = None, skipped: tuple[str, ...] = ()) -> dict:
         """A pipeline job the agent submitted: attach it to its step."""
         run = self.ensure_run(scope, kind)
+        params = job.get("parameters") or {}
+        if str(job.get("job_type")) == "LOCATE_PLANTS" and params.get("image_path") and not params.get("images_prefix"):
+            # A try on one image (checking a model or a threshold): not the run's
+            # inference, and not a model the person chose for the pipeline.
+            return self.describe(run)
         for key in skipped:
             if (run["steps"].get(key) or {}).get("status") not in ("completed", "running"):
                 self.set_step(run, key, "skipped")
         step = JOB_STEP.get(str(job.get("job_type")))
+        # Plot images and trait extraction run on the active boundaries: they exist, so
+        # the boundaries step is done even when they were saved some other way.
+        if step in ("split_orthomosaic", "trait_extraction") and (
+                params.get("boundary_geojson_path") or params.get("boundaries") or params.get("boundaries_path")):
+            if (run["steps"].get("plot_boundary_prep") or {}).get("status") != "completed":
+                self.set_step(run, "plot_boundary_prep", "completed")
         if step:
             self.set_step(run, step, "running", job_id=str(job.get("id")))
         if str(job.get("job_type")) == "LOCATE_PLANTS":
@@ -421,10 +438,11 @@ class ProcessRuns:
                     outputs = None
                     if key == "orthomosaic":
                         outputs = self._ortho_outputs(step, last)
-                    self.set_step(run, key, "completed", outputs=outputs)
+                    self.set_step(run, key, "completed", outputs=outputs, bookkeeping=True)
                     dirty = True
                 elif st in ("FAILED", "CANCELLED"):
-                    self.set_step(run, key, "failed", error=str(last.get("error_message") or st.title()))
+                    self.set_step(run, key, "failed", error=str(last.get("error_message") or st.title()),
+                                  bookkeeping=True)
                     dirty = True
             if dirty:
                 changed.append(self.describe(run))

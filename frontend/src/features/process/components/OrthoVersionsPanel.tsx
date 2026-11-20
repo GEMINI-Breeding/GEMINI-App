@@ -263,9 +263,14 @@ export function OrthoVersionsPanel({
         createdAt: target.createdAt ?? new Date().toISOString(),
       })
     }
-    setStepState(run.id, "orthomosaic", {
-      outputs: { ...(run.steps.orthomosaic?.outputs ?? {}), versions: meta },
-    })
+    setStepState(
+      run.id,
+      "orthomosaic",
+      {
+        outputs: { ...(run.steps.orthomosaic?.outputs ?? {}), versions: meta },
+      },
+      "person",
+    )
     setEditingVersion(null)
   }
 
@@ -294,14 +299,22 @@ export function OrthoVersionsPanel({
       const meta = readOrthoOutputs(run).filter(
         (m) => m.filename !== v.filename,
       )
-      setStepState(run.id, "orthomosaic", {
-        outputs: { ...(run.steps.orthomosaic?.outputs ?? {}), versions: meta },
-        // If we just deleted the last version, flip the step back to pending
-        // so the user can re-run / re-import. Otherwise leave it completed.
-        ...(meta.length === 0
-          ? { status: "pending" as const, completedAt: undefined }
-          : {}),
-      })
+      setStepState(
+        run.id,
+        "orthomosaic",
+        {
+          outputs: {
+            ...(run.steps.orthomosaic?.outputs ?? {}),
+            versions: meta,
+          },
+          // If we just deleted the last version, flip the step back to pending
+          // so the user can re-run / re-import. Otherwise leave it completed.
+          ...(meta.length === 0
+            ? { status: "pending" as const, completedAt: undefined }
+            : {}),
+        },
+        "person",
+      )
       queryClient.invalidateQueries({
         queryKey: [
           "files",

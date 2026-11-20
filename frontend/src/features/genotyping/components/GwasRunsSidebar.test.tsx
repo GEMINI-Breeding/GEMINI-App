@@ -33,6 +33,8 @@ const useTraitNameMapMock = vi.fn()
 vi.mock("@/features/genotyping/hooks/useGwas", () => ({
   useStudyGwasJobs: (...args: unknown[]) => useStudyGwasJobsMock(...args),
   useTraitNameMap: (...args: unknown[]) => useTraitNameMapMock(...args),
+  // Site/season names come from the experiment; none here, so rows say "All sites and seasons".
+  useExperimentScopeNames: () => ({ data: undefined }),
   // jobTraitNames is a pure helper — re-export the real one. We import
   // it dynamically inside the mock factory to keep the mock self-contained.
   jobTraitNames: (

@@ -94,7 +94,8 @@ interface UploadListProps {
   scope?: Record<string, EntityChoice>
   onFilesSelected?: (files: File[]) => void
   /** Fired with the MinIO object paths of the successfully uploaded files. */
-  onUploadComplete?: (destPaths: string[]) => void
+  /** destPaths: uploaded now; alreadyStored: skipped as already there. */
+  onUploadComplete?: (destPaths: string[], alreadyStored?: string[]) => void
   /** Optional label shown above the upload zone. */
   label?: string
   /** Optional sub-path appended to the target directory (e.g. "DEM"). */
@@ -351,7 +352,25 @@ export function UploadList({
       return
     }
 
-    if (wrongType.length > 0 || folderArtifacts.length > 0) {
+    // iPhone photos in Apple's HEIC format: nothing downstream reads them.
+    const heic = wrongType.filter((f) => /\.(heic|heif)$/i.test(f.name))
+    if (
+      heic.length > 0 &&
+      heic.length === wrongType.length &&
+      folderArtifacts.length === 0
+    ) {
+      setRejection({
+        title:
+          accepted.length > 0
+            ? `${heic.length} HEIC photo(s) skipped — ${accepted.length} accepted`
+            : "HEIC photos can't be processed",
+        description:
+          "These are iPhone photos in Apple's HEIC format, which the processing (stitching, plot images, models) can't read. Their GPS would be lost too.",
+        rejectedNames: heic.map((f) => f.name),
+        remediation:
+          "On the iPhone: Settings → Camera → Formats → Most Compatible, then take the photos again; or export these as JPEG (Photos → Export → JPEG, with location included) and upload those.",
+      })
+    } else if (wrongType.length > 0 || folderArtifacts.length > 0) {
       const allowed = cfg?.fileType ?? "(any)"
       const names = [...folderArtifacts, ...wrongType].map((f) => f.name)
       const desc =
@@ -544,6 +563,7 @@ export function UploadList({
       // in Manage Data, and two uploads at the same scope no longer
       // commingle on disk.
       const allUploaded: string[] = []
+      const alreadyStored: string[] = []
       // Field data (rover logs, images) becomes a run on the Process tab.
       const filedRuns: { run: Run; created: boolean }[] = []
       for (const batch of work) {
@@ -651,6 +671,12 @@ export function UploadList({
           if (choice === "skip") {
             const skip = new Set(existing)
             toUpload = batch.files.filter((f) => !skip.has(f.name))
+            // Already stored in this folder: still passed on, so a step
+            // after the upload (e.g. mapping weather columns) can use them.
+            if (!batchRoot)
+              alreadyStored.push(
+                ...existing.map((n) => `${targetRootDir}/${n}`),
+              )
             if (toUpload.length === 0) {
               showSuccessToast(
                 batches.length > 1
@@ -773,7 +799,7 @@ export function UploadList({
           },
         )
       }
-      onUploadComplete?.(allUploaded)
+      onUploadComplete?.(allUploaded, alreadyStored)
       setSelected([])
       setFolderEdits({})
       setFolderMeaning("one")

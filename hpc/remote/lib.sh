@@ -193,7 +193,7 @@ worker_job_types() {
     amiga) echo "EXTRACT_BINARY" ;;
     stitch) echo "RUN_STITCH ASSOCIATE_BOUNDARIES" ;;
     odm) echo "RUN_ODM" ;;
-    geo) echo "SPLIT_ORTHOMOSAIC CREATE_COG" ;;
+    geo) echo "SPLIT_ORTHOMOSAIC CREATE_COG DATA_SYNC GROUND_PLOT_FRAMES" ;;
     ml) echo "LOCATE_PLANTS EXTRACT_TRAITS" ;;
     gwas) echo "RUN_GWAS" ;;
     *) echo "" ;;

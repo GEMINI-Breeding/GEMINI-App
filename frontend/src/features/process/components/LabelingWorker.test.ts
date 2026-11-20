@@ -40,4 +40,10 @@ describe("workerLine", () => {
       "bad",
     )
   })
+  it("does not keep checking when the overview has no ML worker", () => {
+    expect(workerLine(undefined, null).text).toMatch(/Checking/)
+    const l = workerLine(undefined, null, true)
+    expect(l.text).not.toMatch(/Checking/)
+    expect(l.ready).toBe(true)
+  })
 })

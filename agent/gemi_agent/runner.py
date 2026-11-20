@@ -312,7 +312,11 @@ def parse_text_call(text: str) -> Optional[tuple[str, dict]]:
         body = text[m.end() - 1:]
         if body.startswith("("):            # call:name(a: 1) — same thing with parentheses
             end = body.rfind(")")
-            body = "{" + (body[1:end] if end > 0 else body[1:]) + "}"
+            inner = body[1:end] if end > 0 else body[1:]
+            _, kw = split_pycall(f"{m.group(1)}({inner})", {})     # call:name(a="x", b=2): Python keywords
+            if kw:
+                return m.group(1), kw
+            body = "{" + inner + "}"
         args = _loose_json(body)
         return m.group(1), args if args is not None else {}
     candidates = _JSON_BLOCK.findall(text)
@@ -709,15 +713,28 @@ class Run:
                             continue
                 unread = self._rules_unread(name, args)
                 if unread:
+                    self._seen[key] -= 1             # the call itself was fine: sent again after the rules, it is new
+                    self._last_call = ""
                     self.event("tool", tool=name, args=args, error="cluster rules not read yet: " + ", ".join(unread))
                     self._tool_reply(name, "NOT RUN. This cluster's administrators publish rules for agents that have "
                                      "not been read in this conversation: " + ", ".join(unread) + ". Read each with "
                                      "cluster_rules and its name first, then make this call again if the rules allow "
                                      "it.", [], call_id)
                     continue
-                if name == "cluster_rules" and args.get("name"):
-                    self._rules_read.add(str(args["name"]))
-                if name == "upload":
+                if name == "cluster_rules":
+                    if args.get("name"):
+                        self._rules_read.add(str(args["name"]))
+                    else:
+                        try:                         # the tool reads the only rule set when none is named
+                            from .hpc_tools import site_rules
+
+                            rows = site_rules() or []
+                            if len(rows) == 1:
+                                self._rules_read.add(rows[0]["name"])
+                        except Exception:
+                            pass
+                if name == "upload" or (name == "cluster_folder" and args.get("upload")) or (
+                        name == "online_storage" and str(args.get("action")) == "copy" and args.get("data_type")):
                     invented = self._not_said({k: args.get(k) for k in ("experiment", "site", "population", "date")})
                     if invented:
                         self.event("tool", tool=name, args=args, error="labels the person did not give: " + ", ".join(invented))

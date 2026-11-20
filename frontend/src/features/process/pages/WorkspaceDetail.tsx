@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { BatchRunDialog } from "@/features/process/components/BatchRunDialog"
 import { NewRunDialog } from "@/features/process/components/NewRunDialog"
-import { RunGroupList } from "@/features/process/components/RunGroupList"
+import { RunGrid } from "@/features/process/components/RunGrid"
 import {
   deletePipeline,
   deleteRun,
@@ -74,25 +74,19 @@ function PipelineCard({
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                  isAerial ? "bg-blue-500/10" : "bg-green-500/10"
-                }`}
-              >
-                <Icon
-                  className={`h-5 w-5 ${isAerial ? "text-blue-600" : "text-green-600"}`}
-                />
-              </div>
-              <div>
-                <CardTitle className="text-base">{pipeline.name}</CardTitle>
-                <CardDescription className="capitalize">
-                  {pipeline.type} pipeline
-                </CardDescription>
-              </div>
+      <Card className="gap-3 py-3">
+        <CardHeader className="px-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Icon
+                className={`h-4 w-4 shrink-0 ${isAerial ? "text-blue-600" : "text-green-600"}`}
+              />
+              <CardTitle className="truncate text-base">
+                {pipeline.name}
+              </CardTitle>
+              <CardDescription className="shrink-0 capitalize">
+                · {pipeline.type} pipeline
+              </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -153,20 +147,22 @@ function PipelineCard({
           </div>
         </CardHeader>
         {runs.length > 0 && (
-          <CardContent data-onboarding="process-run-groups">
-            {/* One row per flight day (every sensor flown); a day with several runs
-                — diurnal flights, treatments, thermal beside RGB — expands to them. */}
-            <RunGroupList
+          <CardContent className="px-4" data-onboarding="process-run-groups">
+            {/* Days × the pipeline's stages; a cell opens that day at that stage.
+                A day with several runs (times of day, treatments, thermal
+                beside RGB) opens to a row per run. */}
+            <RunGrid
               runs={runs}
               experiment={
                 runs.find((r) => r.uploadScope?.experiment)?.uploadScope
                   ?.experiment
               }
-              typeOf={() => pipeline.type}
-              onOpen={(run) =>
+              type={pipeline.type}
+              onOpen={(run, step) =>
                 navigate({
                   to: "/process/$workspaceId/run/$runId",
                   params: { workspaceId, runId: run.id },
+                  search: step ? { step } : {},
                 })
               }
               actions={(run) => (
@@ -415,20 +411,24 @@ export function WorkspaceDetail() {
 
   return (
     <div className="bg-background">
-      <div className="mx-auto max-w-5xl p-8">
-        <div className="mb-8 flex items-center gap-4">
+      <div className="mx-auto max-w-6xl px-6 py-4">
+        {/* One line: the workspace, what it is. */}
+        <div className="mb-3 flex min-w-0 items-center gap-2">
           <Button
             variant="ghost"
             size="icon"
+            className="h-8 w-8 shrink-0"
             aria-label="Back to workspaces"
             onClick={() => navigate({ to: "/process" })}
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <h1 className="text-2xl font-semibold">{workspace.name}</h1>
-            <p className="text-muted-foreground text-sm">{description}</p>
-          </div>
+          <h1 className="shrink-0 text-xl font-semibold">{workspace.name}</h1>
+          {description && description !== `Experiment ${workspace.name}` && (
+            <p className="text-muted-foreground truncate text-sm">
+              · {description}
+            </p>
+          )}
         </div>
 
         {pipelines.length === 0 ? (
@@ -455,8 +455,7 @@ export function WorkspaceDetail() {
           </>
         ) : (
           <>
-            <div className="mb-6">
-              <h2 className="mb-4 text-lg font-medium">Pipelines</h2>
+            <div className="mb-4">
               <div className="space-y-3">
                 {pipelines.map((pipeline) => (
                   <PipelineCard

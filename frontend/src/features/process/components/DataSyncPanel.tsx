@@ -9,7 +9,7 @@ import { JobsService } from "@/client"
 
 const SOURCE_LABELS: Record<string, string> = {
   exif: "own EXIF GPS",
-  platform_log: "ArduPilot log",
+  platform_log: "from the GPS log",
   interpolated: "interpolated from the source track",
   clamped: "clamped to the source track's end",
   own_gps: "own GPS (outside the track)",
@@ -22,6 +22,13 @@ interface SyncResult {
   images?: number
   located?: number
   platform_log_fixes?: number
+  /** GPS logs read (file name → fixes) and those that held no track. */
+  gps_logs?: Record<string, number>
+  gps_logs_unread?: string[]
+  /** A ground run's photos with no GPS at all (paired with the field design). */
+  no_positions?: boolean
+  /** Per image folder: the camera clock shift applied to match the GPS. */
+  clock_shift?: Record<string, { hours: number; how: string; images: number }>
   datasets?: Record<string, Record<string, number>>
   /** Located images whose altitude was estimated from the nearest image in
    * time, or that no image could supply (see sync.fill_missing_altitude). */
@@ -48,10 +55,55 @@ export function DataSyncPanel({
       <p data-testid="data-sync-summary">
         {result.located} of {result.images} images have a position
         {result.mode === "cross_sensor" ? " (synced from another sensor)" : ""}
-        {result.platform_log_fixes
-          ? ` · ${result.platform_log_fixes} ArduPilot log fixes`
-          : ""}
       </p>
+      {result.gps_logs && Object.keys(result.gps_logs).length > 0 ? (
+        <p data-testid="data-sync-gps-logs">
+          GPS log
+          {Object.keys(result.gps_logs).length === 1 ? "" : "s"}:{" "}
+          {Object.entries(result.gps_logs)
+            .map(([name, n]) => `${name} (${n} fixes)`)
+            .join(", ")}
+        </p>
+      ) : result.platform_log_fixes ? (
+        <p>{result.platform_log_fixes} GPS log fixes</p>
+      ) : null}
+      {result.gps_logs_unread?.length ? (
+        <p className="text-amber-600">
+          Not read as a GPS log (no times and positions found):{" "}
+          {result.gps_logs_unread.join(", ")}
+        </p>
+      ) : null}
+      {Object.values(result.clock_shift ?? {}).map((c, i) => (
+        <p
+          key={i}
+          className="text-amber-600"
+          data-testid="data-sync-clock-shift"
+        >
+          The camera's clock had no time zone: {c.images} photo
+          {c.images === 1 ? "" : "s"} shifted by {c.hours > 0 ? "+" : ""}
+          {c.hours} h ({c.how}) to line up with the GPS.
+        </p>
+      ))}
+      {result.no_positions ? (
+        <p
+          className="text-sky-700 dark:text-sky-300"
+          data-testid="data-sync-no-gps"
+        >
+          These photos have no GPS. That is fine: pair them with the field
+          design in the Plot Images step — one photo per plot, or mark the
+          walked plots first and use their raw frames with the field design.
+        </p>
+      ) : result.images &&
+        result.located !== undefined &&
+        result.located < result.images ? (
+        <p className="text-amber-600" data-testid="data-sync-unlocated">
+          {result.images - result.located} image
+          {result.images - result.located === 1 ? " has" : "s have"} no
+          position. Their own GPS is missing (on a phone, turn on location for
+          the camera) and no GPS log covers their capture time: upload one as
+          GPS Logs for this date and camera, then run Data Sync again.
+        </p>
+      ) : null}
       {result.altitude && result.altitude.missing > 0 ? (
         <p className="text-amber-600" data-testid="data-sync-altitude">
           No image has an altitude, so the orthomosaic places every camera at 0

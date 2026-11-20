@@ -720,6 +720,13 @@ def check_args(name: str, args: dict) -> tuple[dict, Optional[str]]:
     if missing:
         return out, (f"{name} needs {', '.join(missing)}. " +
                      " ".join(f"{k}: {props[k]['description']}." for k in missing if props[k].get("description")))
+    # A tool's own check of what must go together (e.g. an upload's settings), made before the
+    # person is asked to approve the call rather than after.
+    pre = TOOLS[name].get("precheck")
+    if pre:
+        problem = pre(out)
+        if problem:
+            return out, f"{name}: {problem}"
     return out, None
 
 
@@ -795,3 +802,4 @@ from . import automark  # noqa: E402,F401  (rover plots from the canopy's own rh
 from . import analysis_tools  # noqa: E402,F401  (the Analyze tab: trait data and its analyses)
 from . import genotype_tools  # noqa: E402,F401  (the Genotyping tab: marker studies and GWAS)
 from . import plot_images  # noqa: E402,F401  (photos with no GPS, paired with the field design)
+from . import label_tools  # noqa: E402,F401  (labelled sets and training, as the app's Label & train)

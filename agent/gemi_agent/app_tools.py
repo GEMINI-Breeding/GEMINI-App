@@ -13,7 +13,7 @@ from typing import Any, Optional
 from . import uploads
 from .client import AGENT_DIR, SKILLS_DIR, ApiError
 from .process_runs import JOB_STEP, SCOPE_KEYS, scope_from_path
-from .tools import TOOLS, _bool, _int, _ints, _str, _tool, client, process_tab
+from .tools import TOOLS, _bool, _int, _ints, _num, _str, _tool, client, process_tab
 
 _ = AGENT_DIR
 # What read_skill returns by default: "quick" = the steps only, "full" = the whole skill.
@@ -232,7 +232,9 @@ def local_path(given: str) -> Path:
 
 
 _KIND_OF = {**{e: "images" for e in (".jpg", ".jpeg", ".png")}, ".bin": "amiga_bin",
-            ".tif": "tif", ".tiff": "tif"}
+            ".tif": "tif", ".tiff": "tif",
+            **{e: "gps_log" for e in (".gpx", ".nmea", ".pos")},
+            **{e: "heic" for e in (".heic", ".heif")}}
 
 
 def look_at_folder(args: dict) -> dict:
@@ -282,7 +284,11 @@ def look_at_folder(args: dict) -> dict:
                       "call, with its own data_type and paths (the folders listed for it)")
     for k in kinds:
         dt = {"images": "images", "amiga_bin": "amiga_bin",
-              "tif": "orthomosaic (a stitched map) or images (single photos): ask the person"}[k]
+              "tif": "orthomosaic (a stitched map) or images (single photos): ask the person",
+              "gps_log": "gps_log (a GPS track for photos of the same date, platform and sensor; "
+                         "upload it with the photos' own scope)",
+              "heic": "none: iPhone HEIC photos can't be processed; ask for JPEGs (iPhone: Settings → "
+                      "Camera → Formats → Most Compatible, or export as JPEG with location)"}[k]
         where = [r["folder"] for r in rows if k in r["files"]]
         advice.append(f"{k}: data_type {dt}; in {len(where)} folder(s): {', '.join(where[:8])}"
                       + (" …" if len(where) > 8 else ""))
@@ -463,7 +469,7 @@ def _scope_of(params: dict) -> Optional[dict]:
             scope["datasetShortIds"] = list(params["dataset_short_ids"])
         return scope
     for key in ("images_prefix", "output_prefix", "orthomosaic_path", "output_traits_geojson_path",
-                "output_predictions_path", "image_path", "stitch_prefix"):
+                "output_predictions_path", "image_path", "stitch_prefix", "scope_prefix"):
         if isinstance(params.get(key), str):
             scope = scope_from_path(params[key])
             if scope:
@@ -493,10 +499,14 @@ def _adopt(pr) -> int:
     link existed, with `submit_job`, or by another client) to the run of their
     scope, oldest first, so the Process tab shows them too."""
     known = {j for r in pr.state()["runs"] for s in r.get("steps", {}).values() for j in s.get("jobIds") or []}
-    # Labelling prompts (LOCATE_PLANTS with `prompted`) belong to no run step.
+    # Labelling prompts (LOCATE_PLANTS with `prompted`) and tries on one image
+    # (checking a model, proposals for labelling) belong to no run step.
+    def one_off(j: dict) -> bool:
+        p = j.get("parameters") or {}
+        return bool(p.get("prompted")) or (str(j.get("job_type")) == "LOCATE_PLANTS"
+                                           and bool(p.get("image_path")) and not p.get("images_prefix"))
     jobs = [j for j in client().jobs(limit=1000)
-            if str(j.get("job_type")) in JOB_STEP and str(j.get("id")) not in known
-            and not (j.get("parameters") or {}).get("prompted")]
+            if str(j.get("job_type")) in JOB_STEP and str(j.get("id")) not in known and not one_off(j)]
     adopted = 0
     for job in sorted(jobs, key=lambda j: j.get("created_at") or ""):
         params = job.get("parameters") or {}
@@ -580,6 +590,11 @@ def wait_jobs(args: dict) -> dict:
     """Block until the given jobs finish (or the timeout passes)."""
     c = client()
     ids = [str(i) for i in args.get("job_ids") or []]
+    if ids and all(i.isdigit() for i in ids):
+        # Cluster (Slurm) job ids, as an upload from a cluster folder returns: not app jobs.
+        from .hpc_tools import wait_cluster_jobs
+
+        return wait_cluster_jobs(ids, min(int(args.get("timeout_s") or 600), 3600))
     if not ids:
         # "Wait for it": the jobs still open, else the one submitted last.
         rows = c.jobs(None, None, 1000)
@@ -690,6 +705,88 @@ def _model_spec(model: Any, task: Optional[str]) -> dict:
     return spec
 
 
+def plot_images_prefix(run_dir: str) -> str:
+    """A run's per-plot images: the orthomosaic's plot images (…/PlotImages/),
+    or, when the plots were cut from the drone photos instead, the straightened
+    plot frames (…/PlotFrames/straightened/)."""
+    c = client()
+    for sub in ("PlotImages/", "PlotFrames/straightened/"):
+        page = c.list_page(run_dir + sub, limit=50)
+        if any(str(f.get("object_name") or "").lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff"))
+               for f in page.get("files") or []):
+            return run_dir + sub
+    return run_dir + "PlotImages/"
+
+
+def pick_run(words: str) -> dict:
+    """The one Process-tab run that words name (site, crop, date; or a run id).
+    A date flown several times (runs of the day, treatments) has many runs with
+    the same words: then the label printed for a run picks it exactly, and plain
+    words pick the date's main run (no run-of-day label, RGB) when there is one."""
+    from . import guide
+    from .process_runs import ProcessRuns
+
+    words = str(words or "").strip()
+    pr = ProcessRuns(client())
+    runs, pipelines = guide._state(pr)
+    found = [r for r in runs if str(r.get("id", "")).startswith(words)] if len(words) >= 8 else []
+    if not found:
+        found = guide._match(runs, words)
+    if len(found) > 1:
+        def norm(t: str) -> str:
+            return " ".join(t.lower().replace("·", " ").split())
+        exact = [r for r in found if norm(guide._label(pr.describe(r, pipelines))) == norm(words)]
+        main = [r for r in found if not (r.get("uploadScope") or {}).get("batchLabel")
+                and "rgb" in str((r.get("uploadScope") or {}).get("sensor", "")).lower()]
+        found = exact if len(exact) == 1 else main if len(main) == 1 else found
+    if len(found) != 1:
+        raise ValueError(f"`run` must pick exactly one run; it matches {len(found)}: " +
+                         ", ".join(guide._label(pr.describe(r, pipelines)) for r in (found or runs)[:8]) +
+                         ". Add the experiment (e.g. GEMINI-26), the run of the day or treatment as printed, or the sensor.")
+    return found[0]
+
+
+def sync_positions(args: dict) -> dict:
+    """Data Sync for a run: give every photo a position and capture time
+    (the app's Data Sync step, the DATA_SYNC job). A handheld pass's photos
+    take their own EXIF GPS (a phone with location on for its camera), and a
+    GPS log uploaded for the same date and camera (`upload` data_type
+    gps_log: GPX, NMEA, CSV, RTK .pos, ArduPilot) replaces it with the log's
+    position at each capture time. A camera clock without a time zone is
+    lined up with the log by whole hours unless `clock_offset_sec` says the
+    shift. A rover extraction already has its track: nothing to do."""
+    run = pick_run(str(args.get("run") or ""))
+    u = run.get("uploadScope") or {}
+    if not all(u.get(k) for k in SCOPE_KEYS):
+        raise ValueError("this run has no upload scope to sync")
+    raw = "Raw/" + "/".join(str(u[k]) for k in SCOPE_KEYS) + "/"
+    folders, bundled = [], []
+    for sid in u.get("datasetShortIds") or []:
+        rover = [o for o in client().list_dir(f"{raw}{sid}/RGB/Metadata") if
+                 str(o.get("object_name", "")).endswith("msgs_synced.csv")]
+        if rover:
+            bundled.append(sid)
+            continue
+        imgs = [str(o.get("object_name", "")) for o in client().list_dir(f"{raw}{sid}/Images")
+                if str(o.get("object_name", "")).lower().endswith((".jpg", ".jpeg", ".png", ".tif", ".tiff"))]
+        if imgs:
+            folders.append(imgs[0].rsplit("/", 1)[0] + "/")
+    if not folders:
+        if bundled:
+            return {"result": {"already_located": bundled,
+                               "tell_the_person": "The rover's own GPS track is used; no sync needed."}}
+        raise ValueError(f"no photos found under {raw} for this run's uploads")
+    params: dict = {"scope_prefix": raw, "images_prefixes": sorted(set(folders)), "mode": "own_metadata",
+                    "write_geo_txt": str(u.get("platform", "")).lower() == "drone"}
+    if args.get("clock_offset_sec") not in (None, ""):
+        params["clock_offset_sec"] = float(args["clock_offset_sec"])
+    job = client().submit_job("DATA_SYNC", params, _experiment_id(str(u["experiment"])))
+    _record(job, params)
+    return {"result": {"job_id": str(job.get("id")), "folders": params["images_prefixes"],
+                       "next": "wait for the job (`job_detail`): its result says how many photos got a position, "
+                               "from the photos' GPS or the GPS log, and any clock shift; then plot marking"}}
+
+
 def resolve_inference(args: dict) -> dict:
     """Fill in what follows from the rest: `run` (words naming one pipeline run)
     gives the plot-images folder and where the predictions go; the model may
@@ -708,17 +805,8 @@ def resolve_inference(args: dict) -> dict:
         args["run"] = " ".join(w for w in given.replace("/", " ").split() if w.lower() != "plotimages")
         args.pop("images_prefix")
     if args.get("run") and not (args.get("images_prefix") or args.get("image_path")):
-        from . import guide
-        from .process_runs import ProcessRuns
-
-        pr = ProcessRuns(client())
-        runs, pipelines = guide._state(pr)
-        found = guide._match(runs, str(args["run"]))
-        if len(found) != 1:
-            raise ValueError(f"`run` must pick exactly one run; it matches {len(found)}: " +
-                             ", ".join(guide._label(pr.describe(r, pipelines)) for r in (found or runs)[:8]))
-        up = found[0].get("uploadScope") or {}
-        args["images_prefix"] = "Processed/" + "/".join(str(up[k]) for k in SCOPE_KEYS) + "/PlotImages/"
+        up = pick_run(str(args["run"])).get("uploadScope") or {}
+        args["images_prefix"] = plot_images_prefix("Processed/" + "/".join(str(up[k]) for k in SCOPE_KEYS) + "/")
         args.setdefault("per_plot", True)
     args.pop("run", None)
     prefix = args.get("images_prefix") or ""
@@ -726,8 +814,14 @@ def resolve_inference(args: dict) -> dict:
         m = args["model"]
         name = str(args.get("count_label") or m.get("hf_model_id") or m.get("model_id") or m.get("weights_path") or "model")
         name = "".join(c if c.isalnum() else "-" for c in name.split("/")[-1].rsplit(".", 1)[0]).strip("-").lower()
-        base = prefix.rstrip("/").rsplit("/", 1)[0] if prefix.rstrip("/").endswith(("PlotImages",)) or "AgRowStitch_v" in prefix \
-            else prefix.rstrip("/")
+        scope = scope_from_path(prefix)
+        if scope is not None:
+            # The run's own folder, never inside the images (a later run over the
+            # folder would meet its own predictions there).
+            base = "Processed/" + "/".join(str(scope[k]) for k in SCOPE_KEYS)
+        else:
+            base = prefix.rstrip("/").rsplit("/", 1)[0] if prefix.rstrip("/").endswith(("PlotImages",)) \
+                or "AgRowStitch_v" in prefix else prefix.rstrip("/")
         args["output_predictions_path"] = f"{base}/predictions/{name}-v1.json"
         args.setdefault("count_label", name)
     return args
@@ -746,7 +840,7 @@ def run_inference(args: dict) -> dict:
         # each plot's count to the trait records (Analyze and map views).
         scope = scope_from_path(params["images_prefix"])
         if scope is None:
-            raise ValueError("per_plot needs images_prefix under Processed/…/PlotImages/")
+            raise ValueError("per_plot needs images_prefix under Processed/…/PlotImages/ (or …/PlotFrames/straightened/)")
         directory = "Processed/" + "/".join(str(scope[k]) for k in SCOPE_KEYS) + "/"
         snap = client().load_version(directory).get("state_snapshot") or {}
         if not (snap.get("boundaries") or {}).get("features"):
@@ -831,11 +925,19 @@ _app(datasets, "An experiment's upload batches (datasets) with their storage loc
      {"experiment": _str}, ["experiment"], "status")
 _app(browse, "List objects under a storage prefix (paged; listing is recursive, so use a narrow prefix).",
      {"prefix": _str, "limit": _int, "offset": _int}, ["prefix"], "status")
+_app(sync_positions, "Data Sync for a run: positions for every photo from their own GPS (phone location on) "
+     "or a GPS log uploaded for the same date and camera (data_type gps_log), matched by capture time. Run it "
+     "before plot marking on a handheld pass.",
+     {"run": {**_str, "description": "words naming the run (site, crop, date, platform)"},
+      "clock_offset_sec": {**_num, "description": "seconds to add to photo times with no time zone; omit to "
+                                                   "fit them to the GPS log"}},
+     ["run"], "jobs")
 _app(reference_datasets, "Reference data loaded in the app (field designs, hand-measured traits per plot).",
      {}, [], "status")
 _app(upload, "Start a background upload of local files or folders into the app; returns a task id to poll with "
      "`tasks`. Creates the experiment/site/population/season/platform/sensor if missing. data_type: amiga_bin "
-     "(rover .bin logs; extraction is queued per file), images, orthomosaic.",
+     "(rover .bin logs; extraction is queued per file), images, orthomosaic, gps_log (a GPS track — GPX, NMEA, "
+     "CSV, RTK .pos, ArduPilot — for photos of the same date, platform and sensor; Data Sync reads it).",
      {"paths": {**_strs, "description": "folders or files on this computer"},
       "experiment": {**_str, "description": "the experiment / project name"},
       "site": {**_str, "description": "where the field is (the location)"},
@@ -896,11 +998,22 @@ _app(online_storage, "Data in online storage (Box, Google Drive, Dropbox, S3, We
       "id": _str, "keep": {**_bool, "description": "keep the copy after uploading (default: remove it)"},
       "experiment": _str, "site": _str, "population": _str, "date": {**_str, "description": "YYYY-MM-DD"},
       "platform": _PLATFORM, "sensor": _SENSOR,
-      "data_type": {**_str, "description": "images | amiga_bin | orthomosaic"},
+      "data_type": {**_str, "description": "images | amiga_bin | orthomosaic | gps_log"},
       "name_ends": {**_str, "description": "keep only files whose names end so, comma separated"},
       "name_has": {**_str, "description": "keep only files whose names contain this, e.g. one date's files of a "
                                           "folder of several dates: 2023-06-15 (copy each date with its own date)"},
       "run_of_day": _str, "treatment": _str}, ["action"], "upload")
+
+
+def _copy_precheck(a: dict) -> Optional[str]:
+    if str(a.get("action")) != "copy" or not any(a.get(k) for k in ("experiment", "site", "population", "date", "data_type")):
+        return None
+    from .hpc_tools import _upload_settings_missing
+
+    return _upload_settings_missing(a, "To copy without uploading, leave out data_type and the other settings.")
+
+
+TOOLS["online_storage"]["precheck"] = _copy_precheck
 _app(tasks, "Progress of background uploads: one task (task_id) or the latest ones.",
      {"task_id": _str, "limit": _int}, [], "upload")
 _app(wait_task, "Wait for a background upload: returns when it finishes or after timeout_s (default 300, max "

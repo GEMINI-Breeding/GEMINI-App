@@ -54,6 +54,8 @@ const WORKER_FOR: Record<string, string> = {
   RUN_ODM: "orthomosaic (odm)",
   CREATE_COG: "map tiles (geo)",
   SPLIT_ORTHOMOSAIC: "map tiles (geo)",
+  DATA_SYNC: "map tiles (geo)",
+  GROUND_PLOT_FRAMES: "map tiles (geo)",
   EXTRACT_TRAITS: "models (ml)",
   LOCATE_PLANTS: "models (ml)",
   RUN_STITCH: "stitching",

@@ -260,24 +260,72 @@ def browse(name: str, path: str = "", where: str = "local", cluster: Optional[st
     return {"name": name, "path": path, "items": rows}
 
 
-def read_file(name: str, path: str, where: str = "local", cluster: Optional[str] = None) -> bytes:
-    """One small file of a connection (up to 20 MB): a field design, a field map."""
+def read_file(name: str, path: str, where: str = "local", cluster: Optional[str] = None,
+              offset: int = 0) -> bytes:
+    """One small file of a connection (up to 20 MB from ``offset``): a field design, a field map,
+    or a piece of a larger one (read_whole)."""
     name = check_name(name)
     path = path.strip().strip("/")
     if where == "cluster":
         from .hpc_tools import _gemi_hpc
 
-        out = _gemi_hpc(["cloud", "cat", name, encode_path(path)], cluster, timeout=300).strip()
+        words = ["cloud", "cat", name, encode_path(path)] + ([str(int(offset))] if offset else [])
+        out = _gemi_hpc(words, cluster, timeout=300).strip()
         line = out.splitlines()[-1] if out else ""
         try:
             return base64.b64decode(line, validate=True)
         except Exception:
             raise RuntimeError(f"could not read {name}:{path}: {out[-300:]}") from None
-    r = subprocess.run([str(rclone_path()), "--config", str(CONF), "cat", "--count", str(20 * 1024 * 1024),
-                        f"{name}:{path}"], capture_output=True, timeout=300)
+    r = subprocess.run([str(rclone_path()), "--config", str(CONF), "cat", "--offset", str(int(offset)),
+                        "--count", str(READ_PIECE), f"{name}:{path}"], capture_output=True, timeout=300)
     if r.returncode:
         raise RuntimeError(_rclone_error(r.stderr.decode(errors="replace")))
     return r.stdout
+
+
+READ_PIECE = 20 * 1024 * 1024
+
+
+def _size_of(name: str, path: str, where: str, cluster: Optional[str]) -> Optional[int]:
+    """The file's size as the connection lists it, or None when it cannot be told."""
+    parent, _, leaf = path.strip("/").rpartition("/")
+    try:
+        for e in browse(name, parent, where, cluster).get("items", []):
+            if e.get("name") == leaf and not e.get("is_dir") and e.get("size") is not None:
+                return int(e["size"])
+    except Exception:
+        return None
+    return None
+
+
+def read_whole(name: str, path: str, where: str = "local", cluster: Optional[str] = None,
+               limit: int = 200 * 1024 * 1024) -> bytes:
+    """A file of any size up to ``limit``, read 20 MB at a time (a flight log, say).
+    Checked against the size the connection lists: a piece cut short by a dropped
+    connection is read again, never taken for the end of the file."""
+    size = _size_of(name, path, where, cluster)
+    if size is not None and size > limit:
+        raise ValueError(f"{path} is larger than {limit // 2**20} MB: copy it with fetch instead")
+    out = b""
+    while len(out) < limit:
+        want = min(READ_PIECE, size - len(out)) if size is not None else READ_PIECE
+        if want <= 0:
+            return out
+        # A dropped connection loses one piece, not the file: read it again.
+        for attempt in range(5):
+            try:
+                piece = read_file(name, path, where, cluster, offset=len(out))
+                if size is not None and len(piece) < want:
+                    raise RuntimeError(f"short read at byte {len(out)}: {len(piece)} of {want}")
+                break
+            except RuntimeError:
+                if attempt == 4:
+                    raise
+                time.sleep(15 * (attempt + 1))
+        out += piece[:want] if size is not None else piece
+        if size is None and len(piece) < READ_PIECE:
+            return out
+    raise ValueError(f"{path} is larger than {limit // 2**20} MB: copy it with fetch instead")
 
 
 def ensure_cluster_rclone(cluster: Optional[str] = None, wait_s: int = 900) -> None:

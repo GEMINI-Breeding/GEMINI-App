@@ -6,6 +6,8 @@
 const LABELS: Record<string, string> = {
   Temp_veg_avg_C: "Canopy temperature",
   Height_95p_meters: "Canopy height (95th pct)",
+  CTD_C: "Canopy − air temperature",
+  CTD_rel_C: "Canopy − air temperature vs field",
 }
 
 export function traitLabel(name: string | null | undefined): string {

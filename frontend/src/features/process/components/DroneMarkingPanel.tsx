@@ -412,13 +412,18 @@ export function DroneMarkingPanel({
 
   return (
     <div className="rounded border text-xs" data-testid="dm-panel">
+      {/* Nothing to open until a drone flight of this field has boundaries:
+          then it is a plain line saying how to get some. */}
       <button
         type="button"
-        className="flex w-full items-start gap-2 px-3 py-2 text-left"
+        className="flex w-full items-start gap-2 px-3 py-2 text-left disabled:cursor-default"
         onClick={() => setOpen((v) => !v)}
+        disabled={!candidates.length}
         data-testid="dm-toggle"
       >
-        {open ? (
+        {!candidates.length ? (
+          <span className="h-3.5 w-3.5 shrink-0" />
+        ) : open ? (
           <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         ) : (
           <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />

@@ -18,28 +18,33 @@
  * therefore win for a given plot, which is the behaviour a user expects
  * from "show me this plot".
  */
-import { useQuery } from "@tanstack/react-query"
 
+import { useQuery } from "@tanstack/react-query"
 import { type FileMetadata, FilesService } from "@/client"
 import { isLoggedIn } from "@/lib/auth"
+import { normalizePlotNumber } from "@/lib/plotNumber"
 
 const DEFAULT_BUCKET = "gemini"
 
 /** `plot_12_accession_CB27.png` -> 12. Null when the name doesn't match. */
-export function plotNumberFromImageName(objectName: string): number | null {
+export function plotNumberFromImageName(
+  objectName: string,
+): number | string | null {
   const base = objectName.split("/").pop() ?? ""
-  const m = base.match(/^plot_(\d+)(?:_|\.)/)
+  // plot_12_accession_X.png → 12; plot_KW3_accession_X.png → "KW3"
+  const m = base.match(/^plot_(.+?)(?:_accession_.*)?\.[A-Za-z0-9]+$/)
   if (!m) return null
-  const n = Number(m[1])
-  return Number.isFinite(n) ? n : null
+  return normalizePlotNumber(m[1]) ?? null
 }
 
 /**
  * Map of plot number -> MinIO object path, built from a file listing.
  * Exported for tests; the hook wraps it.
  */
-export function indexPlotImages(files: FileMetadata[]): Map<number, string> {
-  const byPlot = new Map<number, string>()
+export function indexPlotImages(
+  files: FileMetadata[],
+): Map<number | string, string> {
+  const byPlot = new Map<number | string, string>()
   const relevant = files
     .map((f) => f.object_name ?? "")
     .filter((n) => n.includes("/PlotImages/") && /\.(png|jpe?g)$/i.test(n))

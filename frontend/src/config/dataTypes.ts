@@ -9,6 +9,8 @@ type DataTypeConfig = {
   hidden?: true
   /** When true, UploadData renders a custom upload dialog instead of the standard UploadList. */
   customUpload?: true
+  /** One line under the type in the picker: what it is and what it is for. */
+  hint?: string
 }
 
 // Path segment templates use literal placeholders ("Season", "Experiment",
@@ -21,6 +23,7 @@ type DataTypeConfig = {
 // user picks/creates the season explicitly, just like every other entity.
 export const dataTypes: Record<string, DataTypeConfig> = {
   "Image Data": {
+    hint: "Photos from a drone, a rover's camera or a handheld camera (phone, monopod)",
     fields: [
       "experiment",
       "season",
@@ -43,7 +46,12 @@ export const dataTypes: Record<string, DataTypeConfig> = {
       "Images",
     ],
   },
-  "Ardupilot Logs": {
+  // GPS tracks matched to photos by capture time in Data Sync: a drone's
+  // ArduPilot log, or the GPS a person carried on a handheld pass. Stored in
+  // the photos' Metadata/ folder, so the experiment, date, platform and
+  // sensor must be the photos' own.
+  "GPS Logs": {
+    hint: "A GPS track for photos of the same date and camera: ArduPilot, GPX, NMEA, CSV or RTK .pos",
     fields: [
       "experiment",
       "season",
@@ -53,7 +61,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
       "platform",
       "sensor",
     ],
-    fileType: "*",
+    fileType: ".bin,.log,.tlog,.gpx,.nmea,.pos,.csv,.txt",
     directory: [
       "Raw",
       "Season",
@@ -67,6 +75,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
   },
   "Synced Metadata": {
+    hint: "A table of each photo's position (image, time, lat, lon) when the photos have none",
     fields: [
       "experiment",
       "season",
@@ -90,6 +99,7 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
   },
   "Farm-ng Binary File": {
+    hint: "Amiga rover logs (.bin): frames and GPS are extracted",
     fields: ["experiment", "season", "location", "population", "date"],
     fileType: "*",
     directory: [
@@ -155,19 +165,6 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     ],
     hidden: true,
   },
-  "Weather Data": {
-    fields: ["experiment", "season", "location", "population", "date"],
-    fileType: "*",
-    directory: [
-      "Raw",
-      "Season",
-      "Experiment",
-      "Location",
-      "Population",
-      "Date",
-      "WeatherData",
-    ],
-  },
   "Field Design": {
     fields: ["experiment", "season", "location", "population", "date"],
     fileType: ".csv",
@@ -190,6 +187,14 @@ export const dataTypes: Record<string, DataTypeConfig> = {
     fileType: ".csv,.xlsx,.xls",
     // Scoped so two experiments' "lai.csv" don't overwrite each other.
     directory: ["ReferenceData", "Experiment", "Location", "Population"],
+  },
+  "Weather Data": {
+    // Weather station files (Campbell TOA5 .dat, or CSV): the originals are
+    // kept here, then the weather dialog maps their columns and saves one
+    // tidy file per station under Processed/…/Weather/.
+    fields: ["experiment", "season", "location"],
+    fileType: ".dat,.csv,.txt",
+    directory: ["Raw", "Season", "Experiment", "Location", "Weather"],
   },
   "Trait Data": {
     // Only experiment lives at the page level — site, season, population,

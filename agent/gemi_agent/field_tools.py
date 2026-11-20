@@ -1749,6 +1749,16 @@ def move_boundaries(args: dict) -> dict:
         v = c.save_version(directory, snap, args.get("name") or f"moved from {args['from_directory']}")
         c.post_json("/api/plot_geometry/versions/activate", {"directory": directory, "version": v["version"]})
         out["saved"] = {"directory": directory, "version": v["version"]}
+
+        # The date's run: its boundaries step is done (as plot_boundaries records it), so
+        # the Process page's run list does not keep asking for boundaries.
+        def update(pr):
+            run = pr.ensure_run(scope, "aerial")
+            pr.set_step(run, "plot_boundary_prep", "completed",
+                        outputs={"activeVersion": v["version"], "activeVersionName": v.get("name")})
+            return pr.describe(run)
+
+        out["run"] = process_tab(update)
     return {"result": out}
 
 
@@ -1953,6 +1963,64 @@ def associate_plots(args: dict) -> dict:
                        "output": directory + "PlotImages/", "process_tab": process_tab(update)}}
 
 
+def ground_plot_frames(args: dict) -> dict:
+    """GROUND_PLOT_FRAMES: plot images from a rover's or handheld pass's raw
+    frames instead of the stitch. Each marked plot's frames that do not
+    overlap (PlotFrames/tiles/, for counting: a model's counts add up over
+    them) and its middle frame (PlotFrames/straightened/). Plots are named
+    from the drone boundaries they were marked from, else from `design_path`
+    in marking order (no GPS), else by their GPS inside the active plot
+    boundaries, else by marking number."""
+    from .app_tools import pick_run
+
+    run = pick_run(str(args.get("run") or ""))
+    u = run.get("uploadScope") or {}
+    keys = ("year", "experiment", "location", "population", "date", "platform", "sensor")
+    if not all(u.get(k) for k in keys):
+        raise ValueError("this run has no upload scope")
+    c = client()
+    marks = c.load_version("Processed/" + "/".join(str(u[k]) for k in keys[:4]) + "/PlotMarkings")
+    snap = marks.get("state_snapshot") or {}
+    sels = [x for x in snap.get("selections") or [] if x.get("start_image") and x.get("end_image")]
+    if not sels:
+        raise ValueError("no saved plot markings for this run: mark the plots first (ground-plot-marking)")
+    if int((snap.get("layout") or {}).get("lanes") or 1) > 1:
+        raise ValueError("this track is marked with several plots per frame: use the stitched plots")
+    directory = "Processed/" + "/".join(str(u[k]) for k in keys) + "/"
+    params: dict = {
+        "images_prefix": snap["track"]["imagesPrefix"],
+        "plots": [{k: x[k] for k in ("plot_id", "start_image", "end_image") if k in x}
+                  | ({"boundary": x["boundary"]} if x.get("boundary") else {}) for x in sels],
+        "output_prefix": directory + "PlotFrames/",
+    }
+    track = snap["track"].get("correctedMsgsSyncedPath") or snap["track"].get("msgsSyncedPath")
+    if track:
+        params["msgs_synced_path"] = track
+    try:
+        bounds = (c.load_version(directory).get("state_snapshot") or {}).get("boundaries") or {}
+    except Exception:
+        bounds = {}
+    if bounds.get("features"):
+        params["boundaries"] = bounds
+    if args.get("design_path"):
+        rows = read_design(str(args["design_path"]))["rows"]
+        params["design"] = [{"plot": r["_plot"], "accession": r["_accession"],
+                             **{k: v for k, v in r.items() if not str(k).startswith("_")}} for r in rows]
+    exp = next((e for e in c.entities("experiments") if e.get("experiment_name") == u["experiment"]), None)
+    job = c.submit_job("GROUND_PLOT_FRAMES", params, str(exp["id"]) if exp else None)
+    scope = {k: str(u[k]) for k in keys}
+
+    def update(pr):
+        return pr.record_job(scope, job, kind="ground")
+
+    return {"result": {"job_id": job.get("id"), "plots": len(sels), "output": params["output_prefix"],
+                       "named_from": ("field design, in marking order" if params.get("design") else
+                                      "drone boundaries / GPS inside the plot boundaries / marking number"),
+                       "next": "run_inference on …/PlotFrames/tiles/ counts each plot once (summed over its "
+                               "frames); …/PlotFrames/straightened/ is one image per plot",
+                       "process_tab": process_tab(update)}}
+
+
 _tool(mock_field_design, "Write a stand-in field design (CSV) for a rover track that has none: bed = pass, tier = "
       "position in the bed, placeholder genotypes. For trying the pipeline only.",
       {"genotypes": _int, "save_as": _str}, [], track=True, group="ground")
@@ -1969,3 +2037,9 @@ _tool(gps_placement, "Rover: correct where a stitch version's plots sit when GPS
 _tool(associate_plots, "Rover: file each stitched mosaic under its plot using the active boundaries "
       "(ASSOCIATE_BOUNDARIES; needs the stitch worker). Output: …/PlotImages/.",
       {"stitch_prefix": _str}, ["stitch_prefix"], track=False, group="ground")
+_tool(ground_plot_frames, "Rover or handheld: plot images from each marked plot's raw frames, no stitch "
+      "(GROUND_PLOT_FRAMES, geo worker). Frames that do not overlap go to PlotFrames/tiles/ (count with them: "
+      "counts add up, nothing counted twice), the middle one to PlotFrames/straightened/. design_path: a field "
+      "design paired with the markings in marking order, for a pass with no GPS.",
+      {"run": {**_str, "description": "words naming the run"}, "design_path": _str}, ["run"],
+      track=False, group="ground")

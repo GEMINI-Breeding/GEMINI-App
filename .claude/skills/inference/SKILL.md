@@ -100,7 +100,35 @@ Roboflow works with the published ml worker. Hugging Face and local weights
 need the model backends: built into the rebuilt ml image, or on a cluster
 installed once with `hpc` `pull_ml_deps`. Without them those sources fail
 with an import or unknown-source error — report that rather than retrying.
-OWLv2 models also need SciPy, which is not installed.
+
+## Label and train a model of your own
+
+When no model counts the object well (check with a few `label_view`
+pictures first), build a labelled set and train one. It is the same set the
+app's Label & train tool shows, so the person can review or continue it there.
+
+1. `label_propose` with `run`, a set `name` (one per object, e.g. `flowers`)
+   and 8–15 `images` spread over the field (plot numbers), from one of:
+   `from_job` (an inference job already run on the run: correcting a model is
+   quickest), `model` (`weights:<path>`, run on just those images), or
+   `describe` (zero-shot: `flower: a single white cowpea flower`; OWLv2 reads
+   at most ~16 words, so keep it short).
+2. For each image: `label_view` (numbers on every box; `region` = [x0,y0,x1,y1]
+   for a close-up), then `label_edit` with `keep` / `drop` numbers, `add` boxes
+   [x1,y1,x2,y2] for missed objects, and `done=true` once every object on the
+   image is boxed. Unboxed objects on a done image teach the model they are
+   background, so finish each image or leave it not done.
+3. Label more than one date (and both sunny and overcast light) when the model
+   should work across the season; each run keeps its own set.
+4. `train_model` with `runs` (all the runs whose sets to use), `name` (also the
+   trait name), `base` (`yolo11s`, or `weights:<path>` of an earlier model of the
+   same object to fine-tune it). Then `wait_jobs` and `train_result`: precision,
+   recall and mAP50 on held-out images.
+5. Run it with `run_inference` (`model` = `weights:<weights_path>`), check with
+   `inference_stats` and a few `label_view`-style looks, and compare with the
+   old model (`compare_predictions`) before running every date.
+
+`label_set` shows how far a set is (images done, objects per class).
 
 ## A measurement without a model
 

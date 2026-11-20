@@ -868,7 +868,7 @@ export function GcpPicker({
   useEffect(() => {
     const prev = run.steps.gcp_selection?.manualMarks
     if (JSON.stringify(prev) !== JSON.stringify(marks)) {
-      setStepState(run.id, "gcp_selection", { manualMarks: marks })
+      setStepState(run.id, "gcp_selection", { manualMarks: marks }, "person")
     }
   }, [marks, run.id, run.steps.gcp_selection])
 
@@ -920,9 +920,14 @@ export function GcpPicker({
       JSON.stringify((stored as { gcpRadii?: unknown }).gcpRadii ?? {}) ===
       JSON.stringify(gcpRadii)
     if (sameModes && sameRadii) return
-    setStepState(run.id, "gcp_selection", {
-      outputs: { ...stored, gcpModes, gcpRadii },
-    })
+    setStepState(
+      run.id,
+      "gcp_selection",
+      {
+        outputs: { ...stored, gcpModes, gcpRadii },
+      },
+      "person",
+    )
   }, [gcpModes, gcpRadii])
 
   // Effective mode/radius for the active GCP. Coord-less GCPs always
@@ -1319,25 +1324,30 @@ export function GcpPicker({
       }
     },
     onSuccess: () => {
-      setStepState(run.id, "gcp_selection", {
-        status: "completed",
-        completedAt: new Date().toISOString(),
-        manualMarks: marks,
-        outputs: {
-          ...(run.steps.gcp_selection?.outputs ?? {}),
-          gcpListPath: `${scopePrefix}${GCP_FILENAME}`,
-          geoTxtPath: `${scopePrefix}${GEO_FILENAME}`,
-          gcpLocationsCsvPath: csvObjectName,
-          gcpImageGroupsPath: groupsObjectName,
-          gcpCount: catalog.length,
-          markCount: excludedNames.size
-            ? marks.filter((m) => !excludedNames.has(m.image)).length
-            : marks.length,
-          gcpImageGroups,
-          gcpModes,
-          gcpRadii,
+      setStepState(
+        run.id,
+        "gcp_selection",
+        {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          manualMarks: marks,
+          outputs: {
+            ...(run.steps.gcp_selection?.outputs ?? {}),
+            gcpListPath: `${scopePrefix}${GCP_FILENAME}`,
+            geoTxtPath: `${scopePrefix}${GEO_FILENAME}`,
+            gcpLocationsCsvPath: csvObjectName,
+            gcpImageGroupsPath: groupsObjectName,
+            gcpCount: catalog.length,
+            markCount: excludedNames.size
+              ? marks.filter((m) => !excludedNames.has(m.image)).length
+              : marks.length,
+            gcpImageGroups,
+            gcpModes,
+            gcpRadii,
+          },
         },
-      })
+        "person",
+      )
       queryClient.invalidateQueries({
         queryKey: ["files", "list", imagesPrefix],
       })
@@ -1354,11 +1364,16 @@ export function GcpPicker({
   })
 
   function handleSkip() {
-    setStepState(run.id, "gcp_selection", {
-      status: "skipped",
-      completedAt: new Date().toISOString(),
-      manualMarks: marks,
-    })
+    setStepState(
+      run.id,
+      "gcp_selection",
+      {
+        status: "skipped",
+        completedAt: new Date().toISOString(),
+        manualMarks: marks,
+      },
+      "person",
+    )
     showSuccessToast("Skipped GCP selection")
     onSaved?.()
   }
@@ -1628,7 +1643,7 @@ export function GcpPicker({
   return (
     <div className="space-y-4">
       {/* Catalog + controls */}
-      <Card>
+      <Card data-testid="gcp-catalog">
         <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
           <div>
             <CardTitle className="text-base">GCP catalog</CardTitle>
@@ -1973,7 +1988,7 @@ export function GcpPicker({
           shown as ringed pins. Lasso (shift-drag / shift-click) edits the
           active GCP's image group when its mode is "map"; in radius mode
           the map is read-only (the lasso is a no-op). */}
-      <Card>
+      <Card data-testid="gcp-map">
         <CardHeader>
           <CardTitle className="text-base">Image map</CardTitle>
           <CardDescription>
@@ -2318,7 +2333,10 @@ export function GcpPicker({
       </Card>
 
       {/* Footer: progress + actions */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div
+        className="flex flex-wrap items-center justify-between gap-2"
+        data-testid="gcp-footer"
+      >
         <div className="flex flex-col gap-0.5 text-xs">
           <p className="text-muted-foreground">
             {marks.length} mark{marks.length === 1 ? "" : "s"} ·{" "}

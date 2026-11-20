@@ -1,7 +1,8 @@
 /**
  * BatchRunner — works through "Run across dates" while the app is open: a
  * step waiting on another of its batch's steps starts once that one's jobs
- * have finished (or stops, with the reason, if they failed). Renders nothing.
+ * have finished (or stops, with the reason, if they failed). Also keeps every
+ * run's steps in step with their jobs (settleRuns). Renders nothing.
  */
 import { useEffect } from "react"
 
@@ -14,6 +15,7 @@ import {
   updateQueued,
 } from "../lib/batchQueue"
 import { startStep } from "../lib/batchSubmit"
+import { settleRuns } from "../lib/settleRuns"
 
 const EVERY_MS = 20_000
 
@@ -79,8 +81,13 @@ export async function workBatchQueue() {
 
 export function BatchRunner() {
   useEffect(() => {
-    void workBatchQueue()
-    const t = setInterval(() => void workBatchQueue(), EVERY_MS)
+    const tick = () => {
+      void workBatchQueue()
+      // Every run's steps follow their jobs, not only the open run's.
+      if (isLoggedIn()) void settleRuns()
+    }
+    tick()
+    const t = setInterval(tick, EVERY_MS)
     return () => clearInterval(t)
   }, [])
   return null

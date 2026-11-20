@@ -39,7 +39,8 @@ const JOB_WORDS: Record<string, string> = {
   RUN_STITCH: "stitching",
   ASSOCIATE_BOUNDARIES: "boundary association",
   EXTRACT_BINARY: "rover extraction",
-  SYNC_METADATA: "data sync",
+  DATA_SYNC: "data sync",
+  GROUND_PLOT_FRAMES: "plot images from the raw frames",
 }
 
 export const jobWords = (type: string) =>

@@ -131,3 +131,20 @@ export function displayStage(
       return stage && stage.length > 0 ? stage : "—"
   }
 }
+
+/**
+ * The object key inside the app's bucket for an "s3://gemini/<key>" artifact
+ * (what thumbnailSrc wants), or null for anything else.
+ */
+export function s3ObjectKey(s3: unknown): string | null {
+  if (typeof s3 !== "string") return null
+  const m = s3.match(/^s3:\/\/gemini\/(.+)$/)
+  return m ? m[1] : null
+}
+
+/** Markers that pass the run's multiple-testing threshold (Bonferroni when
+ *  the worker reports it, else the fixed genome-wide line). */
+export function passingMarkers(r: GwasResult | null): number | null {
+  if (!r) return null
+  return r.n_bonferroni_sig ?? r.n_genome_wide_sig ?? null
+}

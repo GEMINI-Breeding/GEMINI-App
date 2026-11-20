@@ -5,10 +5,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AnalyzeMap } from "./AnalyzeMap"
 import { AnalyzeQuery } from "./AnalyzeQuery"
 import { AnalyzeTable } from "./AnalyzeTable"
+import { AnalyzeWeather } from "./AnalyzeWeather"
 import { MultivariateAnalyze } from "./MultivariateAnalyze"
 import { SingleTrait } from "./SingleTrait"
 
-type View = "table" | "query" | "single" | "multi" | "map"
+type View = "table" | "query" | "single" | "multi" | "map" | "weather"
 
 export function AnalyzeDashboard() {
   const navigate = useNavigate()
@@ -63,6 +64,9 @@ export function AnalyzeDashboard() {
           <TabsTrigger value="map" data-testid="analyze-tab-map">
             Map
           </TabsTrigger>
+          <TabsTrigger value="weather" data-testid="analyze-tab-weather">
+            Weather
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="table" className="mt-6">
@@ -86,6 +90,9 @@ export function AnalyzeDashboard() {
         </TabsContent>
         <TabsContent value="map" className="mt-6">
           <AnalyzeMap />
+        </TabsContent>
+        <TabsContent value="weather" className="mt-6">
+          <AnalyzeWeather traits={traits} />
         </TabsContent>
       </Tabs>
     </div>

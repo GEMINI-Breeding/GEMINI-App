@@ -2,8 +2,10 @@
  * DataSyncDialog — how the run's images get their positions (main's Data
  * Sync dialog):
  *
- *   Use own metadata     each image's EXIF GPS + time, refined by any
- *                        ArduPilot logs uploaded to Metadata/
+ *   Use own metadata     each image's EXIF GPS + time, replaced by a GPS
+ *                        log uploaded for the same date and camera (a
+ *                        drone's ArduPilot log, or a handheld GPS's GPX /
+ *                        NMEA / CSV / RTK .pos track) at each capture time
  *   Sync from another    positions interpolated from another sensor's
  *   sensor               synced track (same date and population) at each
  *                        image's capture time
@@ -54,10 +56,37 @@ export function syncSources(
     .sort((a, b) => a.label.localeCompare(b.label))
 }
 
+/** File endings Data Sync reads as GPS logs (gemini/workers/geo/sync.py). */
+const GPS_LOG = /\.(bin|log|tlog|gpx|nmea|pos|csv|txt)$/i
+const NOT_LOGS = new Set(["msgs_synced.csv"])
+
+/** GPS logs uploaded for these photos: files in the scope's Metadata/ folders. */
+export function gpsLogs(files: FileMetadata[], scope: AerialScope): string[] {
+  const own = rawScopePrefix(scope)
+  return files
+    .map((f) => f.object_name ?? "")
+    .filter((n) => n.startsWith(own) && n.includes("/Metadata/"))
+    .map((n) => n.split("/").pop() ?? "")
+    .filter((name) => GPS_LOG.test(name) && !NOT_LOGS.has(name.toLowerCase()))
+    .sort()
+}
+
+/** The camera clock's zone choices: hours ahead of UTC, or automatic. */
+const CLOCK_ZONES = [
+  -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 5.5, 6, 7, 8, 9,
+  9.5, 10, 11, 12,
+]
+const zoneLabel = (h: number) =>
+  h === 0
+    ? "UTC"
+    : `UTC${h > 0 ? "+" : "−"}${Math.floor(Math.abs(h))}${Math.abs(h) % 1 ? ":30" : ""}`
+
 export interface DataSyncChoice {
   mode: "own_metadata" | "cross_sensor"
   sourceTrackPath?: string
   maxExtrapolationSec: number
+  /** Seconds to add to capture times with no time zone; undefined = fitted. */
+  clockOffsetSec?: number
 }
 
 export function DataSyncDialog({
@@ -85,9 +114,14 @@ export function DataSyncDialog({
     enabled: open && isLoggedIn() && Boolean(datePrefix),
   })
   const sources = scope ? syncSources(listing.data ?? [], scope) : []
+  const logs = scope ? gpsLogs(listing.data ?? [], scope) : []
   const [mode, setMode] = useState<DataSyncChoice["mode"]>("own_metadata")
   const [source, setSource] = useState("")
   const [maxExt, setMaxExt] = useState(30)
+  // "auto", or the camera clock's zone in hours ahead of UTC.
+  const [clock, setClock] = useState<string>("auto")
+  const matchesByTime =
+    (mode === "own_metadata" && logs.length > 0) || mode === "cross_sensor"
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -95,7 +129,8 @@ export function DataSyncDialog({
         <DialogHeader>
           <DialogTitle>Data Sync</DialogTitle>
           <DialogDescription>
-            Choose how to assign GPS coordinates to your images.
+            Where each photo's position comes from. Plot marking, stitching and
+            matching plots to their boundaries all use it.
           </DialogDescription>
         </DialogHeader>
 
@@ -109,11 +144,34 @@ export function DataSyncDialog({
             aria-label="Use own metadata"
           />
           <div>
-            <p className="font-medium text-sm">Use own metadata</p>
+            <p className="font-medium text-sm">
+              The photos' own GPS, and GPS logs
+            </p>
             <p className="text-muted-foreground mt-0.5 text-xs">
-              Each image's own EXIF GPS and capture time. ArduPilot logs
-              uploaded to this date's Metadata refine the positions (and give
-              height above ground when the drone has a rangefinder).
+              Each photo's GPS and capture time, as the camera wrote them (a
+              phone does when location is on for its camera). A GPS log of the
+              same date and camera, uploaded as GPS Logs, gives the position at
+              each photo's capture time instead: a drone's ArduPilot log, or a
+              GPX, NMEA, CSV or RTK .pos track from a phone app or a GPS
+              receiver carried on the walk.
+            </p>
+            <p className="mt-1.5 text-xs" data-testid="data-sync-logs">
+              {listing.isLoading ? (
+                <span className="text-muted-foreground">
+                  Looking for GPS logs…
+                </span>
+              ) : logs.length ? (
+                <>
+                  <span className="font-medium">
+                    GPS log{logs.length === 1 ? "" : "s"} found:
+                  </span>{" "}
+                  {logs.join(", ")}
+                </>
+              ) : (
+                <span className="text-muted-foreground">
+                  No GPS log for these photos: their own GPS is used.
+                </span>
+              )}
             </p>
           </div>
         </label>
@@ -190,6 +248,35 @@ export function DataSyncDialog({
           </div>
         </label>
 
+        {matchesByTime && (
+          <div
+            className="flex flex-wrap items-center gap-2 text-xs"
+            data-testid="data-sync-clock"
+          >
+            <label htmlFor="data-sync-clock" className="font-medium">
+              Camera clock
+            </label>
+            <select
+              id="data-sync-clock"
+              className="border-input bg-background rounded-md border px-2 py-1 text-sm"
+              value={clock}
+              onChange={(e) => setClock(e.target.value)}
+            >
+              <option value="auto">Match to the GPS automatically</option>
+              {CLOCK_ZONES.map((h) => (
+                <option key={h} value={String(h)}>
+                  Set to {zoneLabel(h)}
+                </option>
+              ))}
+            </select>
+            <span className="text-muted-foreground basis-full">
+              Photos are matched to the GPS by time. Phones record their time
+              zone; many cameras keep local time without it, and are then
+              shifted by the whole hours that line them up with the GPS.
+            </span>
+          </div>
+        )}
+
         {mode === "cross_sensor" && (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-xs">
             Works best when both sensors rode the same platform during the same
@@ -209,6 +296,11 @@ export function DataSyncDialog({
                 mode,
                 sourceTrackPath: mode === "cross_sensor" ? source : undefined,
                 maxExtrapolationSec: maxExt,
+                // A camera at UTC+h reads h hours ahead: take them off.
+                clockOffsetSec:
+                  matchesByTime && clock !== "auto"
+                    ? -Number(clock) * 3600
+                    : undefined,
               })
             }
           >

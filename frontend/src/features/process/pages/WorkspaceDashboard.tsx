@@ -69,6 +69,7 @@ import {
   TAG_LABEL,
 } from "@/features/process/lib/runStatus"
 import {
+  agentLastChanged,
   createWorkspace,
   deleteWorkspace,
   type Run,
@@ -134,7 +135,7 @@ function useWorkspaceStats(workspaceId: string): WorkspaceStats {
   return {
     aerial: runs.filter((r) => aerialPipelineIds.has(r.pipelineId)).length,
     ground: runs.filter((r) => groundPipelineIds.has(r.pipelineId)).length,
-    agent: runs.filter((r) => r.createdBy === "agent").length,
+    agent: runs.filter((r) => agentLastChanged(r)).length,
     byTag,
   }
 }
@@ -311,7 +312,7 @@ function WorkspaceCard({
               title="Runs the agent started; marked with this icon inside"
             >
               <Bot className="h-3 w-3" />
-              {stats.agent} started by the agent
+              {stats.agent} last changed by the agent
             </p>
           )}
         </div>

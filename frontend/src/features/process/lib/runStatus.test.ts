@@ -59,4 +59,18 @@ describe("runState", () => {
     )
     expect(runState(run({}), "aerial").tag).toBe("new")
   })
+  it("treats plot images and models as optional", () => {
+    const traits = Object.fromEntries(
+      [
+        "data_sync",
+        "orthomosaic",
+        "plot_boundary_prep",
+        "trait_extraction",
+      ].map((k) => [k, "completed"]),
+    )
+    expect(runState(run(traits), "aerial")).toEqual({
+      tag: "complete",
+      detail: "Done · Plot images optional",
+    })
+  })
 })

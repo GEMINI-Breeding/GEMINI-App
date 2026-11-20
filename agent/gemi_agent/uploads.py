@@ -32,6 +32,11 @@ DATA_TYPES = {
     "amiga_bin": {"label": "Farm-ng Binary File", "subdir": "Images", "ext": (".bin",), "extract": True},
     "images": {"label": "Image Data", "subdir": "Images", "ext": (".jpg", ".jpeg", ".png", ".tif", ".tiff"), "extract": False},
     "orthomosaic": {"label": "Orthomosaic", "subdir": "Orthomosaic", "ext": (".tif", ".tiff"), "extract": False},
+    # A GPS track for photos of the same date, platform and sensor (a drone's
+    # ArduPilot log, a handheld GPS's GPX/NMEA/CSV/RTK .pos): Data Sync reads
+    # it from the photos' Metadata/ folder and matches it by capture time.
+    "gps_log": {"label": "GPS Logs", "subdir": "Metadata",
+                "ext": (".bin", ".log", ".tlog", ".gpx", ".nmea", ".pos", ".csv", ".txt"), "extract": False},
 }
 
 
@@ -125,8 +130,9 @@ def check_kit(platform: str, sensor: str) -> tuple[str, str]:
     head, _, camera = str(sensor or "").strip().partition("-")
     t = next((x for x in SENSOR_TYPES if x.lower() == head.strip().lower()), None)
     if t is None:
-        raise ValueError(f"sensor {sensor!r}: use one of {', '.join(SENSOR_TYPES)}, or another camera of that type as "
-                         "<type>-<camera>, e.g. RGB-SonyA7R")
+        raise ValueError(f"sensor {sensor!r}: use {' or '.join(SENSOR_TYPES)} (the platform's own cameras, e.g. a "
+                         "drone's wide and thermal cameras). Only for a second camera of the same type on that "
+                         "platform: <type>-<camera>, e.g. RGB-SonyA7R")
     slug = "".join(w[:1].upper() + w[1:] for w in re.split(r"[^A-Za-z0-9]+", camera) if w)
     return p, (f"{t}-{slug}" if slug else t)
 
@@ -191,6 +197,9 @@ def start(client: Client, files: list[Path], *, experiment: str, site: str, popu
         # Where the app's upload puts them and its run page looks: no dataset folder, and the
         # elevation model beside the RGB in Orthomosaic-DEM/ (one is not offered as the other).
         prefix = f"{scope_dir}/Orthomosaic"
+    elif data_type == "gps_log":
+        # The scope's own Metadata/, beside every upload of these photos.
+        prefix = f"{scope_dir}/Metadata"
     else:
         prefix = f"{scope_dir}/{ds_id[:8]}/{kind['subdir']}"
     task_id = time.strftime("%m%d-%H%M%S-") + uuid.uuid4().hex[:4]

@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { platformFromMaker } from "@/features/files/lib/sensorKit"
+import { WeatherUploadDialog } from "@/features/weather/components/WeatherUploadDialog"
 import { getToken } from "@/lib/auth"
 import { openUrl } from "@/lib/platform"
 import { DataStructureForm, DataTypes, UploadList } from "../components"
@@ -268,6 +269,8 @@ export function UploadData() {
   const [rgbCount, setRgbCount] = useState(0)
   const [demCount, setDemCount] = useState(0)
   const [demSignal, setDemSignal] = useState(0)
+  // Weather files just uploaded: their columns are mapped next.
+  const [weatherFiles, setWeatherFiles] = useState<File[] | null>(null)
   const handleRgbUploadComplete = useCallback((destPaths: string[]) => {
     const tif = destPaths.find((p) => /\.(tif|tiff)$/i.test(p))
     if (tif) setRgbTifPath(tif)
@@ -279,7 +282,7 @@ export function UploadData() {
   }, [])
 
   const handleUploadComplete = useCallback(
-    async (destPaths: string[]) => {
+    async (destPaths: string[], alreadyStored: string[] = []) => {
       if (selectedFileType === "Synced Metadata") {
         const csvPath = destPaths.find((p) => /\.csv$/i.test(p))
         if (!csvPath) return
@@ -287,6 +290,18 @@ export function UploadData() {
         if (!content) return
         setSyncedCsvText(content.text)
         setSyncedCsvPath(csvPath)
+      } else if (selectedFileType === "Weather Data") {
+        // The originals are stored; read them back to map their columns.
+        const got = await Promise.all(
+          [...destPaths, ...alreadyStored].map(async (p) => {
+            const c = await fetchUploadedContent(p)
+            return c
+              ? new File([c.blob], p.split(/[\\/]/).pop() ?? "weather.dat")
+              : null
+          }),
+        )
+        const ok = got.filter((f): f is File => f !== null)
+        if (ok.length) setWeatherFiles(ok)
       } else if (selectedFileType === "Reference Data") {
         const filePath = destPaths[0]
         if (!filePath) return
@@ -447,6 +462,18 @@ export function UploadData() {
           </div>
         </div>
       </div>
+      {weatherFiles && (
+        <WeatherUploadDialog
+          open
+          files={weatherFiles}
+          scope={{
+            experiment: formValues.experiment,
+            season: formValues.season,
+            location: formValues.location,
+          }}
+          onClose={() => setWeatherFiles(null)}
+        />
+      )}
       {refDataFile && (
         <ReferenceDataUploadDialog
           open

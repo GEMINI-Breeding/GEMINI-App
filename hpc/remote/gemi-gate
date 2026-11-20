@@ -16,7 +16,7 @@
 #   ps | status | session | login | limits | selftest
 #   logs <name> [lines]
 #   core-submit [where=…] | core-state | core-log | down
-#   worker <amiga|stitch|geo|ml|odm> [where=…] | stop-worker <name>
+#   worker <amiga|stitch|geo|ml|odm|gwas> [where=…] | stop-worker <name>
 #   llm-up [model] [where=…] | llm-down | llm-env | llm-status | llm-ready [model]
 #   pull-images [name…] | pull-mldeps | pull-llm [model…]
 #   folder-peek <folder> | ingest <folder> <setting=…>…   (data already on the cluster)
@@ -25,6 +25,7 @@
 #   cloud-ls <name> <path64> | cloud-cat <name> <path64> | cloud-fetch <name> <path64> <dest> [include=…] [keep=1] [<setting=…>…]
 #   cloud-state [job]  | pull-rclone          (online storage, copied straight here with rclone)
 #   share on [passwordless] | off | status | clear-request | check   (the folder's group joins this session)
+#   keeper on|off|status | keeper-serve   (a Slurm cron entry of the owner's that starts the core when a member asks)
 #   my-places [partition:account …]      (your own placements, for your jobs on a shared session)
 #   recv <backend|hpc>            (a tar stream on stdin, into a staging folder)
 #   sync-finish <cluster> <rev>   (move the staged folders into place)
@@ -77,6 +78,8 @@ main() {
       down|recv|sync-finish|login|pull-images|pull-mldeps|pull-llm|pull-llm-cancel|pull-rclone|llm-up|llm-down|cloud-*)
         refuse "only $OWNER (who runs this session) can do $first" ;;
       share) [ "${rest[0]:-}" = status ] || refuse "only $OWNER can change sharing" ;;
+      keeper) [ "${rest[0]:-}" = status ] || refuse "only $OWNER can set up the keeper" ;;
+      keeper-serve) refuse "the keeper runs as $OWNER" ;;
     esac
   fi
 
@@ -94,6 +97,27 @@ main() {
   one_of() { local x=$1; shift; local o; for o in "$@"; do [ "$x" = "$o" ] && return 0; done; return 1; }
   nwords() { [ "${#words[@]}" -ge "$1" ] && [ "${#words[@]}" -le "$2" ] || refuse "wrong number of arguments"; }
   gemi_jobs() { squeue -h -u "$USER" -o '%i %j' | awk '$2 ~ /^gemi-/'; }
+  # The core's placement: the one asked for, else the one the owner last started it on (kept in
+  # $RUN/core-place, so the keeper starts it where it last ran), else launch.conf's.
+  core_place() {
+    local w="${WHERE%% *}"
+    [ -z "$w" ] && [ -s "$RUN/core-place" ] && w=$(head -1 "$RUN/core-place")
+    [ -n "$w" ] && allowed_place "$w" || w="$CORE_PARTITION:$CORE_ACCOUNT"
+    printf '%s' "$w"
+  }
+  submit_core() {
+    local w part acct
+    w=$(core_place); part="${w%%:*}"; acct="${w#*:}"; acct="${acct%%:*}"
+    check_job "$CORE_CPUS" "$CORE_MEM" 0 "$CORE_TIME" || refuse "core resources over the limits"
+    printf '%s:%s\n' "$part" "$acct" > "$RUN/core-place"
+    bash "$HPC/remote/make-env.sh" >/dev/null
+    rm -f "$RUN/session.env"
+    sbatch --partition="$part" --account="$acct" --cpus-per-task="$CORE_CPUS" --mem="$CORE_MEM" --time="$CORE_TIME" \
+      --output="$LOGS/core-%j.log" --export=ALL,GEMI_HPC_ROOT="$ROOT" "$HPC/remote/core.sbatch"
+  }
+  KEEPER_BEGIN="# gemi-keeper begin $ROOT"
+  KEEPER_END="# gemi-keeper end $ROOT"
+  keeper_on() { command -v scrontab >/dev/null && scrontab -l 2>/dev/null | grep -qxF "$KEEPER_BEGIN"; }
   # The settings an upload into the session takes (ingest, cloud-fetch). Values with spaces
   # and other characters come as b64:<url-safe base64>, decoded by the uploader.
   upload_setting() {
@@ -213,9 +237,18 @@ main() {
         # The cluster's rules: at most two levels on a login node.
         echo "folder: $src"
         echo "entries: $(ls -1 "$src" | wc -l)"; ls -1 "$src" | head -20
-        echo "files by type (two levels):"
-        find "$src" -maxdepth 2 -type f -printf '%f\n' | sed -n 's/.*\.\([A-Za-z0-9]*\)$/\1/p' | tr 'A-Z' 'a-z' \
-          | sort | uniq -c | sort -rn | head -12
+        # Files of this folder itself, then each sub-folder in one line (still two levels): what it
+        # holds, so the next look goes straight to the folder with the images.
+        local sub n=0 kinds
+        kinds=$(find "$src" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sed -n 's/.*\.\([A-Za-z0-9]*\)$/\1/p' \
+                | tr 'A-Z' 'a-z' | sort | uniq -c | sort -rn | head -8 | awk '{printf "%s%s %s", (NR>1?", ":""), $1, $2}')
+        echo "files in this folder itself: ${kinds:-none}"
+        while IFS= read -r sub; do
+          n=$((n + 1)); [ $n -gt 15 ] && { echo "  (more sub-folders not shown)"; break; }
+          kinds=$(find "$sub" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | sed -n 's/.*\.\([A-Za-z0-9]*\)$/\1/p' \
+                  | tr 'A-Z' 'a-z' | sort | uniq -c | sort -rn | head -4 | awk '{printf "%s%s %s", (NR>1?", ":""), $1, $2}')
+          echo "sub-folder ${sub##*/}/: ${kinds:-no files}; $(find "$sub" -mindepth 1 -maxdepth 1 -type d | wc -l) sub-folders"
+        done < <(find "$src" -mindepth 1 -maxdepth 1 -type d | sort)
       else
         [ "${#words[@]}" -ge 3 ] || refuse "ingest <folder> experiment=… site=… …"
         local kv
@@ -259,20 +292,19 @@ main() {
         fi
         audit REQUEST
         printf '%s %s\n' "$USER" "$(date -Is)" > "$RUN/share/start-request"
-        echo "start requested: the session's core runs as $OWNER, so their GEMI starts it (asked $(date '+%H:%M'))"
+        if [ -s "$RUN/share/keeper" ]; then
+          echo "start requested: the session's core runs as $OWNER; their keeper on the cluster starts it within about 5 minutes (asked $(date '+%H:%M'))"
+        else
+          echo "start requested: the session's core runs as $OWNER, so their GEMI starts it (asked $(date '+%H:%M'))"
+        fi
         exit 0
       fi
       if squeue -h -u "$USER" -n gemi-core -o %i | grep -q .; then
         audit ALLOW; echo "a core job already exists:"; squeue -u "$USER" -n gemi-core -o '%i %P %T %M %N'; exit 0
       fi
-      local part="$CORE_PARTITION" acct="$CORE_ACCOUNT"
-      [ -n "$WHERE" ] && { local w1="${WHERE%% *}"; part="${w1%%:*}"; acct="${w1#*:}"; acct="${acct%%:*}"; }
-      check_job "$CORE_CPUS" "$CORE_MEM" 0 "$CORE_TIME" || refuse "core resources over the limits"
       audit SUBMIT
-      bash "$HPC/remote/make-env.sh" >/dev/null
-      rm -f "$RUN/session.env"
-      sbatch --partition="$part" --account="$acct" --cpus-per-task="$CORE_CPUS" --mem="$CORE_MEM" --time="$CORE_TIME" \
-        --output="$LOGS/core-%j.log" --export=ALL,GEMI_HPC_ROOT="$ROOT" "$HPC/remote/core.sbatch"
+      submit_core
+      rm -f "$RUN/share/start-request"
       ;;
     core-state)
       nwords 0 0; audit ALLOW
@@ -297,7 +329,7 @@ main() {
       ;;
     worker)
       nwords 1 1
-      one_of "${words[0]}" amiga stitch geo ml odm || refuse "unknown worker"
+      one_of "${words[0]}" amiga stitch geo ml odm gwas || refuse "unknown worker"
       audit SUBMIT
       GEMI_WORKER_TRY="$WHERE" bash "$HPC/remote/submit-worker.sh" "${words[0]}"
       ;;
@@ -321,7 +353,7 @@ main() {
       ;;
     stop-worker)
       nwords 1 1
-      one_of "${words[0]}" amiga stitch geo ml odm || refuse "unknown worker"
+      one_of "${words[0]}" amiga stitch geo ml odm gwas || refuse "unknown worker"
       audit STOP
       scancel -u "$USER" -n "gemi-worker-${words[0]}"; echo "stopped worker ${words[0]}"
       ;;
@@ -350,14 +382,26 @@ main() {
       grep -v KEY "$RUN/llm.env" 2>/dev/null || echo '(LLM not up)'
       ;;
     pull-images)
+      # [where=partition:account]: run it there instead of the core's partition (which can
+      # be full for hours); a copy still waiting in the queue is replaced.
       audit SUBMIT
-      sbatch --partition="$CORE_PARTITION" --account="$CORE_ACCOUNT" --output="$LOGS/pull-%j.log" \
+      local ipart="$CORE_PARTITION" iacct="$CORE_ACCOUNT"
+      if [ -n "$WHERE" ]; then
+        local i1="${WHERE%% *}"; ipart="${i1%%:*}"; iacct="${i1#*:}"; iacct="${iacct%%:*}"
+        scancel -u "$USER" -n gemi-pull --state=PENDING 2>/dev/null || true
+      fi
+      sbatch --partition="$ipart" --account="$iacct" --output="$LOGS/pull-%j.log" \
         --export=ALL,GEMI_HPC_ROOT="$ROOT",GEMI_IMAGE_REGISTRY="$GEMI_IMAGE_REGISTRY",GEMI_IMAGE_VERSION="$GEMI_IMAGE_VERSION",ONLY="${words[*]-}" \
         "$HPC/remote/pull-images.sbatch"
       ;;
     pull-mldeps)
+      # [where=partition:account]: run it there (a full partition can hold it for hours);
+      # a copy still waiting in the queue is replaced.
       nwords 0 0; audit SUBMIT
-      sbatch --partition="${LLM_PULL_PARTITION:-$CORE_PARTITION}" --account="${LLM_PULL_ACCOUNT:-$CORE_ACCOUNT}" \
+      local mpart="${LLM_PULL_PARTITION:-$CORE_PARTITION}" macct="${LLM_PULL_ACCOUNT:-$CORE_ACCOUNT}"
+      [ -n "$WHERE" ] && { local m1="${WHERE%% *}"; mpart="${m1%%:*}"; macct="${m1#*:}"; macct="${macct%%:*}"; }
+      scancel -u "$USER" -n gemi-pull-mldeps --state=PENDING 2>/dev/null || true
+      sbatch --partition="$mpart" --account="$macct" \
         --output="$LOGS/pull-mldeps-%j.log" --export=ALL,GEMI_HPC_ROOT="$ROOT" "$HPC/remote/pull-mldeps.sbatch"
       ;;
     pull-llm)
@@ -433,6 +477,63 @@ main() {
         *) refuse "share on|off|status|clear-request|check" ;;
       esac
       ;;
+    keeper)
+      # on | off | status: a Slurm cron entry (scrontab) of the owner's, every 5 minutes a
+      # one-CPU job that starts the core if a member of the shared session asked for it
+      # (keeper-serve). So members can start the session without the owner's computer.
+      nwords 1 1
+      case "${words[0]}" in
+        on)
+          audit CONFIG
+          command -v scrontab >/dev/null || refuse "this cluster has no scrontab (Slurm cron)"
+          local w part acct tab
+          # where= is the keeper's own small job; the core starts on core_place.
+          w="${WHERE%% *}"; [ -n "$w" ] || w=$(core_place)
+          part="${w%%:*}"; acct="${w#*:}"; acct="${acct%%:*}"
+          tab=$(mktemp)
+          scrontab -l 2>/dev/null | awk -v b="$KEEPER_BEGIN" -v e="$KEEPER_END" '$0==b{skip=1} !skip{print} $0==e{skip=0}' \
+            | grep -v 'no crontab for' > "$tab" || true
+          {
+            echo "$KEEPER_BEGIN"
+            echo "#SCRON --partition=$part --account=$acct --time=00:05:00 --cpus-per-task=1 --mem=256M --job-name=gemi-keeper --output=$LOGS/keeper.log --open-mode=append"
+            echo "*/5 * * * * bash -l $HPC/remote/gemi-gate keeper-serve"
+            echo "$KEEPER_END"
+          } >> "$tab"
+          if ! scrontab "$tab" 2>&1; then echo "-- the entry it was given:"; cat "$tab"; rm -f "$tab"; refuse "scrontab did not take the entry"; fi
+          rm -f "$tab"
+          mkdir -p "$RUN/share"; echo "$part:$acct" > "$RUN/share/keeper"; share_perms
+          echo "keeper on: every 5 minutes a 1-CPU job on $part ($acct) starts the core (on $(core_place)) if a member asked for it" ;;
+        off)
+          audit CONFIG
+          if command -v scrontab >/dev/null; then
+            local tab; tab=$(mktemp)
+            scrontab -l 2>/dev/null | awk -v b="$KEEPER_BEGIN" -v e="$KEEPER_END" '$0==b{skip=1} !skip{print} $0==e{skip=0}' \
+              | grep -v 'no crontab for' > "$tab" || true
+            if [ -s "$tab" ]; then scrontab "$tab" >/dev/null 2>&1; else scrontab -r >/dev/null 2>&1 || true; fi
+            rm -f "$tab"
+          fi
+          rm -f "$RUN/share/keeper"; echo "keeper off" ;;
+        status)
+          audit ALLOW
+          echo "scrontab=$(command -v scrontab >/dev/null && echo yes || echo no) keeper=$([ -s "$RUN/share/keeper" ] && echo on || echo off) core_place=$(core_place)"
+          if is_owner && command -v scrontab >/dev/null; then
+            keeper_on && echo "entry=present" || echo "entry=missing"
+          fi
+          [ -r "$LOGS/keeper.log" ] && tail -n 3 "$LOGS/keeper.log"
+          true ;;
+        *) refuse "keeper on|off|status" ;;
+      esac
+      ;;
+    keeper-serve)
+      # Run by the owner's Slurm cron entry: start the core if a member asked and none exists.
+      nwords 0 0
+      [ -s "$RUN/share/start-request" ] || exit 0
+      if ! shared; then rm -f "$RUN/share/start-request"; exit 0; fi
+      if squeue -h -u "$USER" -n gemi-core -o %i | grep -q .; then rm -f "$RUN/share/start-request"; exit 0; fi
+      audit SUBMIT
+      echo "$(date -Is) starting the core for $(cut -d' ' -f1 "$RUN/share/start-request")"
+      submit_core && rm -f "$RUN/share/start-request"
+      ;;
     my-places)
       # Your own placements (partition:account[:gres]) for the jobs you submit here: kept in your
       # home (~/.gemi/places), used for your workers on a session shared with you. No words: show them.
@@ -496,12 +597,14 @@ main() {
       timeout 120 "$RCLONE" --config "$RCLONE_CONF" lsjson --max-depth 1 --no-mimetype "${words[0]}:$path" | head -c 4000000
       ;;
     cloud-cat)
-      # One small file of a connection (a field design, a map), base64 on one line: at most 20 MB.
-      nwords 2 2; remote_name "${words[0]}"; have_remote "${words[0]}"
+      # One small file of a connection (a field design, a map), base64 on one line: at most 20 MB,
+      # from a byte offset if given (a larger file, such as a flight log, read in pieces).
+      nwords 2 3; remote_name "${words[0]}"; have_remote "${words[0]}"
       [ -x "$RCLONE" ] || refuse "rclone is not installed here yet (pull-rclone)"
-      local path; path=$(b64word "${words[1]}") || exit 77
+      local path offset="${words[2]:-0}"; path=$(b64word "${words[1]}") || exit 77
+      [[ "$offset" =~ ^[0-9]{1,12}$ ]] || refuse "offset must be a number of bytes"
       audit ALLOW
-      timeout 120 "$RCLONE" --config "$RCLONE_CONF" cat --count 20971520 "${words[0]}:$path" | base64 -w0; echo
+      timeout 120 "$RCLONE" --config "$RCLONE_CONF" cat --offset "$offset" --count 20971520 "${words[0]}:$path" | base64 -w0; echo
       ;;
     cloud-fetch)
       # Copy a folder of a connection into INCOMING/<dest> in a job; with upload settings, the

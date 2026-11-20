@@ -24,7 +24,8 @@ export type SensorType = (typeof SENSOR_TYPES)[number]
 export const PLATFORM_HINT: Record<Platform, string> = {
   Drone: "aerial pipeline: orthomosaic, plot boundaries, plot images",
   Rover: "ground pipeline: plot marking, stitching",
-  Handheld: "ground pipeline: plot photos",
+  Handheld:
+    "ground pipeline: with GPS (phone location on, or a GPS log) like a rover's pass; with no GPS, the photos are paired with the field design in the Plot Images step (one per plot, or a marked walk)",
 }
 
 /** "SonyA7R" from "Sony A7R" — what can stand in a storage path. */

@@ -17,7 +17,7 @@ IP=$(node_ip)
 [ -s "$RUN/llm.key" ] || (umask 077; head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > "$RUN/llm.key")
 KEY=$(cat "$RUN/llm.key")
 TMP=/tmp/gemi-$USER-$SLURM_JOB_ID
-mkdir -p "$TMP" "$DATA/llm/hf"
+mkdir -p "$TMP" "$DATA/llm/hf" "$DATA/llm/cache"   # compile caches: not in the image's small writable layer
 rm -f "$RUN/llm.env"
 cleanup() { rm -f "$RUN/llm.env"; rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -26,7 +26,8 @@ log "vLLM: $MODEL on $(hostname) ($(nvidia-smi --query-gpu=name,memory.total --f
 # HF_HUB_OFFLINE: weights were fetched by pull-llm.sbatch; never download on a GPU allocation.
 # shellcheck disable=SC2086  # LLM_ARGS is a list of flags
 apptainer exec --nv --no-home --writable-tmpfs $(private_ipc "$TMP/shm") \
-  -B "$DATA/llm/hf:/hf" --env "HF_HOME=/hf,HF_HUB_OFFLINE=1,VLLM_NO_USAGE_STATS=1" \
+  -B "$DATA/llm/hf:/hf" -B "$DATA/llm/cache:/llmcache" \
+  --env "HF_HOME=/hf,HF_HUB_OFFLINE=1,VLLM_NO_USAGE_STATS=1,XDG_CACHE_HOME=/llmcache,VLLM_CACHE_ROOT=/llmcache/vllm,TRITON_CACHE_DIR=/llmcache/triton,TORCHINDUCTOR_CACHE_DIR=/llmcache/inductor" \
   "$IMAGES/vllm.sif" \
   vllm serve "$MODEL" --host 0.0.0.0 --port "$PORT" --api-key "$KEY" \
     --served-model-name "$LLM_NAME" $LLM_ARGS &

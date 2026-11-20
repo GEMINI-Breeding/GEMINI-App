@@ -51,6 +51,7 @@ import {
 } from "@/features/process/components/predictionView"
 import { TrainModelDialog } from "@/features/process/components/TrainModelDialog"
 import type { InferenceModel } from "@/features/process/lib/inferenceModels"
+import { useUploadedWeights } from "@/features/process/lib/knownModels"
 import {
   type Ann,
   fromPrediction,
@@ -132,13 +133,7 @@ async function prompt(
   }
 }
 
-export function LabelingWorkspace({
-  images,
-  initial,
-  experimentId,
-  onClose,
-  onUseTrained,
-}: {
+interface WorkspaceProps {
   /** Object names of the images to label. */
   images: string[]
   /** A model's detections per image, offered as proposals. */
@@ -147,8 +142,71 @@ export function LabelingWorkspace({
   onClose: () => void
   /** Add a model trained from these labels to the pipeline. */
   onUseTrained?: (m: InferenceModel) => void
+}
+
+/** The labelled sets these images already have (one per object, e.g.
+ *  "flowers", "pods"; made here or by the agent), and which one is open. A
+ *  new set is started by naming it. Switching opens that set afresh. */
+export function LabelingWorkspace(props: WorkspaceProps) {
+  const base = labelSetDirectory(props.images[0] ?? "", "")
+  const sets = useQuery({
+    queryKey: ["label-sets", base],
+    queryFn: async () => {
+      const all =
+        ((await PlotGeometryService.apiPlotGeometryVersionsAllListAllVersions().catch(
+          () => [],
+        )) ?? []) as { directory?: string }[]
+      const names = new Set<string>()
+      for (const v of all) {
+        const d = String(v.directory ?? "")
+        if (
+          d.startsWith(base) &&
+          d.length > base.length &&
+          !d.slice(base.length).includes("/")
+        )
+          names.add(d.slice(base.length))
+      }
+      return [...names].sort()
+    },
+    staleTime: 30_000,
+  })
+  const [chosen, setChosen] = useState<string | null>(null)
+  const names = sets.data ?? []
+  const current =
+    chosen ??
+    (names.length === 0 || names.includes("default") ? "default" : names[0])
+  if (sets.isLoading)
+    return (
+      <p className="text-muted-foreground flex items-center gap-1 p-2 text-xs">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Finding labelled sets…
+      </p>
+    )
+  return (
+    <LabelingSession
+      key={current}
+      {...props}
+      setName={current}
+      setNames={names.includes(current) ? names : [...names, current].sort()}
+      onSetName={setChosen}
+    />
+  )
+}
+
+function LabelingSession({
+  images,
+  initial,
+  experimentId,
+  onClose,
+  onUseTrained,
+  setName,
+  setNames,
+  onSetName,
+}: WorkspaceProps & {
+  setName: string
+  setNames: string[]
+  onSetName: (name: string) => void
 }) {
-  const directory = labelSetDirectory(images[0] ?? "")
+  const directory = labelSetDirectory(images[0] ?? "", setName)
   const saved = useQuery({
     queryKey: ["label-set", directory],
     queryFn: async () => {
@@ -187,6 +245,13 @@ export function LabelingWorkspace({
   const [cls, setCls] = useState<string>("")
   const activeClass = cls || set.classes[0] || "object"
   const [busy, setBusy] = useState<string | null>(null)
+  // The last prompt or save that failed, kept on screen (a toast is gone in a
+  // few seconds, and a slow prompt may fail while the person looks elsewhere).
+  const [failed, setFailed] = useState<string | null>(null)
+  const fail = useCallback((msg: string) => {
+    setFailed(msg)
+    toast.error(msg)
+  }, [])
   const ask = useCallback(
     (img: string, prompted: Record<string, unknown>) =>
       prompt(experimentId, img, prompted, setBusy),
@@ -347,12 +412,12 @@ export function LabelingWorkspace({
             `${proposed.length} proposed. Enter keeps them all; click any wrong one to drop it.`,
           )
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Finding similar failed")
+        fail(e instanceof Error ? e.message : "Finding similar failed")
       } finally {
         setBusy(null)
       }
     },
-    [image, ownExamples, carriedExample, activeClass, setAnns, ask],
+    [image, ownExamples, carriedExample, activeClass, setAnns, ask, fail],
   )
 
   // Carry-over: an untouched image with earlier examples gets proposals.
@@ -379,13 +444,23 @@ export function LabelingWorkspace({
     return ""
   }, [pipelines, keys.data])
   const [describeOpen, setDescribeOpen] = useState(false)
-  const [describeModel, setDescribeModel] = useState("sam3")
+  // SAM 3 is gated: without a token (or sam3.pt uploaded) it can only fail,
+  // so the default is then OWLv2, which needs neither. The person's own
+  // choice wins.
+  const uploadedWeights = useUploadedWeights()
+  const hasSam3Weights = (uploadedWeights.data ?? []).some((f) =>
+    /(^|\/)sam3\.pt$/i.test(f.object_name ?? ""),
+  )
+  const [describeChoice, setDescribeModel] = useState<string | null>(null)
+  const describeModel =
+    describeChoice ?? (hfToken || hasSam3Weights ? "sam3" : "owlv2")
   const [describeText, setDescribeText] = useState("")
   const [lastDescribe, setLastDescribe] = useState<string | null>(null)
   const describe = useCallback(
     async (text: string, auto = false) => {
       if (!image || !text.trim()) return
       setBusy("Finding by description…")
+      setFailed(null)
       try {
         const preds = await ask(image, {
           mode: "describe",
@@ -411,14 +486,12 @@ export function LabelingWorkspace({
             `${proposed.length} proposed. Enter keeps them all; click any wrong one to drop it.`,
           )
       } catch (e) {
-        toast.error(
-          e instanceof Error ? e.message : "Finding by description failed",
-        )
+        fail(e instanceof Error ? e.message : "Finding by description failed")
       } finally {
         setBusy(null)
       }
     },
-    [image, ask, describeModel, hfToken, setAnns],
+    [image, ask, describeModel, hfToken, setAnns, fail],
   )
   // Carry-over: the next untouched image gets the same description's proposals.
   const described = useRef(new Set<string>())
@@ -456,11 +529,11 @@ export function LabelingWorkspace({
         }),
       )
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Masks failed")
+      fail(e instanceof Error ? e.message : "Masks failed")
     } finally {
       setBusy(null)
     }
-  }, [anns, image, setAnns, ask])
+  }, [anns, image, setAnns, ask, fail])
 
   const segmentPoint = useCallback(
     async (x: number, y: number) => {
@@ -477,12 +550,12 @@ export function LabelingWorkspace({
           : null
         if (a) setAnns((all) => [...all, a])
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Outlining failed")
+        fail(e instanceof Error ? e.message : "Outlining failed")
       } finally {
         setBusy(null)
       }
     },
-    [image, activeClass, setAnns, ask],
+    [image, activeClass, setAnns, ask, fail],
   )
 
   const save = useMutation({
@@ -496,7 +569,7 @@ export function LabelingWorkspace({
       }),
     onSuccess: () => setDirty(false),
     onError: (e) =>
-      toast.error(e instanceof Error ? e.message : "Could not save labels"),
+      fail(e instanceof Error ? e.message : "Could not save labels"),
   })
 
   const markDoneAndGo = (d: number) => {
@@ -707,6 +780,37 @@ export function LabelingWorkspace({
         <span className="font-medium">
           {image?.split("/").pop()} · {idx + 1} / {images.length}
         </span>
+        <label className="text-muted-foreground flex items-center gap-1">
+          Set
+          <select
+            className="bg-background h-7 rounded border px-1 text-foreground"
+            value={setName}
+            data-testid="labeling-set"
+            title="Labelled sets of these images: one per object (flowers, pods…). Pick one, or start a new one."
+            onChange={(e) => {
+              if (
+                dirty &&
+                !window.confirm(
+                  "Leave this set without saving the current image?",
+                )
+              )
+                return
+              if (e.target.value !== "__new__") return onSetName(e.target.value)
+              const n = window
+                .prompt("Name of the new set (the object, e.g. flowers)")
+                ?.trim()
+                .replace(/[^A-Za-z0-9._-]+/g, "-")
+              if (n) onSetName(n)
+            }}
+          >
+            {setNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+            <option value="__new__">New set…</option>
+          </select>
+        </label>
         <span className="text-muted-foreground">
           {doneCount} labelled · {kept} kept
           {proposed ? ` · ${proposed} proposed` : ""}
@@ -714,6 +818,22 @@ export function LabelingWorkspace({
         {busy && (
           <span className="flex items-center gap-1 text-primary">
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> {busy}
+          </span>
+        )}
+        {!busy && failed && (
+          <span
+            className="text-destructive flex max-w-xl items-center gap-1"
+            data-testid="labeling-failed"
+            title={failed}
+          >
+            <span className="truncate">{failed}</span>
+            <button
+              type="button"
+              className="hover:text-foreground shrink-0 underline"
+              onClick={() => setFailed(null)}
+            >
+              dismiss
+            </button>
           </span>
         )}
         <span className="ml-auto flex items-center gap-1">
@@ -799,8 +919,11 @@ export function LabelingWorkspace({
           <span className="text-muted-foreground basis-full">
             One object per line, as name: description; say what it is not (“…,
             not a leaf”). Kept proposals carry to the next image.
-            {describeModel === "sam3" && !hfToken
+            {describeModel === "sam3" && !hfToken && !hasSam3Weights
               ? " SAM 3 needs a Hugging Face token: save one in Settings → Keys & tokens (or upload sam3.pt to Models/weights)."
+              : ""}
+            {!hfToken && !hasSam3Weights && describeModel === "owlv2"
+              ? " Using OWLv2: SAM 3 (outlines, usually better) needs a Hugging Face token in Settings → Keys & tokens."
               : ""}
           </span>
         </form>
@@ -1214,8 +1337,9 @@ export function LabelingWorkspace({
           open={trainOpen}
           onOpenChange={setTrainOpen}
           set={set}
+          directory={directory}
           experimentId={experimentId}
-          defaultName={`${set.classes.join(" ") || "objects"} detector`}
+          defaultName={`${set.classes.join(" ") || (setName !== "default" ? setName : "objects")} detector`}
           onUse={onUseTrained}
         />
       )}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   assignNearest,
   folderOrthos,
+  framesOrthos,
   nearestIndex,
   nearestRegions,
 } from "./multiOrtho"
@@ -113,5 +114,32 @@ describe("pickCovering", () => {
         [[...ww], [...dr]],
       ),
     ).toBe(1)
+  })
+})
+
+describe("framesOrthos", () => {
+  it("keeps the orthomosaics whose run kept camera positions, the treatments' first", () => {
+    const J3 = "53ccaa52-8587-4bf3-bf80-9877738c2801"
+    const f = (object_name: string, last_modified = "2026-10-01") =>
+      ({ object_name, last_modified }) as never
+    const files = [
+      f(`${F}odm_orthophoto-${J1}.tif`, "2026-10-14"), // a treatment's run, no camera positions
+      f(`${F}odm_orthophoto-${J2}.tif`, "2026-10-26"),
+      f(`${F}odm_shots-${J2}.geojson`),
+      f(`${F}odm_orthophoto-${J3}.tif`, "2026-10-20"),
+      f(`${F}odm_shots-${J3}.geojson`),
+    ]
+    expect(framesOrthos(files, F)).toEqual([
+      `${F}odm_orthophoto-${J2}.tif`,
+      `${F}odm_orthophoto-${J3}.tif`,
+    ])
+    expect(framesOrthos(files, F, [J3, J1])).toEqual([
+      `${F}odm_orthophoto-${J3}.tif`,
+      `${F}odm_orthophoto-${J2}.tif`,
+    ])
+    // Another run of the day (a diurnal flight) is left out when the run's jobs are known.
+    expect(framesOrthos(files, F, [], [J1, J3])).toEqual([
+      `${F}odm_orthophoto-${J3}.tif`,
+    ])
   })
 })

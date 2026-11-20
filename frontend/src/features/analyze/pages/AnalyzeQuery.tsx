@@ -270,7 +270,7 @@ export function AnalyzeQuery() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="analyze-query">
-      <ProcessScopeSelectors allowAllPopulations />
+      <ProcessScopeSelectors allowAllPopulations onlyWithData />
 
       {!scopeReady ? (
         <p className="text-muted-foreground text-sm">

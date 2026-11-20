@@ -205,7 +205,21 @@ export interface ExecuteStepInput {
   stitching?: StitchingParams
   splitOrthomosaic?: SplitOrthomosaicParams
   associateBoundaries?: AssociateBoundariesParams
+  /** Ground plot images from the raw frames instead of the stitch. */
+  groundFrames?: GroundFramesParams
   dataSync?: DataSyncParams
+}
+
+/** GROUND_PLOT_FRAMES (geo worker): each marked plot's frames. */
+export interface GroundFramesParams {
+  imagesPrefix: string
+  msgsSyncedPath: string | null
+  plots: Record<string, unknown>[]
+  /** …/PlotFrames/ of the run's processed scope. */
+  outputPrefix: string
+  boundaries?: GeoJSON.FeatureCollection
+  /** Plot properties in marking order (a field design paired by order). */
+  design?: Record<string, unknown>[]
 }
 
 export interface DataSyncParams {
@@ -217,6 +231,8 @@ export interface DataSyncParams {
   /** cross_sensor: the other sensor's synced track. */
   sourceTrackPath?: string
   maxExtrapolationSec?: number
+  /** Seconds added to capture times with no time zone; omitted = fitted to the log. */
+  clockOffsetSec?: number
   /** Aerial: write geo.txt for ODM. */
   writeGeoTxt: boolean
 }
@@ -269,6 +285,12 @@ export async function executeStep(
             images_prefixes: d.imagesPrefixes,
             mode: d.mode,
             write_geo_txt: d.writeGeoTxt,
+            ...(d.clockOffsetSec !== undefined
+              ? { clock_offset_sec: d.clockOffsetSec }
+              : {}),
+            // A ground run's photos may have no GPS at all (paired with the
+            // field design instead): that finishes the sync, not fails it.
+            ...(d.writeGeoTxt ? {} : { allow_unlocated: true }),
             ...(d.mode === "cross_sensor"
               ? {
                   source_track_path: d.sourceTrackPath,
@@ -595,6 +617,34 @@ export async function executeStep(
     }
 
     case "associate_boundaries": {
+      if (input.groundFrames) {
+        // The raw frames instead of the stitch: each plot's frames that
+        // do not overlap, named by its plot (geo worker).
+        const g = input.groundFrames
+        const job = (await JobsService.apiJobsSubmitSubmitJob({
+          requestBody: {
+            job_type: "GROUND_PLOT_FRAMES",
+            parameters: {
+              images_prefix: g.imagesPrefix,
+              plots: g.plots,
+              output_prefix: g.outputPrefix,
+              ...(g.msgsSyncedPath
+                ? { msgs_synced_path: g.msgsSyncedPath }
+                : {}),
+              ...(g.boundaries ? { boundaries: g.boundaries } : {}),
+              ...(g.design?.length ? { design: g.design } : {}),
+            },
+            experiment_id: experimentId,
+          } as Parameters<
+            typeof JobsService.apiJobsSubmitSubmitJob
+          >[0]["requestBody"],
+        })) as JobOutput
+        const jobId = String(job?.id ?? "")
+        if (!jobId)
+          throw new Error("GROUND_PLOT_FRAMES submitted but no job id returned")
+        appendStepJobId(runId, "associate_boundaries", jobId)
+        return { jobId, done: false }
+      }
       // Stitched plot → boundary polygon by centre-in-polygon (main's
       // run_associate_boundaries), in the stitch worker.
       const a = input.associateBoundaries

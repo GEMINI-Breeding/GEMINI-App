@@ -64,6 +64,7 @@ import {
 } from "@/features/process/components/predictionView"
 import { ZoomableOverlay } from "@/features/process/components/ZoomableOverlay"
 import { loadActiveBoundaries } from "@/features/process/lib/activeBoundaries"
+import { groundFramesPlots } from "@/features/process/lib/groundFrames"
 import {
   type InferenceModel,
   modelDisplayName,
@@ -284,7 +285,7 @@ export function InferenceTool({
         prefix: plotImagesPrefix(scope),
         plots: true,
       },
-      { label: "Raw drone images", prefix: rawPrefix, plots: false },
+      { label: "Raw images", prefix: rawPrefix, plots: false },
       // From the raw frames (placed by camera positions): each plot's frame crops
       // and its best frame straightened to a top-down view.
       {
@@ -295,6 +296,13 @@ export function InferenceTool({
       {
         label: "Straightened plot views from the raw frames",
         prefix: `${plotFramesPrefix(scope, run.uploadScope?.batchLabel)}straightened/`,
+        plots: true,
+      },
+      // A ground track's raw frames: each plot's frames that do not
+      // overlap, so a model's counts on them add up to the plot's count.
+      {
+        label: "Every frame of each plot, no overlap (counts summed)",
+        prefix: `${plotFramesPrefix(scope, run.uploadScope?.batchLabel)}tiles/`,
         plots: true,
       },
     ]
@@ -388,6 +396,13 @@ export function InferenceTool({
       let boundaries: GeoJSON.FeatureCollection | undefined
       if (mode === "all" && sources[sourceIdx].plots) {
         boundaries = await loadActiveBoundaries(processedPrefix(scope))
+        // Ground frames named from a field design (no GPS, no boundaries):
+        // the plots' properties come from the frames' manifest.
+        if (!boundaries && activePrefix.includes("/PlotFrames/")) {
+          boundaries = await groundFramesPlots(
+            `${plotFramesPrefix(scope, run.uploadScope?.batchLabel)}manifest.json`,
+          )
+        }
       }
       const result = await executeStep({
         runId: run.id,
@@ -547,17 +562,20 @@ export function InferenceTool({
         <Play className="mr-1.5 h-3.5 w-3.5" />
         Run a model
       </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-7"
-        disabled={plotImageNames.length === 0}
-        title="Label objects on the plot images (by hand, by example or by description) and train a model from them"
-        onClick={() => setLabeling(true)}
-      >
-        Label &amp; train
-      </Button>
     </>
+  )
+  // Without results yet (the bare actions row): labelling starts blank.
+  const labelBlankButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-7"
+      disabled={plotImageNames.length === 0}
+      title="Label objects on the plot images (by hand, by example or by description) and train a model from them"
+      onClick={() => setLabeling(true)}
+    >
+      Label &amp; train
+    </Button>
   )
   const results = (
     <InferenceResults
@@ -565,6 +583,9 @@ export function InferenceTool({
       configured={models}
       onAddModel={addModel}
       actions={resultActions}
+      onLabelBlank={
+        plotImageNames.length > 0 ? () => setLabeling(true) : undefined
+      }
     />
   )
 
@@ -627,7 +648,10 @@ export function InferenceTool({
   return (
     <div className="space-y-3">
       {(run.steps.inference?.jobIds?.length ?? 0) === 0 && (
-        <div className="flex flex-wrap justify-end gap-2">{resultActions}</div>
+        <div className="flex flex-wrap justify-end gap-2">
+          {resultActions}
+          {labelBlankButton}
+        </div>
       )}
       {results}
       <Sheet open={runPanel} onOpenChange={setRunPanel}>

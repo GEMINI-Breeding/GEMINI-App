@@ -54,7 +54,10 @@ import {
   newCropRule,
 } from "@/features/process/components/CropRuleList"
 import { EdgeCropTool } from "@/features/process/components/EdgeCropTool"
-import { InferenceModelEditor } from "@/features/process/components/InferenceModelEditor"
+import {
+  InferenceModelEditor,
+  ReuseModelPicker,
+} from "@/features/process/components/InferenceModelEditor"
 import {
   emptyModel,
   type InferenceModel,
@@ -64,6 +67,7 @@ import {
   sourceLabel,
   usesRoboflowServer,
 } from "@/features/process/lib/inferenceModels"
+import { useKnownModels } from "@/features/process/lib/knownModels"
 import {
   createPipeline,
   updatePipeline,
@@ -262,6 +266,15 @@ export function ProcessingPipeline() {
   const [aerialConfig, setAerialConfig] = useState(AERIAL_DEFAULT_CONFIG)
   const [models, setModels] = useState<InferenceModel[]>([emptyModel()])
   const configuredModels = models.filter((m) => modelKey(m))
+  const knownModels = useKnownModels()
+  // A picked model fills an untouched blank entry, or is added below.
+  const addKnownModel = (m: InferenceModel) =>
+    setModels((prev) => {
+      const blank = prev.findIndex((x) => !modelKey(x) && !x.label.trim())
+      return blank >= 0
+        ? prev.map((x, i) => (i === blank ? m : x))
+        : [...prev, m]
+    })
   const hasRoboflowModel = configuredModels.some(usesRoboflowServer)
   const [inferenceMode, setInferenceMode] = useState<"cloud" | "local">("cloud")
   const [localServerUrl, setLocalServerUrl] = useState("http://localhost:9002")
@@ -910,10 +923,12 @@ export function ProcessingPipeline() {
             {currentStep === 3 && (
               <>
                 <p className="text-muted-foreground text-sm">
-                  Add one or more models for inference on your plot images —
-                  from Roboflow, Hugging Face, or your own trained weights.
-                  Leave empty to skip — you can configure and run inference
-                  later from the run view.
+                  Models that count or outline objects on the plot images. With
+                  no model yet, start with <em>Describe it</em>: write what to
+                  find and check a few plots. To get a model of your own, label
+                  plot images on a run (Inference → Label &amp; train) and train
+                  one there; it then appears under <em>Your weights</em>.
+                  Optional: you can add models later.
                 </p>
 
                 <div className="space-y-3">
@@ -934,19 +949,28 @@ export function ProcessingPipeline() {
                     />
                   ))}
 
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setModels((prev) => [...prev, emptyModel()])}
-                  >
-                    <Plus className="mr-1 h-4 w-4" />
-                    Add Model
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setModels((prev) => [...prev, emptyModel()])
+                      }
+                    >
+                      <Plus className="mr-1 h-4 w-4" />
+                      Add Model
+                    </Button>
+                    <ReuseModelPicker
+                      known={knownModels}
+                      current={models}
+                      onPick={addKnownModel}
+                    />
+                  </div>
                 </div>
 
                 {hasRoboflowModel && (
                   <div className="space-y-2">
-                    <Label>Roboflow Inference Mode</Label>
+                    <Label>Roboflow inference mode</Label>
                     <div className="flex items-center gap-4">
                       <label className="flex items-center gap-1.5 text-sm cursor-pointer">
                         <input
@@ -966,7 +990,7 @@ export function ProcessingPipeline() {
                           onChange={() => setInferenceMode("local")}
                           className="accent-primary"
                         />
-                        Local server
+                        Local server (your own Roboflow inference server)
                       </label>
                     </div>
                     {inferenceMode === "local" && (

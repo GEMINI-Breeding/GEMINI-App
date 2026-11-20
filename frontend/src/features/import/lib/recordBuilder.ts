@@ -291,7 +291,7 @@ export interface TraitRecord {
   /** Omitted entirely when the sheet has no plot number column mapped —
    *  those records are saved with NULL plot fields ("orphan" traits) and
    *  won't appear on the plot map. */
-  plot_number?: number
+  plot_number?: number | string
   plot_row_number?: number
   plot_column_number?: number
   /** Per-row germplasm name (accession-preferred, line, then alias).

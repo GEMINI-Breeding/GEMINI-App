@@ -9,7 +9,7 @@
  * by hand.
  */
 import { useQueries } from "@tanstack/react-query"
-import { Bot, Eye, EyeOff, Plus } from "lucide-react"
+import { Bot, ChevronDown, Eye, EyeOff, Plus } from "lucide-react"
 import { type ReactNode, useState } from "react"
 
 import { type JobOutput, JobsService } from "@/client"
@@ -22,6 +22,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { InferenceJobView } from "@/features/process/components/InferenceJobView"
 import {
   type InferenceModel,
@@ -81,15 +89,22 @@ export function InferenceResults({
   configured,
   onAddModel,
   actions,
+  onLabelBlank,
 }: {
   run: Run
   /** The pipeline's models; others found in jobs get "Add to pipeline". */
   configured: InferenceModel[]
   onAddModel: (m: InferenceModel) => void
-  /** Controls on the card's title line (run a model, label & train). */
+  /** Controls on the card's title line (run a model, set up models). */
   actions?: ReactNode
+  /** "Label & train" from a blank start (no model's detections). Without it,
+   *  the card shows no Label & train control. */
+  onLabelBlank?: () => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
+  // The job whose detections a labelling session starts from (opens its
+  // results straight in labelling mode).
+  const [labelFrom, setLabelFrom] = useState<string | null>(null)
   const ids = run.steps.inference?.jobIds ?? []
   const jobs = useQueries({
     queries: ids.map((jobId) => ({
@@ -123,6 +138,70 @@ export function InferenceResults({
       })
   }
 
+  // Detection results over many plots: each can seed a labelling session
+  // (correcting a model is quicker than labelling from nothing).
+  const seeds = groups.flatMap((g) =>
+    g.jobs
+      .filter((j) => {
+        const p = (j.parameters ?? {}) as { task_type?: string }
+        return (
+          j.status === "COMPLETED" &&
+          p.task_type !== "classification" &&
+          isBatchInferenceResult((j as { result?: unknown }).result)
+        )
+      })
+      .map((j) => ({ job: j, name: g.name })),
+  )
+  const labelControl = !onLabelBlank ? null : seeds.length === 0 ? (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-7"
+      title="Label objects on the plot images (by hand, by example or by description) and train a model from them"
+      onClick={onLabelBlank}
+    >
+      Label &amp; train
+    </Button>
+  ) : (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7"
+          data-testid="inference-label-menu"
+          title="Label objects on the plot images and train a model from them: start from a model's detections (correct them) or from nothing"
+        >
+          Label &amp; train <ChevronDown className="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-w-sm">
+        <DropdownMenuLabel className="text-xs">
+          Start from a model's detections
+        </DropdownMenuLabel>
+        {seeds.slice(0, 8).map(({ job, name }) => (
+          <DropdownMenuItem
+            key={String(job.id)}
+            className="text-xs"
+            onSelect={() => {
+              setLabelFrom(String(job.id))
+              setOpen(String(job.id))
+            }}
+          >
+            <span className="font-medium">{name}</span>
+            <span className="text-muted-foreground ml-1 truncate">
+              {when(job)} · {counted(job)}
+            </span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-xs" onSelect={onLabelBlank}>
+          Start blank (by hand, by example or by description)
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+
   return (
     <Card className="gap-2 py-3" data-testid="inference-results">
       <CardHeader className="px-4">
@@ -133,7 +212,12 @@ export function InferenceResults({
             job{ids.length === 1 ? "" : "s"}, newest first · per-plot counts are
             in Analyze too
           </CardDescription>
-          {actions && <div className="ml-auto flex gap-2">{actions}</div>}
+          {(actions || labelControl) && (
+            <div className="ml-auto flex gap-2">
+              {actions}
+              {labelControl}
+            </div>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3 px-4">
@@ -201,11 +285,12 @@ export function InferenceResults({
                           }
                           className="h-6 px-2"
                           data-testid="inference-show-job"
-                          onClick={() =>
+                          onClick={() => {
+                            setLabelFrom(null)
                             setOpen((o) =>
                               o === String(j.id) ? null : String(j.id),
                             )
-                          }
+                          }}
                         >
                           {open === String(j.id) ? (
                             <>
@@ -221,9 +306,14 @@ export function InferenceResults({
                     </div>
                     {open === String(j.id) && (
                       <InferenceJobView
+                        key={`${j.id}-${labelFrom === String(j.id) ? "label" : "view"}`}
                         job={j}
                         modelName={g.name}
-                        onClose={() => setOpen(null)}
+                        startLabeling={labelFrom === String(j.id)}
+                        onClose={() => {
+                          setOpen(null)
+                          setLabelFrom(null)
+                        }}
                       />
                     )}
                   </li>

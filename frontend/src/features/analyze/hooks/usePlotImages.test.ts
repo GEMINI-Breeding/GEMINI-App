@@ -31,9 +31,14 @@ describe("plotNumberFromImageName", () => {
     expect(plotNumberFromImageName(`${P}plot_9.png`)).toBe(9)
   })
 
+  it("keeps a named plot's identifier", () => {
+    expect(plotNumberFromImageName(`${P}plot_KW3_accession_BTx623.png`)).toBe(
+      "KW3",
+    )
+  })
+
   it("returns null for anything else", () => {
     expect(plotNumberFromImageName(`${P}thumbnail.png`)).toBeNull()
-    expect(plotNumberFromImageName(`${P}plot_abc_accession_X.png`)).toBeNull()
     expect(plotNumberFromImageName("")).toBeNull()
   })
 })

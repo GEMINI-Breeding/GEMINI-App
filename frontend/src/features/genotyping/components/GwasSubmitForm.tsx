@@ -11,16 +11,20 @@
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ChevronDown, ChevronRight, Play } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ExperimentsService, type GwasSubmitInput } from "@/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useProcess } from "@/contexts/ProcessContext"
 import { idAsString } from "@/features/admin/lib/ids"
-import { useGenotypingStudy } from "@/features/genotyping/hooks/useGenotypingStudies"
+import {
+  useGenotypingStudy,
+  useGenotypingStudyExperiments,
+} from "@/features/genotyping/hooks/useGenotypingStudies"
 import {
   useDatasetTraits,
   useExperimentDatasets,
+  useExperimentScopeNames,
   useSubmitGwas,
 } from "@/features/genotyping/hooks/useGwas"
 import useCustomToast from "@/hooks/useCustomToast"
@@ -45,6 +49,10 @@ export function GwasSubmitForm({ studyId }: GwasSubmitFormProps) {
 
   const [experimentId, setExperimentId] = useState<string>("")
   const [datasetId, setDatasetId] = useState<string>("")
+  // One environment at a time is the clean test; empty = every site and
+  // season, each line's values averaged (phenotype aggregation).
+  const [siteId, setSiteId] = useState<string>("")
+  const [seasonId, setSeasonId] = useState<string>("")
   const [selectedTraits, setSelectedTraits] = useState<Set<string>>(new Set())
 
   const [model, setModel] = useState<Model>("lmm")
@@ -73,6 +81,21 @@ export function GwasSubmitForm({ studyId }: GwasSubmitFormProps) {
   })
   const datasetsQuery = useExperimentDatasets(experimentId || null)
   const traitsQuery = useDatasetTraits(datasetId || null)
+  const scopeNames = useExperimentScopeNames(experimentId || null)
+
+  // Start from the study's own experiment (and its trait dataset, when it has
+  // only one): what a person nearly always picks first.
+  const linkedExperiments = useGenotypingStudyExperiments(studyId)
+  useEffect(() => {
+    const linked = linkedExperiments.data ?? []
+    if (!experimentId && linked.length === 1 && linked[0]?.id != null)
+      setExperimentId(idAsString(linked[0].id))
+  }, [linkedExperiments.data, experimentId])
+  useEffect(() => {
+    const ds = (datasetsQuery.data ?? []) as Array<{ id?: unknown }>
+    if (experimentId && !datasetId && ds.length === 1 && ds[0]?.id != null)
+      setDatasetId(idAsString(ds[0].id))
+  }, [datasetsQuery.data, experimentId, datasetId])
 
   const submitMutation = useSubmitGwas()
   const submitError = submitMutation.error?.message ?? null
@@ -107,6 +130,8 @@ export function GwasSubmitForm({ studyId }: GwasSubmitFormProps) {
       n_pcs: nPcs,
       phenotype_agg: phenotypeAgg,
       qc: { maf, geno, mind, hwe },
+      ...(siteId ? { site_id: siteId } : {}),
+      ...(seasonId ? { season_id: seasonId } : {}),
       ...(model === "mvlmm"
         ? { trait_ids: traitIds }
         : traitIds.length === 1
@@ -174,6 +199,8 @@ export function GwasSubmitForm({ studyId }: GwasSubmitFormProps) {
               onChange={(e) => {
                 setExperimentId(e.target.value)
                 setDatasetId("")
+                setSiteId("")
+                setSeasonId("")
                 setSelectedTraits(new Set())
               }}
               className={SELECT_CLS}
@@ -228,6 +255,63 @@ export function GwasSubmitForm({ studyId }: GwasSubmitFormProps) {
                 </option>
               ))}
             </select>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="gwas-site-select"
+                  className="mb-1 block text-sm font-medium"
+                >
+                  Site
+                </label>
+                <select
+                  id="gwas-site-select"
+                  data-testid="gwas-site-select"
+                  value={siteId}
+                  onChange={(e) => setSiteId(e.target.value)}
+                  disabled={!experimentId}
+                  className={SELECT_CLS}
+                >
+                  <option value="">All sites</option>
+                  {[...(scopeNames.data?.sites ?? new Map())].map(
+                    ([id, name]) => (
+                      <option key={id} value={id}>
+                        {name}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="gwas-season-select"
+                  className="mb-1 block text-sm font-medium"
+                >
+                  Season
+                </label>
+                <select
+                  id="gwas-season-select"
+                  data-testid="gwas-season-select"
+                  value={seasonId}
+                  onChange={(e) => setSeasonId(e.target.value)}
+                  disabled={!experimentId}
+                  className={SELECT_CLS}
+                >
+                  <option value="">All seasons</option>
+                  {[...(scopeNames.data?.seasons ?? new Map())].map(
+                    ([id, name]) => (
+                      <option key={id} value={id}>
+                        {name}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+            </div>
+            <p className="text-muted-foreground mt-1 text-xs">
+              {siteId || seasonId
+                ? "Only this environment's trait values are used."
+                : "Each line's values are averaged over every site and season; pick one environment for a cleaner test."}
+            </p>
           </div>
 
           <div>

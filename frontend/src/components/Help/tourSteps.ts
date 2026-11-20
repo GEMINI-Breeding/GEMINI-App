@@ -113,9 +113,9 @@ export const TOUR_SECTIONS: Record<string, TourSection> = {
       },
       {
         id: "process-run-groups",
-        title: "Runs, One Row per Flight Day",
+        title: "Flight Days × Stages",
         description:
-          "Runs are grouped by date and platform. A day flown with several cameras (RGB and thermal) or several times (diurnal flights, one per treatment) is one row: expand it to see each flight. A thermal flight flown beside an RGB one is folded into the RGB run rather than listed on its own. Click a run to open its steps.",
+          "One row per flight day, one column per stage of the pipeline: a tick is done, “next” is what that day needs, and clicking any cell opens that day at that stage. The header counts how many days have each stage done; older seasons fold. A day flown several times or with several cameras shows counts per stage: open it for a row per run.",
         selector: '[data-onboarding="process-run-groups"]',
       },
       {
@@ -492,116 +492,107 @@ TOUR_SECTIONS["/process/plot-marking"] = {
   label: "Plot Marking",
   steps: [
     {
-      id: "pm-keyboard-hints",
+      id: "pm-intro",
+      title: "Plot Marking",
+      description:
+        "Each plot is a stretch of the rover's track between a start frame and an end frame. Mark them here (or let the app mark the whole track), check them, then save: stitching joins each plot's frames into one image.",
+      selector: null,
+    },
+    {
+      id: "pm-keys",
       title: "Keyboard Shortcuts",
       description:
-        "Quick reference for all keyboard shortcuts — S marks the start of a plot, E marks the end, N skips to the next unfinished plot, and arrow keys navigate between images. Keep this visible while you work.",
-      selector: '[data-onboarding="pm-keyboard-hints"]',
+        "← / → move through the frames, S marks the current plot's start, E its end, N starts a new plot, D deletes one, and Ctrl+S saves. Plots per frame (beside it) is for passes that see more than one plot at once, one per band of the frame.",
+      selector: '[data-testid="pm-keys"]',
     },
     {
-      id: "pm-image-viewer",
-      title: "Image Viewer",
+      id: "pm-automark",
+      title: "Mark Automatically",
       description:
-        "The main image panel. Click to mark a start (S key) or end (E key) point for the current plot. Zoom in for precise placement — drag to pan when zoomed in, double-click to reset the view.",
-      selector: '[data-onboarding="pm-image-viewer"]',
+        "Marks the whole track from the crop rows, using the plots per bed and plot spacing recorded for the run. Review the result plot by plot afterwards. Below it, Mark from drone plot boundaries marks every plot from the boundaries drawn on that date's orthomosaic, when the field was also flown.",
+      selector: '[data-testid="pm-automark"]',
     },
     {
-      id: "pm-nav-images",
-      title: "Image Navigation",
+      id: "pm-frame",
+      title: "The Frame You Are On",
       description:
-        "Step through images with the ← / → arrows. The counter shows the current image index out of the total. Click the counter to jump to a specific image number.",
-      selector: '[data-onboarding="pm-nav-images"]',
+        "The current frame, with the heading of the rover. Wheel or the buttons zoom, drag moves around. Full size opens the frame on its own.",
+      selector: '[data-testid="pm-frame"]',
     },
     {
-      id: "pm-mark-buttons",
+      id: "pm-marks",
       title: "Mark Start / End",
       description:
-        "Click Mark Start (or press S) to record the start frame for the current plot, and Mark End (or press E) to record the end frame. Both marks are required before moving to the next plot.",
-      selector: '[data-onboarding="pm-mark-buttons"]',
+        "Mark Start (S) and Mark End (E) set the current plot's first and last frame to the frame shown. The Step setting above skips several frames at a time.",
+      selector: '[data-testid="pm-marks"]',
     },
     {
-      id: "pm-plot-nav",
-      title: "Plot Navigation",
+      id: "pm-pager",
+      title: "Plot by Plot",
       description:
-        "Move between plots with the ← / → arrows or press N to jump to the next unmarked plot. The counter shows which plot you're on out of the total count.",
-      selector: '[data-onboarding="pm-plot-nav"]',
+        "Go to a plot by number, or step through them with the arrows. + adds a plot, the bin deletes the current one.",
+      selector: '[data-testid="pm-pager"]',
     },
     {
-      id: "pm-plot-pager",
-      title: "Plot Progress Card",
+      id: "pm-strip",
+      title: "Every Plot on the Track",
       description:
-        "Shows the current plot's start and end frame assignments alongside its plot ID. Completed plots are indicated by both frames being set.",
-      selector: '[data-onboarding="pm-plot-pager"]',
+        "One segment per plot: green is marked, amber needs a check (carried over from another date, or a frame that no longer exists), grey is not marked. Click a segment to go to that plot.",
+      selector: '[data-testid="pm-strip"]',
     },
     {
-      id: "pm-plot-start-end",
-      title: "Start / End Labels",
+      id: "pm-approve",
+      title: "Check a Plot",
       description:
-        "Displays the image numbers assigned as the start and end frames for the current plot. Tap a label to jump directly to that image in the viewer.",
-      selector: '[data-onboarding="pm-plot-start-end"]',
+        "The plot's start and end frames side by side. Looks right · next (Y) confirms it and moves on; click Start or End to jump to that frame and fix it.",
+      selector: '[data-testid="pm-approve"]',
     },
     {
       id: "pm-direction",
-      title: "Row Direction",
+      title: "Stitching Direction",
       description:
-        "Set which direction the Amiga rover was travelling through this plot row — Left-to-Right or Right-to-Left. Direction must be set on every plot before saving.",
-      selector: '[data-onboarding="pm-direction"]',
-    },
-    {
-      id: "pm-dot-strip",
-      title: "Progress Strip",
-      description:
-        "A colour-coded dot for every plot. Green = both start and end marked; amber = only one mark; grey = unmarked. Click any dot to jump directly to that plot.",
-      selector: '[data-onboarding="pm-dot-strip"]',
+        "Which way the images run through the plot when stitched (the rover's travel direction across the frame).",
+      selector: '[data-testid="pm-direction"]',
     },
     {
       id: "pm-gps-toggle",
-      title: "GPS Map Toggle",
-      description:
-        "Show or hide the GPS map panel. When visible, the map plots the rover's GPS track and highlights the image position for each frame as you navigate, helping you orient the field.",
-      selector: '[data-onboarding="pm-gps-toggle"]',
-    },
-    {
-      id: "pm-gps-map",
       title: "GPS Map",
       description:
-        "Displays the rover's GPS track for this run. The current image position is highlighted as you step through frames — useful for confirming which part of the field each image covers.",
-      selector: '[data-onboarding="pm-gps-map"]',
+        "Shows the rover's track beside the frame, with the current frame on it: useful to see which pass and bed you are on.",
+      selector: '[data-testid="pm-gps-toggle"]',
     },
     {
-      id: "pm-version-selector",
-      title: "Version Selector",
+      id: "pm-version-select",
+      title: "Versions",
       description:
-        "Switch between previously saved plot marking versions. Loading an earlier version restores all its start/end frame assignments so you can compare or continue from a prior state.",
-      selector: '[data-onboarding="pm-version-selector"]',
-    },
-    {
-      id: "pm-back",
-      title: "Back",
-      description:
-        "Exit the plot marking tool and return to the pipeline steps. If you have unsaved changes, you'll be prompted to confirm before leaving.",
-      selector: '[data-onboarding="pm-back"]',
+        "Saved markings of this track. Loading one restores all its plots; the bin deletes it.",
+      selector: '[data-testid="pm-version-select"]',
     },
     {
       id: "pm-save",
       title: "Save",
       description:
-        "Saves the current start/end assignments, overwriting the active version. The saved data is used by the stitching step to assemble plot video clips.",
-      selector: '[data-onboarding="pm-save"]',
+        "Saves over the version shown. Stitching uses the saved markings.",
+      selector: '[data-testid="pm-save"]',
     },
     {
       id: "pm-save-as",
       title: "Save As",
       description:
-        "Saves the current assignments as a new named version, keeping the previous version intact. Useful for experimenting with different mark positions before committing.",
-      selector: '[data-onboarding="pm-save-as"]',
+        "Saves the markings as a new version and keeps the earlier one.",
+      selector: '[data-testid="pm-save-as"]',
     },
     {
-      id: "pm-clear-all",
-      title: "Clear All Plots",
-      description:
-        "Resets all plots to a single empty entry so you can start the marking process fresh. Found inside the Danger zone toggle — only appears when plots exist.",
-      selector: '[data-onboarding="pm-clear-all"]',
+      id: "pm-back",
+      title: "Back",
+      description: "Back to the run. With unsaved changes it asks first.",
+      selector: '[data-testid="pm-back"]',
+    },
+    {
+      id: "pm-danger",
+      title: "Danger Zone",
+      description: "Clear every plot and start the marking again.",
+      selector: '[data-testid="pm-danger"]',
     },
   ],
 }
@@ -610,81 +601,119 @@ TOUR_SECTIONS["/process/gcp"] = {
   label: "GCP Selection",
   steps: [
     {
-      id: "gcp-select",
-      title: "Select a GCP",
+      id: "gcp-intro",
+      title: "Ground Control Points",
       description:
-        "Pick which ground control point you want to mark from this dropdown. Each GCP corresponds to a physical marker in the field with known GPS coordinates. A coloured dot fills in once you've marked at least one image for it.",
-      selector: '[data-onboarding="gcp-select"]',
+        "Markers on the ground at surveyed positions. Marking them in the drone images ties the orthomosaic to its true position, so maps of different dates line up. ODM needs at least three GCPs marked to use them.",
+      selector: null,
     },
     {
-      id: "gcp-nav-marks",
-      title: "Navigate Marked Images",
+      id: "gcp-load-csv",
+      title: "Load GCPs from CSV",
       description:
-        "Jump back and forth between images that already have a mark for the active GCP. The counter shows how many images have been marked so far.",
-      selector: '[data-onboarding="gcp-nav-marks"]',
+        "A file with each GCP's name, latitude, longitude and elevation. Or add GCPs one at a time from the list and type their coordinates.",
+      selector: '[data-testid="gcp-load-csv"]',
     },
     {
-      id: "gcp-nav-images",
-      title: "Browse All Images",
+      id: "gcp-active-select",
+      title: "The GCP You Are Marking",
       description:
-        "Step through every image with the ← / → arrows. Click the number counter to type in an image number and jump directly to it.",
-      selector: '[data-onboarding="gcp-nav-images"]',
+        "Pick a GCP. Its coordinates can be edited beside it (Save coords), and the bin deletes it.",
+      selector: '[data-testid="gcp-active-select"]',
     },
     {
-      id: "gcp-filter",
-      title: "Filter by GCP Proximity",
+      id: "gcp-mode",
+      title: "Images Near It",
       description:
-        "When on, only images taken near a GCP are shown (based on GPS distance). Turn it off to see all images — useful if your drone images lack GPS data.",
-      selector: '[data-onboarding="gcp-filter"]',
+        "Radius: the images within a distance of the GCP. Map-picker: choose them on the map with a lasso (shift-drag) instead.",
+      selector: '[data-testid="gcp-mode-radius"]',
     },
     {
-      id: "gcp-viewer",
-      title: "Image Viewer — Mark the GCP",
+      id: "gcp-map",
+      title: "Image Map",
       description:
-        "Left-click anywhere on the image to drop a crosshair at that pixel for the active GCP. Right-click an existing mark to remove it. Drag to pan when zoomed in, double-click to reset the view.",
-      selector: '[data-onboarding="gcp-viewer"]',
+        "Every image is a dot, coloured by the GCP that claims it; the GCPs are ringed pins. The dots near the active GCP are highlighted.",
+      selector: '[data-testid="gcp-map"]',
     },
     {
-      id: "gcp-zoom",
-      title: "Zoom Controls",
-      description:
-        "Zoom in for precise mark placement — the crosshair stays locked to the pixel you clicked regardless of zoom level. A Reset button appears when zoomed in.",
-      selector: '[data-onboarding="gcp-zoom"]',
+      id: "gcp-image-slider",
+      title: "Step Through the Images",
+      description: "The images near the active GCP, one at a time.",
+      selector: '[data-testid="gcp-image-slider"]',
     },
     {
-      id: "gcp-slider",
-      title: "Image Slider",
+      id: "gcp-image-viewer",
+      title: "Mark the GCP",
       description:
-        "Drag the slider to scrub through all images quickly. Coloured diamonds on the track show every marked image across all GCPs — hover a diamond to see which GCP it belongs to.",
-      selector: '[data-onboarding="gcp-slider"]',
+        "Click the marker's centre. Right-click a mark to remove it; clicking again on the same image moves it. Wheel zooms. Mark each GCP in every photo that shows it: ODM needs at least three GCPs, each in three or more photos.",
+      selector: '[data-testid="gcp-image-viewer"]',
     },
     {
-      id: "gcp-save",
-      title: "Save GCPs",
+      id: "gcp-save-and-complete",
+      title: "Save & Complete",
       description:
-        "Saves all marks and writes the GCP pixel-coordinate file used by OpenDroneMap. The button enables once every GCP has at least one image marked.",
-      selector: '[data-onboarding="gcp-save"]',
+        "Writes the GCP file the orthomosaic step reads, and completes the step. Skip leaves GCPs out of this run.",
+      selector: '[data-testid="gcp-save-and-complete"]',
+    },
+  ],
+}
+
+TOUR_SECTIONS["/process/image-review"] = {
+  label: "Image Exclusion",
+  steps: [
+    {
+      id: "ir-map",
+      title: "Every Image on the Map",
+      description:
+        "Each dot is a drone image. Shift-drag a box (or shift-click one dot) to leave images out of the orthomosaic: take-off and landing frames, turns, blurry shots, frames off the field.",
+      selector: ".leaflet-container",
     },
     {
-      id: "gcp-done",
-      title: "Done",
-      description:
-        "Exit the GCP tool and return to the pipeline steps. You can come back and re-mark GCPs at any time before running the orthomosaic step.",
-      selector: '[data-onboarding="gcp-done"]',
+      id: "ir-counts",
+      title: "Kept and Left Out",
+      description: "How many images are kept and how many are left out.",
+      selector: '[data-testid="image-review-counts"]',
     },
     {
-      id: "gcp-replace-file",
-      title: "Replace GCP File",
+      id: "ir-save",
+      title: "Save & Complete",
       description:
-        "Swap the GCP locations CSV with a new file — useful if you updated field marker coordinates or loaded the wrong file. Existing marks will be cleared.",
-      selector: '[data-onboarding="gcp-replace-file"]',
+        "Saves the selection and completes the step. Clear selection starts again; Skip keeps every image.",
+      selector: '[data-testid="image-review-save"]',
+    },
+  ],
+}
+
+TOUR_SECTIONS["/process/inference"] = {
+  label: "Inference",
+  steps: [
+    {
+      id: "inf-results",
+      title: "Results on This Run",
+      description:
+        "Each model run on this date, newest first: how many plots and the mean count per plot. The counts are stored per plot and appear in Analyze too.",
+      selector: '[data-testid="inference-results"]',
     },
     {
-      id: "gcp-clear",
-      title: "Clear All GCPs",
+      id: "inf-run",
+      title: "Run a Model",
       description:
-        "Removes every pixel mark across all GCPs and lets you start over. Only appears once at least one mark has been placed.",
-      selector: '[data-onboarding="gcp-clear"]',
+        "Try a model on one plot image, or run it on every image of the date. Models come from Roboflow, Hugging Face (including ones that find objects from a description), or weights trained here. Set up models keeps the pipeline's list.",
+      selector: '[data-testid="inference-run-open"]',
+    },
+    {
+      id: "inf-label",
+      title: "Label & Train",
+      description:
+        "Correct a model's detections or label from nothing, then train a model of your own on the labelled images. Include several dates so it sees different light and growth stages.",
+      selector: '[data-testid="inference-label-menu"]',
+    },
+    {
+      id: "inf-view",
+      title: "View Results",
+      description:
+        "The detections on each plot. Set a confidence threshold, use it in Analyze, sort plots by count to check the extremes, and correct boxes with Label.",
+      selector: '[data-testid="inference-show-job"]',
     },
   ],
 }
@@ -696,6 +725,8 @@ export function getTourSection(pathname: string, step?: string): TourSection {
     if (step === "plot_boundary_prep")
       return TOUR_SECTIONS["/process/plot-boundary-prep"]
     if (step === "plot_marking") return TOUR_SECTIONS["/process/plot-marking"]
+    if (step === "image_review") return TOUR_SECTIONS["/process/image-review"]
+    if (step === "inference") return TOUR_SECTIONS["/process/inference"]
     return TOUR_SECTIONS["/process/gcp"]
   }
   if (/^\/process\/[^/]+\/run\//.test(pathname))

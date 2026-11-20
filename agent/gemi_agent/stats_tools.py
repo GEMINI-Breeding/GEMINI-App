@@ -281,20 +281,15 @@ def canopy_cover(args: dict) -> dict:
     """Green cover (fraction of the image that is plant) for every plot image
     under a prefix; optionally stored as a trait."""
     if not args.get("images_prefix"):
-        # Named by its run: the plot images of that run.
-        from . import guide
-        from .process_runs import ProcessRuns
+        # Named by its run: the plot images of that run (orthomosaic plot images,
+        # or the straightened plot frames when the plots were cut from the photos).
+        from .app_tools import pick_run, plot_images_prefix
+        from .process_runs import SCOPE_KEYS
 
         if not args.get("run"):
             raise ValueError("canopy_cover needs `run` (words naming the run) or `images_prefix`")
-        pr = ProcessRuns(client())
-        runs, pipelines = guide._state(pr)
-        found = guide._match(runs, str(args["run"]))
-        if len(found) != 1:
-            raise ValueError(f"`run` must pick exactly one run; it matches {len(found)}: " +
-                             ", ".join(guide._label(pr.describe(r, pipelines)) for r in (found or runs)[:8]))
-        up = found[0].get("uploadScope") or {}
-        args = {**args, "images_prefix": "Processed/" + "/".join(str(up[k]) for k in guide.SCOPE_KEYS) + "/PlotImages/"}
+        up = pick_run(str(args["run"])).get("uploadScope") or {}
+        args = {**args, "images_prefix": plot_images_prefix("Processed/" + "/".join(str(up[k]) for k in SCOPE_KEYS) + "/")}
     from concurrent.futures import ThreadPoolExecutor
     import io
 

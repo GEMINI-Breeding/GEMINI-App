@@ -121,18 +121,31 @@ export function useGroundTrack(
     queryFn: async () => {
       const found: DirectTrack[] = []
       for (const id of idsKey.split(",")) {
-        const msgsSyncedPath = `${rawPrefix}${id}/RGB/Metadata/msgs_synced.csv`
-        const points = await fetchTrackCsv(msgsSyncedPath)
-        if (!points?.length) continue
-        found.push({
-          points,
-          track: {
-            dataset: id,
-            imagesPrefix: `${rawPrefix}${id}/RGB/Images/top/`,
-            images: points.map((p) => p.image),
-            msgsSyncedPath,
-          },
-        })
+        // An Amiga extraction's track, else a handheld upload's (written
+        // by Data Sync from the photos' GPS or a GPS log).
+        for (const [msgsSyncedPath, imagesPrefix] of [
+          [
+            `${rawPrefix}${id}/RGB/Metadata/msgs_synced.csv`,
+            `${rawPrefix}${id}/RGB/Images/top/`,
+          ],
+          [
+            `${rawPrefix}${id}/Metadata/msgs_synced.csv`,
+            `${rawPrefix}${id}/Images/`,
+          ],
+        ]) {
+          const points = await fetchTrackCsv(msgsSyncedPath)
+          if (!points?.length) continue
+          found.push({
+            points,
+            track: {
+              dataset: id,
+              imagesPrefix,
+              images: points.map((p) => p.image),
+              msgsSyncedPath,
+            },
+          })
+          break
+        }
       }
       return found
     },

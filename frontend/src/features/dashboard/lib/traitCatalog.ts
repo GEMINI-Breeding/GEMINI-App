@@ -14,9 +14,11 @@
  * temporal widgets ("pipeline-avg" sources) chart one field across flights
  * the way they charted one pipeline across runs.
  */
+
 import type { FileMetadata } from "@/client"
 import type { TraitRecord } from "@/features/analyze/api"
 import type { MatrixRow } from "@/features/analyze/lib/multivariate"
+import { normalizePlotNumber } from "@/lib/plotNumber"
 
 export interface CatalogEntry {
   experiment_name?: string | null
@@ -113,17 +115,20 @@ export function catalogToRecords(entries: CatalogEntry[]): TraitRecord[] {
 export function plotImagesForDate(
   files: FileMetadata[],
   date: string,
-): Map<number, string> {
-  const exact = new Map<number, string>()
-  const any = new Map<number, string>()
+): Map<number | string, string> {
+  const exact = new Map<number | string, string>()
+  const any = new Map<number | string, string>()
   const names = files
     .map((f) => f.object_name ?? "")
     .filter((n) => n.includes("/PlotImages/") && /\.(png|jpe?g)$/i.test(n))
     .sort()
   for (const n of names) {
-    const m = (n.split("/").pop() ?? "").match(/^plot_(\d+)/i)
-    if (!m) continue
-    const plot = Number(m[1])
+    // plot_12_accession_X.png → 12; plot_KW3_accession_X.png → "KW3"
+    const m = (n.split("/").pop() ?? "").match(
+      /^plot_(.+?)(?:_accession_.*)?\.(?:png|jpe?g)$/i,
+    )
+    const plot = m ? normalizePlotNumber(m[1]) : undefined
+    if (plot === undefined) continue
     any.set(plot, n)
     if (n.includes(`/${date}/`)) exact.set(plot, n)
   }
@@ -139,7 +144,7 @@ export function plotImagesForDate(
 export function rowsToFeatureCollection(
   rows: MatrixRow[],
   traitNames: string[],
-  images: Map<number, string>,
+  images: Map<number | string, string>,
 ): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",

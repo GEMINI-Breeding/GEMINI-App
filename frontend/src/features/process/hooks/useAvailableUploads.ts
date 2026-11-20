@@ -18,8 +18,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
 
-import { type FileMetadata, FilesService } from "@/client"
-import { isLoggedIn } from "@/lib/auth"
+import { type FileMetadata, FilesService, OpenAPI } from "@/client"
+import { getToken, isLoggedIn } from "@/lib/auth"
 
 const DEFAULT_BUCKET = "gemini"
 
@@ -144,8 +144,14 @@ function parseRawObjectName(objectName: string): ParsedRawObject | null {
   }
 }
 
+/** A listed object, or a whole folder's files of one extension
+ *  (`count` of them) standing in for its objects. */
+export type UploadEntry = Pick<FileMetadata, "object_name"> & {
+  count?: number
+}
+
 /** Group a Raw/ listing into one entry per uploaded dataset scope. */
-export function groupUploads(files: FileMetadata[]): AvailableUpload[] {
+export function groupUploads(files: UploadEntry[]): AvailableUpload[] {
   const groups = new Map<string, AvailableUpload>()
   // Per-group set of distinct short-ids — turned into a sorted array
   // at the end. Tracked separately because Maps aren't structurally
@@ -193,9 +199,10 @@ export function groupUploads(files: FileMetadata[]): AvailableUpload[] {
       shortIdSets.set(key, shortIds)
     }
     if (parsed.datasetShortId) shortIds.add(parsed.datasetShortId)
+    const n = item.count ?? 1
     const existing = groups.get(key)
     if (existing) {
-      existing.fileCount += 1
+      existing.fileCount += n
       continue
     }
     groups.set(key, {
@@ -208,7 +215,7 @@ export function groupUploads(files: FileMetadata[]): AvailableUpload[] {
       platform: parsed.platform,
       sensor: parsed.sensor,
       dataType,
-      fileCount: 1,
+      fileCount: n,
       datasetShortIds: [],
     })
   }
@@ -228,14 +235,47 @@ export function groupUploads(files: FileMetadata[]): AvailableUpload[] {
   })
 }
 
+/**
+ * The uploaded folders under Raw/ with their file counts, from the
+ * server's register of uploaded files: about a second, where listing the
+ * bucket walks every object (minutes once it holds a few seasons). Each
+ * folder comes back as one entry per file extension, with a stand-in file
+ * name so `groupUploads` reads it like a listed object. Null when the
+ * server has no such route or its register is empty (an older stack).
+ */
+async function listUploadFolders(
+  bucket: string,
+): Promise<UploadEntry[] | null> {
+  const base = (OpenAPI.BASE ?? "").replace(/\/$/, "")
+  try {
+    const res = await fetch(
+      `${base}/api/files/upload_folders/${encodeURIComponent(bucket)}?prefix=Raw/`,
+      { headers: { Authorization: `Bearer ${getToken()}` } },
+    )
+    if (!res.ok) return null
+    const rows = (await res.json()) as
+      | { folder: string; extension?: string | null; count: number }[]
+      | null
+    if (!rows?.length) return null
+    return rows.map((r) => ({
+      object_name: `${r.folder}/files${r.extension ? `.${r.extension}` : ""}`,
+      count: r.count,
+    }))
+  } catch {
+    return null
+  }
+}
+
 export function useAvailableUploads(): {
   uploads: AvailableUpload[]
   isLoading: boolean
   isError: boolean
 } {
-  const listing = useQuery<FileMetadata[], Error>({
+  const listing = useQuery<UploadEntry[], Error>({
     queryKey: ["files", "list-raw-tree-all"],
     queryFn: async () => {
+      const folders = await listUploadFolders(DEFAULT_BUCKET)
+      if (folders) return folders
       const res = await FilesService.apiFilesListFilePathListFiles({
         filePath: `${DEFAULT_BUCKET}/Raw/`,
       })

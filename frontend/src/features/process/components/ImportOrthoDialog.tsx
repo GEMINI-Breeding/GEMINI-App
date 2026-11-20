@@ -135,27 +135,37 @@ export function ImportOrthoDialog({
         createdAt: new Date().toISOString(),
       },
     ]
-    setStepState(run.id, "orthomosaic", {
-      status: "completed",
-      completedAt: new Date().toISOString(),
-      outputs: {
-        ...(run.steps.orthomosaic?.outputs ?? {}),
-        versions: meta,
-        importedDem: selectedDem || undefined,
-        importedDemPath: selectedDem
-          ? `${uploadedDemsPrefix(scope)}${selectedDem}`
-          : undefined,
+    setStepState(
+      run.id,
+      "orthomosaic",
+      {
+        status: "completed",
+        completedAt: new Date().toISOString(),
+        outputs: {
+          ...(run.steps.orthomosaic?.outputs ?? {}),
+          versions: meta,
+          importedDem: selectedDem || undefined,
+          importedDemPath: selectedDem
+            ? `${uploadedDemsPrefix(scope)}${selectedDem}`
+            : undefined,
+        },
       },
-    })
+      "person",
+    )
     // Data Sync only checks the raw images ODM would consume. With an
     // imported ortho there may be none, and a pending Data Sync kept every
     // later step (Split, trait extraction) locked for good.
     const sync = run.steps.data_sync?.status
     if (sync !== "completed" && sync !== "skipped") {
-      setStepState(run.id, "data_sync", {
-        status: "skipped",
-        completedAt: new Date().toISOString(),
-      })
+      setStepState(
+        run.id,
+        "data_sync",
+        {
+          status: "skipped",
+          completedAt: new Date().toISOString(),
+        },
+        "person",
+      )
     }
     showSuccessToast(`Imported ${selectedOrtho}`)
     setSelectedOrtho("")

@@ -345,7 +345,10 @@ function GpsTrackMap({
       {located.length === 0 && (
         <div className="bg-background/90 text-muted-foreground absolute inset-0 z-[500] flex flex-col items-center justify-center gap-2 p-4 text-center text-sm">
           <MapIcon className="h-8 w-8 opacity-40" />
-          <p>No GPS in this track's msgs_synced.csv.</p>
+          <p>
+            No positions for these frames. Run Data Sync with the photos' GPS or
+            a GPS log.
+          </p>
         </div>
       )}
     </div>
@@ -377,7 +380,12 @@ function PlotStrip({
   onPick: (i: number) => void
 }) {
   return (
-    <div className="flex h-3 w-full items-center gap-px" data-testid="pm-strip">
+    // Hundreds of plots: no gaps and segments narrower than a pixel, so the
+    // strip always fits its column instead of widening the page.
+    <div
+      className={`flex h-3 w-full min-w-0 items-center ${plots.length > 200 ? "" : "gap-px"}`}
+      data-testid="pm-strip"
+    >
       {plots.map((p, i) => {
         const warn =
           p.translated ||
@@ -400,7 +408,7 @@ function PlotStrip({
             type="button"
             key={p.plot_id}
             onClick={() => onPick(i)}
-            className={`min-w-px flex-1 rounded-[1px] transition-all hover:opacity-80 ${colour} ${ring} ${
+            className={`min-w-0 flex-1 rounded-[1px] transition-all hover:opacity-80 ${colour} ${ring} ${
               i === current ? "h-3 ring-2 ring-primary" : "h-1.5"
             }`}
             title={`Plot ${p.plot_id}${isComplete(p) ? "" : " · not marked"}${warn ? " · needs a look" : ""}${p.review === "ok" ? " · checked" : p.review === "corrected" ? " · corrected" : ""}`}
@@ -799,7 +807,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
     <>
       <div className="space-y-3" data-testid="plot-marker">
         <div className="bg-muted/40 text-muted-foreground flex flex-wrap items-center justify-between gap-2 rounded px-3 py-1.5 text-xs">
-          <span>
+          <span data-testid="pm-keys">
             <kbd className="bg-background rounded border px-1">←</kbd>
             <kbd className="bg-background ml-1 rounded border px-1">→</kbd>{" "}
             navigate ·{" "}
@@ -948,8 +956,10 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
 
         {!track.msgsSyncedPath && (
           <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-800 text-xs">
-            This dataset has no msgs_synced.csv, so frames have no GPS: markings
-            can't be georeferenced or reused on another date.
+            These frames have no positions yet, so markings can't be placed on
+            the field or reused on another date. Run the Data Sync step: it
+            reads the photos' own GPS (a phone with location on) or a GPS log
+            uploaded for this date (GPX, NMEA, CSV, RTK .pos).
           </p>
         )}
         {translatedBanner && (
@@ -1136,7 +1146,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
               </Select>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex gap-2" data-testid="pm-marks">
               <Button
                 className="flex-1"
                 variant={
@@ -1169,7 +1179,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
           {/* Plot pager: one place to move between plots */}
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1" data-testid="pm-pager">
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1457,6 +1467,7 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
               <Button
                 variant="outline"
                 className="flex-1"
+                data-testid="pm-back"
                 onClick={() =>
                   dirtyRef.current ? setUnsavedOpen(true) : onCancel()
                 }
@@ -1480,7 +1491,10 @@ export function PlotMarker({ run, scope, onCancel }: PlotMarkerProps) {
               </Button>
             </div>
 
-            <div className="space-y-1.5 rounded-md border px-3 py-2">
+            <div
+              className="space-y-1.5 rounded-md border px-3 py-2"
+              data-testid="pm-danger"
+            >
               <button
                 type="button"
                 onClick={() => setDangerOpen((v) => !v)}

@@ -27,10 +27,12 @@ import {
   downloadAuthed,
 } from "@/features/genotyping/components/AuthImage"
 import { GwasRunsSidebar } from "@/features/genotyping/components/GwasRunsSidebar"
+import { runEnvironment } from "@/features/genotyping/components/GwasRunTile"
 import { PcaPlot } from "@/features/genotyping/components/PcaPlot"
 import {
   jobTraitNames,
   useDeleteGwasJob,
+  useExperimentScopeNames,
   useGwasJob,
   useTraitNameMap,
 } from "@/features/genotyping/hooks/useGwas"
@@ -57,6 +59,11 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
   const navigate = useNavigate()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const job = jobQuery.data
+  const jobExperiment = (job?.parameters as { experiment_id?: unknown } | null)
+    ?.experiment_id
+  const scopeNames = useExperimentScopeNames(
+    jobExperiment != null ? String(jobExperiment) : null,
+  )
 
   async function handleDownload(url: string, filename: string) {
     try {
@@ -68,14 +75,14 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
 
   if (jobQuery.isLoading) {
     return (
-      <div className="container max-w-6xl px-4 py-6">
+      <div>
         <p className="text-muted-foreground animate-pulse">Loading…</p>
       </div>
     )
   }
   if (!job) {
     return (
-      <div className="container max-w-6xl px-4 py-6">
+      <div>
         <p className="text-sm text-red-600" data-testid="gwas-job-error">
           {jobQuery.error?.message ?? "Job not found."}
         </p>
@@ -105,12 +112,12 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
   const traitLabel = traitNames.length > 0 ? traitNames.join(", ") : null
 
   return (
-    <div className="container max-w-[1600px] space-y-4 px-4 py-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <Link
           to="/genotyping/$studyId"
           params={{ studyId }}
-          search={{ tab: "gwas" }}
+          search={{}}
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Back to study
@@ -172,7 +179,7 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
                 navigate({
                   to: "/genotyping/$studyId",
                   params: { studyId },
-                  search: { tab: "gwas" },
+                  search: {},
                 })
               } else if (deleteJob.error) {
                 showErrorToast(
@@ -190,12 +197,14 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
         <GwasRunsSidebar studyId={studyId} currentJobId={jobId} />
         <div className="flex-1 space-y-4 min-w-0">
           <div>
-            <h1 className="text-2xl font-semibold">
-              GWAS — {result?.study_name ?? job.job_type}
+            <h1 className="text-2xl font-bold tracking-tight">
+              {traitLabel ?? "GWAS"}
             </h1>
-            <p className="text-muted-foreground text-xs">
-              {traitLabel ? `${traitLabel} · ` : ""}Job {jobId}
+            <p className="text-muted-foreground text-sm">
+              {runEnvironment(job, scopeNames.data)} ·{" "}
+              {result?.study_name ?? "GWAS"}
             </p>
+            <p className="text-muted-foreground/70 text-xs">Job {jobId}</p>
           </div>
 
           {/* Status + progress */}
@@ -287,6 +296,12 @@ export function GwasJobDetail({ studyId, jobId }: GwasJobDetailProps) {
                     label="Genomic inflation λ"
                     value={result.genomic_inflation_lambda?.toFixed(3) ?? "—"}
                   />
+                  {result.n_bonferroni_sig != null && (
+                    <Stat
+                      label={`Pass Bonferroni${result.bonferroni_threshold ? ` (p<${result.bonferroni_threshold.toExponential(2)})` : ""}`}
+                      value={String(result.n_bonferroni_sig)}
+                    />
+                  )}
                   <Stat
                     label="Genome-wide hits (p<5e-8)"
                     value={String(result.n_genome_wide_sig ?? 0)}

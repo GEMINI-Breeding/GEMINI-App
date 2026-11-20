@@ -35,6 +35,16 @@ Step 2 is interactive in the app today; tell the person which screen to open.
   `…_T.JPG` thermal). Upload only one kind per dataset:
   `"name_contains": "_V"` for RGB. Mixing them ruins the reconstruction.
 - The date is the flight date (in the folder and file names), `YYYY-MM-DD`.
+- Data already on the cluster (`cluster_folder`): an upload takes every image
+  below the folder, so upload the sub-folder that holds one camera's images.
+  Look inside sub-folders (no `upload`) until you see it; the tool refuses a
+  folder that would mix cameras and names the sub-folders.
+- Thermal beside RGB (DJI M4T, H20T…): upload the thermal frames as their own
+  upload with `sensor: Thermal` and the same experiment, site, population,
+  date and platform. Prefer frames already converted to °C (single-band
+  `.tif`, often a `thermal_conv` folder) over the camera's raw `_T.JPG`: the
+  plot images step cuts them per plot with the RGB frames and measures canopy
+  temperature from °C frames.
 
 ## 2. Ground control points
 

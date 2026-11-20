@@ -88,67 +88,119 @@ export function FlightCameras({
 
   const companions = companionRunsOf(run, runs, labels)
   if (companions.length === 0) return null
+
+  // One row per camera. A flight split by treatment uploads each camera once
+  // per treatment: those uploads are parts of one camera, listed in its row.
+  const bySensor = new Map<string, Run[]>()
+  for (const c of companions) {
+    const key = c.uploadScope?.sensor ?? "Other camera"
+    bySensor.set(key, [...(bySensor.get(key) ?? []), c])
+  }
+  const total = (rs: Run[]) => {
+    const ns = rs.map(uploadedFiles)
+    return ns.every((n) => n != null)
+      ? ns.reduce<number>((a, n) => a + (n ?? 0), 0)
+      : null
+  }
+  const thisSensor = run.uploadScope?.sensor ?? "RGB"
+  const thisFiles = uploadedFiles(run)
+  const treatments = Array.from(
+    new Set(companions.map((c) => c.uploadScope?.batchLabel).filter(Boolean)),
+  ) as string[]
+
   return (
     <div
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-1.5 text-xs"
+      className="rounded-md border px-3 py-2 text-xs"
       data-testid="flight-cameras"
     >
-      <span
-        className="flex items-center gap-1.5 font-medium"
-        title="Processed as one run. Their frames go into the plot images from the raw frames (matched to these frames by capture time, cut per plot; a thermal camera also gives canopy temperature). An orthomosaic of each is optional."
+      <div
+        className="mb-1.5 flex items-center gap-1.5 font-medium"
+        title="Processed as one run. The other cameras' frames go into the plot images from the raw frames (matched to these frames by capture time, cut per plot; a thermal camera also gives canopy temperature). An orthomosaic of each is optional."
       >
-        <Camera className="h-3.5 w-3.5" /> Cameras
-      </span>
-      <span>
-        <span className="font-medium">{run.uploadScope?.sensor ?? "RGB"}</span>{" "}
-        <span className="text-muted-foreground">this run</span>
-      </span>
-      {companions.map((c) => {
-        const ortho = c.steps?.orthomosaic?.status
-        const files = uploadedFiles(c)
-        const label = c.uploadScope?.batchLabel
-        return (
-          <span
-            key={c.id}
-            className="flex flex-wrap items-center gap-2"
-            data-testid="flight-camera"
-          >
-            <span>
-              <span className="font-medium">{c.uploadScope?.sensor}</span>{" "}
-              <span className="text-muted-foreground">
-                {files != null ? `${files} frames` : "uploaded"}
-                {label ? ` · ${label}` : ""} · in plot images
-                {ortho && ORTHO_STATUS[ortho]
-                  ? ` · ${ORTHO_STATUS[ortho]}`
-                  : ""}
+        <Camera className="h-3.5 w-3.5" /> Cameras of this flight
+        <span className="font-normal text-muted-foreground">
+          · processed together as this run
+          {treatments.length > 1
+            ? ` · flown in ${treatments.length} parts (${treatments.join(", ")})`
+            : ""}
+        </span>
+      </div>
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1.5">
+        <span className="font-medium">{thisSensor}</span>
+        <span className="text-muted-foreground">
+          this run{thisFiles != null ? ` · ${thisFiles} images` : ""} ·
+          orthomosaic, plot boundaries and traits below
+        </span>
+        {Array.from(bySensor.entries()).map(([sensor, parts]) => {
+          const n = total(parts)
+          return (
+            <div key={sensor} className="contents" data-testid="flight-camera">
+              <span className="font-medium">{sensor}</span>
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-muted-foreground">
+                  {n != null ? `${n} frames` : "uploaded"} · matched by time
+                  into the plot images
+                  {/thermal/i.test(sensor) ? " and canopy temperature" : ""}
+                </span>
+                <span className="text-muted-foreground">
+                  Orthomosaic (optional):
+                </span>
+                {parts.map((c) => {
+                  const ortho = c.steps?.orthomosaic?.status
+                  const label = c.uploadScope?.batchLabel
+                  const busy = building === c.id || ortho === "running"
+                  return (
+                    <span
+                      key={c.id}
+                      className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5"
+                      data-testid="flight-camera-part"
+                      title={`${uploadedFiles(c) ?? "?"} frames${label ? ` · ${label}` : ""}${ortho && ORTHO_STATUS[ortho] ? ` · ${ORTHO_STATUS[ortho]}` : ""}`}
+                    >
+                      {parts.length > 1 && (
+                        <span>
+                          {label ?? "part"}
+                          {uploadedFiles(c) != null && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              {uploadedFiles(c)}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-5 px-1.5 text-xs"
+                        disabled={busy}
+                        onClick={() => onBuildOrtho(c)}
+                      >
+                        {busy && (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        )}
+                        {ortho === "completed"
+                          ? "Rebuild"
+                          : ortho === "running"
+                            ? "Building…"
+                            : "Build"}
+                      </Button>
+                      {ortho === "completed" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-5 px-1.5 text-xs"
+                          onClick={() => open(c)}
+                        >
+                          View
+                        </Button>
+                      )}
+                    </span>
+                  )
+                })}
               </span>
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-xs"
-              disabled={building === c.id || ortho === "running"}
-              onClick={() => onBuildOrtho(c)}
-            >
-              {(building === c.id || ortho === "running") && (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              )}
-              {ortho === "completed" ? "Rebuild" : "Build"}{" "}
-              {c.uploadScope?.sensor} orthomosaic
-            </Button>
-            {ortho === "completed" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-xs"
-                onClick={() => open(c)}
-              >
-                View
-              </Button>
-            )}
-          </span>
-        )
-      })}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

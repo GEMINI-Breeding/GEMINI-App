@@ -8,15 +8,16 @@
  * scoped by experiment/season/site; this hook will swap its data source
  * at that point without breaking callers.
  */
-import { type UseQueryResult, useQuery } from "@tanstack/react-query"
 
+import { type UseQueryResult, useQuery } from "@tanstack/react-query"
 import { PlotGeometryService, PlotsService } from "@/client"
+import { normalizePlotNumber, type PlotNumber } from "@/lib/plotNumber"
 
 export type PlotPolygonProps = {
   /** UUID; helpful to surface alongside row/col for joining later. */
   plot_id?: string
-  /** Numeric plot id from the field-design CSV. */
-  plot_number?: number
+  /** The plot's identifier from the field design: 101, or a named plot ("KW1"). */
+  plot_number?: PlotNumber
   plot_row_number?: number
   plot_column_number?: number
   accession_name?: string | null
@@ -56,7 +57,10 @@ function normalizeProps(raw: unknown): PlotPolygonProps {
     typeof v === "string" && v.length > 0 ? v : undefined
   return {
     ...p,
-    plot_number: num(p.plot_number) ?? num(p.plot) ?? num(p.Plot),
+    plot_number:
+      normalizePlotNumber(p.plot_number) ??
+      normalizePlotNumber(p.plot) ??
+      normalizePlotNumber(p.Plot),
     plot_row_number: num(p.plot_row_number) ?? num(p.row) ?? num(p.Row),
     plot_column_number:
       num(p.plot_column_number) ??

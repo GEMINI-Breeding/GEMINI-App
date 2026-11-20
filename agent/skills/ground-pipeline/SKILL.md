@@ -1,6 +1,6 @@
 ---
 name: ground-pipeline
-description: Run the ground (rover) pipeline end to end — upload .bin logs, extraction, plot marking, per-plot stitching — and know which step comes next. Use for "process the rover data", "run the ground pipeline".
+description: Run the ground pipeline end to end — a rover's .bin logs (extraction) or a handheld pass's photos (positions from their GPS or a GPS log), plot marking, per-plot stitching — and know which step comes next. Use for "process the rover data", "the walked pass", "run the ground pipeline".
 ---
 
 # Ground pipeline
@@ -21,6 +21,44 @@ description: Run the ground (rover) pipeline end to end — upload .bin logs, ex
 | 5 | (optional) inference on the mosaics | skill `inference` | predictions written |
 
 Never skip ahead: each step needs the previous one's output.
+
+## Handheld passes (a phone or camera carried along the rows)
+
+With GPS (the photos' own, or a GPS log), a handheld pass is processed exactly
+like a rover's after extraction: positions, plot marking, then plot images.
+
+1. Upload the photos: `upload`, `data_type: images`, `platform: Handheld`,
+   the camera as `sensor` (e.g. RGB). iPhone photos must be JPEG: HEIC can't
+   be processed (Settings → Camera → Formats → Most Compatible).
+2. A GPS log of the walk, if the person carried one (a GPS app's GPX/CSV, an
+   NMEA file, an RTK receiver's .pos or CSV): `upload` it with
+   `data_type: gps_log` and the photos' own experiment, site, population,
+   date, platform and sensor. It is matched to the photos by capture time and
+   beats a phone's own GPS (metres off).
+3. `sync_positions` with `run`. Its job result says how many photos got a
+   position and from where, and whether the camera clock was shifted to line
+   up with the log (cameras without a time zone are shifted by whole hours).
+4. Then plot marking (`ground-plot-marking`) and plot images as for a rover.
+
+With no GPS at all:
+
+- One photo per plot (a photo taken at each plot): skill `plot-photos`
+  (`plots_from_images`, paired with the field design and confirmed).
+- A walked pass: mark the plots as usual (by hand), then `ground_plot_frames`
+  with `design_path`: the design's rows are paired with the marked plots in
+  marking order, so the design must list the plots in the order walked.
+
+## Plot images: the stitch or the raw frames
+
+Either source works for a rover or a handheld pass, once the plots are marked:
+
+- Stitched plots: `stitch`, then `associate_plots` (needs boundaries).
+- Raw frames, no stitch: `ground_plot_frames` with `run`. Each plot's frames
+  that do not overlap go to `…/PlotFrames/tiles/`; run models on that folder
+  (`run_inference`): the counts add up per plot without counting a plant
+  twice. `…/PlotFrames/straightened/` holds one image per plot (its middle
+  frame). Plots are named from the drone boundaries they were marked from,
+  else by GPS inside the active boundaries, else from `design_path`.
 
 ## Which way to identify plots
 

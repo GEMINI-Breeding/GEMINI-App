@@ -255,7 +255,10 @@ export function AnalyzeMap() {
 
   // Per-plot PNGs for the click-through, from this date's flight.
   const datePlotImages = useMemo(
-    () => (date ? plotImagesForDate(files, date) : new Map<number, string>()),
+    () =>
+      date
+        ? plotImagesForDate(files, date)
+        : new Map<number | string, string>(),
     [files, date],
   )
   const [clickedPlot, setClickedPlot] = useState<{
@@ -365,7 +368,7 @@ export function AnalyzeMap() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="analyze-map">
-      <ProcessScopeSelectors allowAllPopulations />
+      <ProcessScopeSelectors allowAllPopulations onlyWithData />
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1">

@@ -22,6 +22,10 @@ Only when the person gives you a marker file that is not in the app yet (a study
 1. `genotype_import` with `path`, `experiment` and `"dry_run": true`. Tell the person how many of the file's samples are lines of that experiment, and stop.
 2. On their yes: `genotype_import` again without `dry_run` (add `study` to name it).
 
+## GWAS results from TASSEL
+
+When the person has association results computed in TASSEL (a GLM or MLM stats table; for an MLM export, the file ending in `_2.txt`), `tassel_import` with `study`, `path` (on this computer or `box:GEMINI_Team/…`) and `trait` brings them in as a GWAS run of that study, shown next to the app's own runs. One trait per call; `label` names it.
+
 ## What matters
 
 - **A GWAS only uses lines that have both markers and the trait.** `genotype_import` reports how many of the file's samples are lines the experiment has trait data for. If that is none or few, stop and tell the person: the names in the file do not match the experiment's lines, or it is the wrong experiment.

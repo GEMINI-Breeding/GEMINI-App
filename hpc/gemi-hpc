@@ -13,7 +13,8 @@
 #   gemi-hpc join [-i keyfile] user@host /gemi/folder [name]
 #                            another computer of yours: copy the settings of a cluster already set up
 #                            (from its last sync) so `gemi-hpc app` works here too
-#   gemi-hpc app               open the app against the cluster: tunnel + frontend on free local ports
+#   gemi-hpc app               open the app against the cluster at http://localhost:3333 (GEMI_WEB_PORT;
+#                            the next free port up if taken); tunnel on a free port
 #   gemi-hpc tunnel [port]     only the API tunnel (default: any free port); Ctrl-C to close
 #   gemi-hpc ingest-cancel <job id|pending>   drop an upload job (or every waiting one)
 #   gemi-hpc login             print the HPC stack's app login
@@ -25,6 +26,7 @@
 #   gemi-hpc llm tunnel [port] make the LLM reachable at http://localhost:<port>/v1 from this PC
 #   gemi-hpc doctor            check the connection, the gate (it must refuse), limits, jobs in flight
 #   gemi-hpc share on|off|status   let the GEMI folder's group join this session (their own workers)
+#   gemi-hpc keeper on|off|status   start the core for the group from the cluster (Slurm cron), not your computer
 #   gemi-hpc my-places p:a …   your own partition:account placements, for a session shared with you
 #   gemi-hpc pull rclone       one-time: rclone, for copies from online storage (Box, Google Drive, S3, …)
 #   gemi-hpc cloud …           those copies: remotes | add <name> <type> < settings | rm | ls | fetch | state
@@ -116,7 +118,8 @@ gate() {
   clean "$@" || return 77
   mkdir -p "$(dirname "$AUDIT")" 2>/dev/null && printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CLUSTER" "$*" >> "$AUDIT" || true
   local out rc=0
-  out=$(ssh "${SSH_OPTS[@]}" "$HPC_HOST" "$GATE $*" 2>&1) || rc=$?
+  if [ "$HPC_HOST" = local ]; then out=$("$GATE" $* 2>&1) || rc=$?   # already on the cluster: run the gate directly
+  else out=$(ssh "${SSH_OPTS[@]}" "$HPC_HOST" "$GATE $*" 2>&1) || rc=$?; fi
   if grep -q "^$MARK\$" <<< "$out"; then sed -n "/^$MARK\$/,\$p" <<< "$out" | sed 1d; else
     # No marker: the gate refused before it started, is not installed, or ssh failed.
     grep -E 'gemi-gate|No such file|Permission denied|Could not resolve|timed out|refused' <<< "$out" >&2 || tail -3 <<< "$out" >&2
@@ -127,12 +130,25 @@ gate() {
 gate_in() {
   clean "$@" || return 77
   printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CLUSTER" "$*" >> "$AUDIT" 2>/dev/null || true
-  ssh "${SSH_OPTS[@]}" "$HPC_HOST" "$GATE $*" 2>&1 | sed -n "/^$MARK\$/,\$p" | sed 1d
+  if [ "$HPC_HOST" = local ]; then "$GATE" $* 2>&1 | sed -n "/^$MARK\$/,\$p" | sed 1d
+  else ssh "${SSH_OPTS[@]}" "$HPC_HOST" "$GATE $*" 2>&1 | sed -n "/^$MARK\$/,\$p" | sed 1d; fi
 }
 where_arg() { [ -n "${1:-}" ] && echo "where=${1// /,}" || true; }
 session() { gate session || true; }
 free_local_port() {
   node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'
+}
+# The first free port from $1 up (a fixed app address, so bookmarks and the login keep working).
+free_port_from() {
+  node -e '
+    const net=require("net"); const start=+process.argv[1];
+    const free=(p)=>new Promise(r=>{const s=net.createServer().once("error",()=>r(false))
+      .listen(p,"127.0.0.1",()=>s.close(()=>r(true)))});
+    (async()=>{for(let p=start;p<start+100;p++){
+      // Taken on IPv6 too (a dev server on localhost may bind ::1 only)?
+      const s6=await new Promise(r=>{const s=net.createServer().once("error",e=>r(e.code!=="EADDRINUSE"))
+        .listen(p,"::1",()=>s.close(()=>r(true)))});
+      if(await free(p)&&s6){console.log(p);return}}process.exit(1)})()' "$1"
 }
 
 cmd=${1:-help}; shift || true
@@ -151,13 +167,23 @@ case "$cmd" in
     if [ -n "${GEMI_BACKEND_TGZ:-}" ]; then
       gate_in recv backend < "$GEMI_BACKEND_TGZ"
     else
-      tar -C "$BACKEND" --exclude='__pycache__' --exclude='*.pyc' -czf - gemini alembic alembic.ini pyproject.toml \
+      # COPYFILE_DISABLE and the ._* exclude keep macOS resource forks out: a ._0012_….py
+      # beside each migration stops Alembic loading the versions folder.
+      COPYFILE_DISABLE=1 tar -C "$BACKEND" --exclude='__pycache__' --exclude='*.pyc' --exclude='._*' -czf - gemini alembic alembic.ini pyproject.toml \
         | gate_in recv backend
     fi
     # Only this cluster's settings go up (not other clusters', not the `active` marker).
     # The agent's uploader goes too: `ingest` runs it in a cluster job.
-    tar -czf - --exclude='__pycache__' --exclude='*.pyc' -C "$HERE" remote tools \
+    # The local handover (AGENTS.md, git-ignored) and patches of uncommitted work
+    # (handoff/patches) go too when present, for working from the cluster itself:
+    # they land in <GEMI folder>/hpc/.
+    handover=()
+    [ -f "$REPO/AGENTS.md" ] && handover+=(AGENTS.md)
+    [ -d "$REPO/handoff/patches" ] && handover+=(handoff/patches)
+    [ ${#handover[@]} -gt 0 ] && handover=(-C "$REPO" "${handover[@]}")
+    COPYFILE_DISABLE=1 tar -czf - --exclude='__pycache__' --exclude='*.pyc' --exclude='._*' -C "$HERE" remote tools \
       -C "$(dirname "$CLUSTERS")" "$(basename "$CLUSTERS")/$CLUSTER" -C "$REPO/agent" gemi_agent \
+      ${handover[@]+"${handover[@]}"} \
       | gate_in recv hpc
     # In a checkout the revision is the backend's commit; in the packaged app, the file shipped with it.
     if [ -n "${GEMI_BACKEND_TGZ:-}" ]; then
@@ -170,12 +196,14 @@ case "$cmd" in
     ;;
   pull)
     if [ "${1:-}" = ml-deps ]; then
-      gate pull-mldeps; echo "follow with: gemi-hpc logs pull-mldeps"; exit 0
+      # GEMI_PULL_TRY="partition:account": where to run the install.
+      gate pull-mldeps $(where_arg "${GEMI_PULL_TRY:-}"); echo "follow with: gemi-hpc logs pull-mldeps"; exit 0
     fi
     if [ "${1:-}" = rclone ]; then
       gate pull-rclone; echo "follow with: gemi-hpc logs pull-rclone"; exit 0
     fi
-    gate pull-images "$@"
+    # GEMI_PULL_TRY="partition:account": where to convert the images (default: the core's partition).
+    gate pull-images "$@" $(where_arg "${GEMI_PULL_TRY:-}")
     echo "follow with: gemi-hpc logs pull"
     ;;
   up)
@@ -195,13 +223,13 @@ case "$cmd" in
     echo "still not up after 30 min; check: gemi-hpc status"; exit 1
     ;;
   worker)
-    [ $# -gt 0 ] || { echo "usage: gemi-hpc worker <amiga|stitch|geo|ml|odm>..."; exit 1; }
+    [ $# -gt 0 ] || { echo "usage: gemi-hpc worker <amiga|stitch|geo|ml|odm|gwas>..."; exit 1; }
     # GEMI_WORKER_TRY="partition:account ..." picks the placement for this submit
     # (it must be one the cluster's launch.conf names).
     for w in "$@"; do echo "worker $w:"; gate worker "$w" $(where_arg "${GEMI_WORKER_TRY:-}"); done
     ;;
   stop)
-    [ $# -gt 0 ] || { echo "usage: gemi-hpc stop <amiga|stitch|geo|ml|odm>..."; exit 1; }
+    [ $# -gt 0 ] || { echo "usage: gemi-hpc stop <amiga|stitch|geo|ml|odm|gwas>..."; exit 1; }
     for w in "$@"; do gate stop-worker "$w"; done
     ;;
   ps)
@@ -214,6 +242,10 @@ case "$cmd" in
   share)
     # share on [passwordless] | off | status: let the GEMI folder's group join this session.
     gate share "${@:-status}" ;;
+  keeper)
+    # keeper on|off|status: a Slurm cron entry of yours that starts the core when a member of
+    # your shared session asks for it, so they need not wait for your computer.
+    gate keeper "${@:-status}" ;;
   my-places)
     gate my-places "$@" ;;
   cloud)
@@ -253,7 +285,11 @@ case "$cmd" in
     # so the local Docker stack (7777) and a local dev server (5173) can stay up.
     s=$(session); [ -n "$s" ] || { echo "no session up — run: gemi-hpc up"; exit 1; }
     eval "$s"
-    api_port=$(free_local_port); web_port=$(free_local_port)
+    # The app on a fixed port (GEMI_WEB_PORT, default 3333), or the next free one up.
+    want=${GEMI_WEB_PORT:-3333}
+    web_port=$(free_port_from "$want") || { echo "no free port from $want"; exit 1; }
+    [ "$web_port" = "$want" ] || echo "  (port $want is in use; the app is on $web_port instead)"
+    api_port=$(free_local_port)
     # Map tiles come from the session's own TiTiler, through the same tunnel. Without it the
     # dev server's /titiler went to this PC's Docker TiTiler, which cannot see the cluster's files.
     tiles=()

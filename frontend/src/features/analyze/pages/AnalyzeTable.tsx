@@ -37,6 +37,7 @@ import { traitLabel } from "@/lib/traitName"
 import { PlotImageDialog } from "../components/PlotImageDialog"
 import { usePlotImageListing } from "../hooks/usePlotImageListing"
 import { useScopeReference } from "../hooks/useScopeReference"
+import { useScopeTraits } from "../hooks/useScopeTraits"
 import {
   matrixKey,
   useScopeDates,
@@ -87,7 +88,7 @@ export function AnalyzeTable() {
       }),
     enabled: Boolean(ctx.experimentId),
   })
-  const traits = useMemo(
+  const allTraits = useMemo(
     () =>
       ((traitsQuery.data as TraitOutput[] | null) ?? [])
         .map((t) => t.trait_name ?? "")
@@ -95,6 +96,14 @@ export function AnalyzeTable() {
         .sort((a, b) => a.localeCompare(b)),
     [traitsQuery.data],
   )
+  // Only traits measured in the picked season, site and crop: a model run
+  // on sorghum at Davis is no column for Riverside. With nothing recorded
+  // here (or when asked), every trait of the experiment.
+  const scopeTraits = useScopeTraits(ctx)
+  const [showAllTraits, setShowAllTraits] = useState(false)
+  const measuredHere = allTraits.filter((t) => scopeTraits.dates.has(t))
+  const filtering = !showAllTraits && measuredHere.length > 0
+  const traits = filtering ? measuredHere : allTraits
 
   // Unchecked traits, so "all" is the default and new traits appear
   // selected without any bookkeeping.
@@ -253,7 +262,7 @@ export function AnalyzeTable() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="analyze-table">
-      <ProcessScopeSelectors allowAllPopulations />
+      <ProcessScopeSelectors allowAllPopulations onlyWithData />
 
       {!scopeReady ? (
         <p className="text-muted-foreground text-sm">
@@ -261,7 +270,7 @@ export function AnalyzeTable() {
         </p>
       ) : traitsQuery.isLoading ? (
         <p className="text-muted-foreground text-sm">Loading traits…</p>
-      ) : traits.length === 0 ? (
+      ) : allTraits.length === 0 ? (
         <p
           className="text-muted-foreground text-sm"
           data-testid="analyze-table-no-traits"
@@ -272,7 +281,31 @@ export function AnalyzeTable() {
       ) : (
         <>
           <div className="space-y-1.5">
-            <Label className="text-xs">Traits</Label>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              <Label className="text-xs">Traits</Label>
+              {measuredHere.length > 0 &&
+                measuredHere.length < allTraits.length && (
+                  <label
+                    htmlFor="analyze-table-all-traits-cb"
+                    className="text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs"
+                  >
+                    <Checkbox
+                      id="analyze-table-all-traits-cb"
+                      checked={showAllTraits}
+                      onCheckedChange={(c) => setShowAllTraits(c === true)}
+                      data-testid="analyze-table-all-traits"
+                    />
+                    Also traits not measured here (
+                    {allTraits.length - measuredHere.length} more)
+                  </label>
+                )}
+              {!scopeTraits.isLoading && measuredHere.length === 0 && (
+                <span className="text-muted-foreground text-xs">
+                  None recorded for this selection yet: showing all the
+                  experiment's traits.
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {traits.map((t, i) => (
                 <label

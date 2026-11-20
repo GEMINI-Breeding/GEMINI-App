@@ -129,7 +129,13 @@ def traits_available(args: dict) -> dict:
         out = [{**e, "traits": sorted(e["traits"])[:12]} for e in by.values()]
         return {"result": {"experiments": out, "next": "traits_available with `experiment` for its seasons and sites; "
                                                        "analyze with `experiment` and `kind` for an analysis"}}
+    # One row per population and date (the catalog's own grain): without them the
+    # rows of one experiment look like copies of each other.
+    rows = sorted(rows, key=lambda c: (str(c.get("experiment_name")), str(c.get("population") or ""),
+                                       str(c.get("collection_date") or "")))
     return {"result": {"trait_data": [{"experiment": c["experiment_name"], "season": c["season_name"], "site": c["site_name"],
+                                       **({"population": c["population"]} if c.get("population") else {}),
+                                       **({"date": c["collection_date"]} if c.get("collection_date") else {}),
                                        "traits": c["trait_names"], "plots": c["plot_count"]} for c in rows],
                        "analyses": KINDS,
                        "next": "analyze with `experiment`, `kind`, and `traits` (words are enough: \"yield\")"}}

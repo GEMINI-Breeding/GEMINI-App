@@ -25,7 +25,7 @@ export interface PlotImageDialogProps {
   open: boolean
   onClose: () => void
   /** Plot number clicked on the map. */
-  plot: number | null
+  plot: number | string | null
   /** MinIO object path for that plot's PNG, or null when none exists. */
   objectPath: string | null
   /** Raw feature properties, rendered as a small key/value list. */

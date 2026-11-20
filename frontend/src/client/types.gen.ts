@@ -786,7 +786,7 @@ export type PlotBulkResponse = {
 };
 
 export type PlotInput = {
-    plot_number: number;
+    plot_number: (number | string);
     plot_row_number: number;
     plot_column_number: number;
     plot_info?: (string | {
@@ -809,7 +809,7 @@ export type PlotOutput = {
     site_id?: (string | number | null);
     accession_id?: (string | number | null);
     population_id?: (string | number | null);
-    plot_number: number;
+    plot_number: (number | string);
     plot_row_number: number;
     plot_column_number: number;
     plot_info?: (string | {
@@ -821,7 +821,7 @@ export type PlotOutput = {
 };
 
 export type PlotUpdate = {
-    plot_number?: (number | null);
+    plot_number?: (number | string | null);
     plot_row_number?: (number | null);
     plot_column_number?: (number | null);
     plot_info?: (string | {
@@ -1236,7 +1236,7 @@ export type SensorRecordInput = {
     experiment_name?: (string | null);
     season_name?: (string | null);
     site_name?: (string | null);
-    plot_number?: (number | null);
+    plot_number?: (number | string | null);
     plot_row_number?: (number | null);
     plot_column_number?: (number | null);
     record_file?: ((Blob | File) | null);
@@ -1263,7 +1263,7 @@ export type SensorRecordOutput = {
     site_id?: (string | number | null);
     site_name?: (string | null);
     plot_id?: (string | number | null);
-    plot_number?: (number | null);
+    plot_number?: (number | string | null);
     plot_row_number?: (number | null);
     plot_column_number?: (number | null);
     record_file?: (string | null);
@@ -1282,7 +1282,7 @@ export type SensorRecordUpdate = {
     experiment_name?: (string | null);
     season_name?: (string | null);
     site_name?: (string | null);
-    plot_number?: (number | null);
+    plot_number?: (number | string | null);
     plot_row_number?: (number | null);
     plot_column_number?: (number | null);
 };
@@ -1440,7 +1440,7 @@ export type TraitRecordInput = {
     experiment_name?: (string | null);
     season_name?: (string | null);
     site_name?: (string | null);
-    plot_number?: (number | null);
+    plot_number?: (number | string | null);
     plot_row_number?: (number | null);
     plot_column_number?: (number | null);
     record_info?: (string | {
@@ -1464,7 +1464,7 @@ export type TraitRecordOutput = {
     site_id?: (string | number | null);
     site_name?: (string | null);
     plot_id?: (string | number | null);
-    plot_number?: (number | null);
+    plot_number?: (number | string | null);
     plot_row_number?: (number | null);
     plot_column_number?: (number | null);
     record_info?: (string | {
@@ -1480,7 +1480,7 @@ export type TraitRecordUpdate = {
     experiment_name?: (string | null);
     season_name?: (string | null);
     site_name?: (string | null);
-    plot_number?: (number | null);
+    plot_number?: (number | string | null);
     plot_row_number?: (number | null);
     plot_column_number?: (number | null);
 };

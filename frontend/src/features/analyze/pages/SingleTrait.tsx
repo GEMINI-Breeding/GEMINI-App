@@ -8,7 +8,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type { TraitOutput } from "@/client"
 import { Input } from "@/components/ui/input"
 import { idAsString } from "@/features/admin/lib/ids"
-import { useTraitRecords } from "@/features/dashboard/hooks/useTraitData"
 import {
   useAllExperiments,
   useExperimentPopulations,
@@ -22,7 +21,7 @@ import {
 import { useProcessScope } from "@/features/process/lib/processScope"
 import { traitLabel } from "@/lib/traitName"
 import { type ChartType, TraitCharts } from "../components/TraitCharts"
-import { seasonOf } from "../lib/mapDate"
+import { useScopeTraits } from "../hooks/useScopeTraits"
 
 export interface TraitLink {
   trait?: string
@@ -102,30 +101,8 @@ export function SingleTrait({
 }) {
   useApplyLinkedScope(link)
   const ctx = useAerialScopeContext()
-  const catalog = useTraitRecords()
-
   // Traits measured in the scope, with their flight dates.
-  const inScope = useMemo(() => {
-    const dates = new Map<string, Set<string>>()
-    for (const r of catalog.data ?? []) {
-      if (ctx.experimentName && r.experiment !== ctx.experimentName) continue
-      if (ctx.siteName && r.location !== ctx.siteName) continue
-      if (ctx.populationName && r.population !== ctx.populationName) continue
-      if (ctx.seasonName && seasonOf(r) !== ctx.seasonName) continue
-      for (const t of r.trait_columns) {
-        const set = dates.get(t) ?? new Set<string>()
-        set.add(r.date.slice(0, 10))
-        dates.set(t, set)
-      }
-    }
-    return dates
-  }, [
-    catalog.data,
-    ctx.experimentName,
-    ctx.seasonName,
-    ctx.siteName,
-    ctx.populationName,
-  ])
+  const { dates: inScope, catalog } = useScopeTraits(ctx)
 
   const [showAll, setShowAll] = useState(false)
   const [q, setQ] = useState("")
@@ -168,7 +145,7 @@ export function SingleTrait({
 
   return (
     <div className="flex flex-col gap-4" data-testid="single-trait">
-      <ProcessScopeSelectors allowAllPopulations />
+      <ProcessScopeSelectors allowAllPopulations onlyWithData />
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-end gap-3">

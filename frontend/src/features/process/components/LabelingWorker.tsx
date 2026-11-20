@@ -40,12 +40,23 @@ function writeWarmup(id: string | null) {
 export function workerLine(
   part: ComputePart | undefined,
   error: string | null,
+  /** The overview has answered (with or without an ML worker in it). */
+  answered = false,
 ): { text: string; ready: boolean; tone: "ok" | "wait" | "off" | "bad" } {
   if (error)
     return {
       text: `Cannot reach the cluster from this computer (${error}).`,
       ready: false,
       tone: "bad",
+    }
+  // No cluster set up here (a local stack, or a browser next to the stack):
+  // nothing to show or start, and prompts still go to whatever ML worker
+  // the stack has. Not "checking" forever.
+  if (!part && answered)
+    return {
+      text: "Prompts run on the stack's ML worker (not managed from this computer).",
+      ready: true,
+      tone: "ok",
     }
   if (!part)
     return { text: "Checking the ML worker…", ready: false, tone: "wait" }
@@ -102,6 +113,7 @@ export function LabelingWorker({ experimentId }: { experimentId?: string }) {
     compute.isError
       ? "the app's link to the cluster is down"
       : (compute.data?.error ?? null),
+    Boolean(compute.data),
   )
 
   const warmup = useQuery({

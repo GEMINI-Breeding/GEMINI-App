@@ -11,7 +11,7 @@ import { GraduationCap, Loader2 } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { type JobOutput, JobsService } from "@/client"
+import { type JobOutput, JobsService, PlotGeometryService } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -68,10 +68,37 @@ const PRESETS = [
   },
 ]
 
+/** The same set on other dates of the run's scope: the directory differs
+ *  only in its date segment (Processed/{year}/{exp}/{site}/{crop}/{date}/…). */
+export function siblingSets(directory: string, all: string[]): string[] {
+  const mine = directory.split("/")
+  if (mine.length < 9 || mine[0] !== "Processed") return []
+  return [...new Set(all)].filter((d) => {
+    const o = d.split("/")
+    return (
+      d !== directory &&
+      o.length === mine.length &&
+      o.every((seg, i) => i === 5 || seg === mine[i])
+    )
+  })
+}
+
+/** One set from several dates' sets (their done images). */
+export function mergeSets(sets: LabelSet[]): LabelSet {
+  const classes = new Set<string>()
+  const images: LabelSet["images"] = {}
+  for (const s of sets) {
+    for (const c of s.classes) classes.add(c)
+    for (const [k, v] of Object.entries(s.images)) if (v.done) images[k] = v
+  }
+  return { classes: [...classes], images }
+}
+
 export function TrainModelDialog({
   open,
   onOpenChange,
-  set,
+  set: ownSet,
+  directory,
   experimentId,
   defaultName,
   onUse,
@@ -79,11 +106,56 @@ export function TrainModelDialog({
   open: boolean
   onOpenChange: (v: boolean) => void
   set: LabelSet
+  /** Where this set is kept: the same set on other dates can join the training. */
+  directory?: string
   experimentId?: string
   defaultName: string
   /** Add the trained model to the pipeline (when the caller can). */
   onUse?: (m: InferenceModel) => void
 }) {
+  // The same set on the scope's other dates (labelled there by a person or
+  // the agent): a model for the whole season learns from all of them.
+  const others = useQuery({
+    queryKey: ["label-set-siblings", directory],
+    enabled: open && Boolean(directory),
+    queryFn: async () => {
+      const all =
+        ((await PlotGeometryService.apiPlotGeometryVersionsAllListAllVersions().catch(
+          () => [],
+        )) ?? []) as { directory?: string }[]
+      const dirs = siblingSets(
+        directory as string,
+        all.map((v) => String(v.directory ?? "")),
+      )
+      const loaded = await Promise.all(
+        dirs.map(async (d) => {
+          try {
+            const r =
+              (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion(
+                {
+                  requestBody: { directory: d },
+                },
+              )) as { state_snapshot?: LabelSet }
+            return { directory: d, set: r.state_snapshot ?? null }
+          } catch {
+            return { directory: d, set: null }
+          }
+        }),
+      )
+      return loaded
+        .filter((x): x is { directory: string; set: LabelSet } =>
+          Boolean(
+            x.set && Object.values(x.set.images ?? {}).some((i) => i.done),
+          ),
+        )
+        .map((x) => ({ ...x, date: x.directory.split("/")[5] ?? x.directory }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+    },
+    staleTime: 30_000,
+  })
+  const [left, setLeft] = useState<Set<string>>(new Set())
+  const joined = (others.data ?? []).filter((o) => !left.has(o.directory))
+  const set = mergeSets([ownSet, ...joined.map((o) => o.set)])
   const images = Object.values(set.images).filter((i) => i.done)
   const objects = images.reduce(
     (n, i) => n + i.annotations.filter((a) => a.status === "kept").length,
@@ -227,6 +299,38 @@ export function TrainModelDialog({
                 {hasOutlines ? "" : " (none yet: use Masks)"}.
               </p>
             </div>
+            {(others.data?.length ?? 0) > 0 && (
+              <div className="space-y-1" data-testid="train-other-dates">
+                <Label className="text-xs">
+                  The same set on other dates (a model for the whole season)
+                </Label>
+                {(others.data ?? []).map((o) => {
+                  const n = Object.values(o.set.images).filter(
+                    (i) => i.done,
+                  ).length
+                  return (
+                    <label
+                      key={o.directory}
+                      className="flex items-center gap-2 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!left.has(o.directory)}
+                        onChange={(e) =>
+                          setLeft((cur) => {
+                            const next = new Set(cur)
+                            if (e.target.checked) next.delete(o.directory)
+                            else next.add(o.directory)
+                            return next
+                          })
+                        }
+                      />
+                      {o.date} · {n} image{n === 1 ? "" : "s"}
+                    </label>
+                  )
+                })}
+              </div>
+            )}
             <div className="space-y-1">
               <Label className="text-xs">How many labels you have</Label>
               <Select value={preset} onValueChange={setPreset}>

@@ -87,7 +87,8 @@ def _samples_of(path: Path) -> list[str]:
             cells = line.rstrip("\r\n").split("\t") if "\t" in line else next(csv.reader([line]))
             if line.startswith("#CHROM"):
                 return cells[9:]                                     # VCF
-            if cells and cells[0].lower().startswith("rs"):
+            if cells and (cells[0].lower().startswith("rs") or
+                          (len(cells) > 3 and cells[1].strip().lower() == "alleles")):   # rs# or SNP_name
                 return cells[FIXED:]                                 # HapMap
             return cells[1:]                                         # markers in rows, samples in columns
     return []
@@ -384,3 +385,88 @@ _tool(mock_genotypes, "Make a made-up marker file for the lines of an experiment
       {"experiment": {**_str, "description": "words naming the experiment"},
        "trait": {**_str, "description": "optional: a trait for one marker to follow"},
        "markers": _int, "chromosomes": _int, "seed": _int}, ["experiment"], track=False, group="genotyping")
+
+
+# ── TASSEL ──────────────────────────────────────────────────────────────────
+
+TASSEL_DIR = AGENT_DIR / "work" / "tassel"
+
+
+def _tassel_file(path: str) -> Path:
+    """The stats file on this computer: a local path, or a Box path
+    ("box:GEMINI_Team/…" or "GEMINI_Team/…" with a Box connection), read
+    once into the agent's work folder."""
+    p = Path(path).expanduser()
+    if p.is_file():
+        return p
+    box = path[4:] if path.startswith("box:") else path
+    from . import cloud
+    TASSEL_DIR.mkdir(parents=True, exist_ok=True)
+    local = TASSEL_DIR / Path(box).name
+    if not local.exists():
+        # The Box connection lives on this computer or on the cluster (wherever it was set up).
+        local_names = {r["name"] for r in cloud.remotes("local").get("remotes", [])}
+        where = "local" if "box" in local_names else "cluster"
+        local.write_bytes(cloud.read_whole("box", box, where, None, limit=1024 * 1024 * 1024))
+    return local
+
+
+def _tassel_traits(p: Path) -> list[str]:
+    with open(p, encoding="utf-8", errors="replace") as f:
+        head = f.readline().rstrip("\r\n").split("\t")
+        if not {"Trait", "Marker", "Chr", "Pos", "p"} <= set(head):
+            raise ValueError("this is not a TASSEL GLM/MLM stats table (columns Trait, Marker, Chr, Pos, p). For an "
+                             "MLM export use the file ending in _2.txt; _1 holds the phenotypes, _3 the effects, "
+                             "_4 the compression.")
+        i = head.index("Trait")
+        seen: dict[str, None] = {}
+        for line in f:
+            seen.setdefault(line.split("\t", i + 1)[i], None)
+    return list(seen)
+
+
+def tassel_import(args: dict) -> dict:
+    """Bring a GWAS run done in TASSEL into a study's results (as a run of its own)."""
+    study = _study(args["study"])
+    p = _tassel_file(str(args["path"]))
+    traits = _tassel_traits(p)
+    want = args.get("trait")
+    if not want and len(traits) > 1:
+        return {"result": {"traits_in_file": traits,
+                           "next": "the file holds several traits: call tassel_import again with trait (one of "
+                                   "these); each import is one run"}}
+    if want and want not in traits:
+        from .analysis_tools import match_trait
+        hits = match_trait(str(want), traits)
+        if len(hits) != 1:
+            raise ValueError(f"trait {want!r} matches {len(hits)} of the file's traits: {', '.join(traits[:12])}")
+        want = hits[0]
+    trait = want or traits[0]
+    c = client()
+    name = f"gwas/imports/tassel/{int(time.time())}-{p.name}"
+    data = p.read_bytes()
+    piece = 8 * 1024 * 1024
+    total = max(1, -(-len(data) // piece))
+    for i in range(total):
+        c.upload_chunk(data[i * piece:(i + 1) * piece], i, total, f"agent:{name}:{len(data)}", name, None)
+    params = {"source": "tassel", "study_id": str(study["id"]), "stats_path": name, "tassel_trait": trait,
+              "trait_label": args.get("label") or trait,
+              "tassel_model": args.get("model") or "TASSEL MLM"}
+    for k in ("experiment_id", "site_id", "season_id"):
+        if args.get(k):
+            params[k] = str(args[k])
+    job = c.submit_job("RUN_GWAS", params, None)
+    return {"result": {"job_id": job.get("id"), "study": study.get("study_name"), "trait": trait,
+                       "markers_file": p.name, "other_traits_in_file": [t for t in traits if t != trait][:20],
+                       "next": [{"tool": "wait_jobs", "args": {"job_ids": [job.get("id")]}},
+                                {"tool": "gwas_result", "args": {"job_id": job.get("id")}}],
+                       "tell_the_person": f"Importing TASSEL's results for {trait} into {study.get('study_name')}: "
+                                          "it shows in the Genotyping tab with its Manhattan and QQ plots once done."}}
+
+
+_tool(tassel_import, "Bring GWAS results computed in TASSEL into a genotyping study, so they show in the Genotyping "
+      "tab next to the app's own runs (Manhattan, QQ, strongest markers). path: TASSEL's GLM/MLM stats table "
+      "(for an MLM export the file ending in _2.txt), on this computer or on Box (box:GEMINI_Team/…). trait: which of "
+      "the file's traits (asked for when it has several). label: the name to show (default: TASSEL's trait name).",
+      {"study": {**_str, "description": "words naming the genotyping study"}, "path": _str, "trait": _str,
+       "label": _str, "model": _str}, ["study", "path"], track=False, group="genotyping")

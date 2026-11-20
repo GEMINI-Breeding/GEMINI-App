@@ -150,10 +150,57 @@ export function jobTraitNames(
     | null
     | undefined
   if (!params) return []
+  // Runs imported from TASSEL name their trait as TASSEL did (no app trait).
+  const label = (params as { trait_label?: unknown }).trait_label
+  if (typeof label === "string" && label) return [label]
   const ids: string[] = []
   if (params.trait_id != null) ids.push(idAsString(params.trait_id))
   if (Array.isArray(params.trait_ids)) {
     for (const id of params.trait_ids) ids.push(idAsString(id))
   }
   return ids.map((id) => nameMap?.get(id) || `${id.slice(0, 8)}…`)
+}
+
+/**
+ * Season and site names of an experiment by id, for labelling a GWAS run
+ * with the environment it tested (its parameters carry only ids).
+ */
+export function useExperimentScopeNames(
+  experimentId: string | null | undefined,
+) {
+  return useQuery<
+    { seasons: Map<string, string>; sites: Map<string, string> },
+    Error
+  >({
+    queryKey: ["experiments", experimentId ?? "", "scope-names"],
+    enabled: Boolean(experimentId),
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const id = experimentId as string
+      const [seasons, sites] = await Promise.all([
+        ExperimentsService.apiExperimentsIdExperimentIdSeasonsGetExperimentSeasons(
+          {
+            experimentId: id,
+          },
+        ) as Promise<Array<{
+          id?: unknown
+          season_name?: string | null
+        }> | null>,
+        ExperimentsService.apiExperimentsIdExperimentIdSitesGetExperimentSites({
+          experimentId: id,
+        }) as Promise<Array<{
+          id?: unknown
+          site_name?: string | null
+        }> | null>,
+      ])
+      return {
+        seasons: new Map(
+          (seasons ?? []).map((s) => [String(s.id), s.season_name ?? ""]),
+        ),
+        sites: new Map(
+          (sites ?? []).map((s) => [String(s.id), s.site_name ?? ""]),
+        ),
+      }
+    },
+  })
 }

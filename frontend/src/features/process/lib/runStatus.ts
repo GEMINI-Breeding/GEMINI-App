@@ -36,6 +36,55 @@ export const RUN_STEPS: Record<"ground" | "aerial", [string, string][]> = {
   ],
 }
 
+/** Every stage of a pipeline, in order, as the workspace grid shows them:
+ *  short column labels; `optional` stages never hold a run back. Mirrors
+ *  GROUND_STEPS / AERIAL_STEPS in RunDetail.tsx. */
+export interface Stage {
+  key: string
+  label: string
+  short: string
+  optional?: boolean
+}
+
+export const RUN_STAGES: Record<"ground" | "aerial", Stage[]> = {
+  ground: [
+    { key: "data_sync", label: "Data sync", short: "Sync" },
+    { key: "plot_marking", label: "Plot marking", short: "Marking" },
+    { key: "stitching", label: "Stitching", short: "Stitch" },
+    {
+      key: "plot_boundary_prep",
+      label: "Plot boundaries",
+      short: "Bounds",
+    },
+    { key: "associate_boundaries", label: "Plot images", short: "Plot imgs" },
+    { key: "inference", label: "Models", short: "Models", optional: true },
+  ],
+  aerial: [
+    { key: "data_sync", label: "Data sync", short: "Sync" },
+    {
+      key: "image_review",
+      label: "Image review",
+      short: "Review",
+      optional: true,
+    },
+    { key: "gcp_selection", label: "GCPs", short: "GCPs", optional: true },
+    { key: "orthomosaic", label: "Orthomosaic", short: "Ortho" },
+    {
+      key: "plot_boundary_prep",
+      label: "Plot boundaries",
+      short: "Bounds",
+    },
+    {
+      key: "split_orthomosaic",
+      label: "Plot images",
+      short: "Plot imgs",
+      optional: true,
+    },
+    { key: "trait_extraction", label: "Trait extraction", short: "Traits" },
+    { key: "inference", label: "Models", short: "Models", optional: true },
+  ],
+}
+
 export type RunTag =
   | "running"
   | "queued"
@@ -72,8 +121,19 @@ export function runState(
   }
   const failed = steps.find(([k]) => st(k) === "failed")
   if (failed) return { tag: "failed", detail: `${failed[1]} failed` }
-  const next = steps.find(([k]) => !DONE.has(st(k)))
-  if (!next) return { tag: "complete", detail: "All steps done" }
+  // Optional stages (plot images, models) never hold a run back: a run whose
+  // traits are extracted is complete; the next optional one is offered.
+  const optional = new Set(
+    RUN_STAGES[type].filter((x) => x.optional).map((x) => x.key),
+  )
+  const next = steps.find(([k]) => !DONE.has(st(k)) && !optional.has(k))
+  if (!next) {
+    const more = steps.find(([k]) => !DONE.has(st(k)))
+    return {
+      tag: "complete",
+      detail: more ? `Done · ${more[1]} optional` : "All steps done",
+    }
+  }
   const started = steps.some(([k]) => DONE.has(st(k)))
   return {
     tag: started ? "waiting" : "new",

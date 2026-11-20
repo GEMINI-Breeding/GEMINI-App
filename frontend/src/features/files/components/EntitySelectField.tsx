@@ -32,7 +32,8 @@ export type EntityChoice =
   | { kind: "new"; name: string }
 
 const CREATE_NEW = "__create_new__"
-const NOT_SELECTED = "__not_selected__"
+// Empty: Radix shows the placeholder only for an empty value.
+const NOT_SELECTED = ""
 
 export type EntityOption = { id: string; name: string }
 
@@ -183,6 +184,7 @@ export function EntitySelectField({
           <SelectTrigger
             id={`entity-${slugTestId}`}
             data-testid={`entity-select-${slugTestId}`}
+            className="w-full min-w-0"
           >
             <SelectValue
               placeholder={`Select ${label.toLowerCase()} or create new…`}

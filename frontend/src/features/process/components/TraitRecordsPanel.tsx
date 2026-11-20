@@ -34,6 +34,7 @@ import {
 } from "@/features/process/lib/runResults"
 import type { Run } from "@/features/process/lib/runStore"
 import { summariseTraits } from "@/features/process/lib/traitResults"
+import { CanopyAirCard } from "@/features/weather/components/CanopyAirCard"
 import useCustomToast from "@/hooks/useCustomToast"
 
 function downloadAuthed(filePath: string, suggestedName: string) {
@@ -265,6 +266,15 @@ export function TraitRecordsPanel({ run }: { run: Run }) {
           }
         />
       )}
+      <CanopyAirCard
+        scope={{
+          experiment: run.uploadScope?.experiment,
+          year: run.uploadScope?.year,
+          site: run.uploadScope?.location,
+          population: run.uploadScope?.population,
+        }}
+        date={run.uploadScope?.date}
+      />
       <div className="rounded-lg border" data-testid="trait-records-panel">
         <Table>
           <TableHeader>

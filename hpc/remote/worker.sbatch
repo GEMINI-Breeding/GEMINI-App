@@ -25,6 +25,12 @@ WORKER_ID="$W-$SLURM_JOB_ID"
 ARGS=(run --cleanenv --no-home --writable-tmpfs --pwd /app $(private_ipc "$WTMP/shm") --env-file "$RUN/stack.env"
       --env "GEMINI_WORKER_ID=$WORKER_ID"
       -B "$SRC/gemini/workers:/app/gemini/workers" -B "$SRC/gemini/__init__.py:/app/gemini/__init__.py")
+if [ "$W" = gwas ]; then
+  # This image keeps its code in /geminibase and needs the whole package (it reads the
+  # database through gemini.db), not only the workers: mount the current source there.
+  ARGS=(run --cleanenv --no-home --writable-tmpfs --pwd /geminibase $(private_ipc "$WTMP/shm") --env-file "$RUN/stack.env"
+        --env "GEMINI_WORKER_ID=$WORKER_ID,PYTHONPATH=/geminibase" -B "$SRC/gemini:/geminibase/gemini")
+fi
 if [ "$W" = ml ]; then
   mkdir -p "$DATA/models"
   ARGS+=(-B "$DATA/models:/models" --env "GEMINI_MODEL_CACHE_DIR=/models,HF_HOME=/models/huggingface")

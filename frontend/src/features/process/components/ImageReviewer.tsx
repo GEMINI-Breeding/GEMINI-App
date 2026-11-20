@@ -131,7 +131,7 @@ export function ImageReviewer({
       JSON.stringify(prev) !== JSON.stringify(arr) &&
       !arraysEqual(prevArr, arr)
     ) {
-      setStepState(run.id, "image_review", { manualMarks: arr })
+      setStepState(run.id, "image_review", { manualMarks: arr }, "person")
     }
   }, [excluded, run.id, run.steps.image_review?.manualMarks])
 
@@ -152,17 +152,22 @@ export function ImageReviewer({
       })
     },
     onSuccess: () => {
-      setStepState(run.id, "image_review", {
-        status: "completed",
-        completedAt: new Date().toISOString(),
-        manualMarks: Array.from(excluded).sort(),
-        outputs: {
-          ...(run.steps.image_review?.outputs ?? {}),
-          imageFilterPath: filterObjectName,
-          excludedCount: excluded.size,
-          totalCount: imageNames.length,
+      setStepState(
+        run.id,
+        "image_review",
+        {
+          status: "completed",
+          completedAt: new Date().toISOString(),
+          manualMarks: Array.from(excluded).sort(),
+          outputs: {
+            ...(run.steps.image_review?.outputs ?? {}),
+            imageFilterPath: filterObjectName,
+            excludedCount: excluded.size,
+            totalCount: imageNames.length,
+          },
         },
-      })
+        "person",
+      )
       queryClient.invalidateQueries({
         queryKey: ["files", "list", imagesPrefix],
       })
@@ -186,10 +191,15 @@ export function ImageReviewer({
   })
 
   function handleSkip() {
-    setStepState(run.id, "image_review", {
-      status: "skipped",
-      completedAt: new Date().toISOString(),
-    })
+    setStepState(
+      run.id,
+      "image_review",
+      {
+        status: "skipped",
+        completedAt: new Date().toISOString(),
+      },
+      "person",
+    )
     showSuccessToast("Skipped image exclusion")
     onSaved?.()
   }

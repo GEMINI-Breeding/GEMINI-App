@@ -71,13 +71,13 @@ import { agentApi } from "@/features/agent/lib/agentApi"
 import { useAgentHidden } from "@/features/agent/lib/agentChoice"
 import { readJson } from "@/features/files/lib/download"
 import { AgentRunMark } from "@/features/process/components/AgentRunMark"
-import { AssociationPanel } from "@/features/process/components/AssociationPanel"
 import {
   type DataSyncChoice,
   DataSyncDialog,
 } from "@/features/process/components/DataSyncDialog"
 import { DataSyncPanel } from "@/features/process/components/DataSyncPanel"
 import { FlightCameras } from "@/features/process/components/FlightCameras"
+import { GroundPlotImagesPanel } from "@/features/process/components/GroundPlotImagesPanel"
 import { ImportOrthoDialog } from "@/features/process/components/ImportOrthoDialog"
 import { OrthoVersionsPanel } from "@/features/process/components/OrthoVersionsPanel"
 import { PlotImagesStepPanel } from "@/features/process/components/PlotImagesStepPanel"
@@ -103,6 +103,7 @@ import {
   useLoadPlotGeometryVersion,
   usePlotGeometryVersions,
 } from "@/features/process/hooks/usePlotGeometry"
+import { loadActiveBoundaries } from "@/features/process/lib/activeBoundaries"
 import { s3UrlForOrtho } from "@/features/process/lib/activeOrtho"
 import { correctionsDirectory } from "@/features/process/lib/gpsCorrections"
 import {
@@ -119,6 +120,7 @@ import {
   assignCovering,
   type FolderOrtho,
   folderOrthos,
+  framesOrthos,
 } from "@/features/process/lib/multiOrtho"
 import {
   buildOrthoVersions,
@@ -134,15 +136,18 @@ import {
   plotFramesPrefix,
   plotImagesPrefix,
   processedPrefix,
+  rawImagesPrefix,
   rawScopePrefix,
   uploadedOrthosPrefix,
 } from "@/features/process/lib/paths"
+import { designProps } from "@/features/process/lib/photoPairing"
 import type { PlotFramesManifest } from "@/features/process/lib/plotFrames"
 import {
   choosePlots,
   type PlotChoice,
   plotsWithOrthoImages,
 } from "@/features/process/lib/plotSelection"
+import { listProcessed } from "@/features/process/lib/processedListing"
 import {
   executeStep,
   markStepSkipped,
@@ -213,11 +218,10 @@ const GROUND_STEPS: StepDef[] = [
   {
     key: "data_sync",
     label: "Data Sync",
-    // Was "Extract GPS from image EXIF for accurate positioning", which
-    // this backend does not do — the step only confirms the upload landed.
-    // Ardupilot/MAVLink GPS merge and cross-sensor sync are Phase 3 (3A.8).
+    // A rover's extraction already carries its GPS (kept as is); photos
+    // from a handheld camera get theirs here, from EXIF or a GPS log.
     description:
-      "Confirm the uploaded images are present at the run's scope. GPS comes from each image's EXIF when it is read later in the pipeline; no separate sync runs here.",
+      "Give every frame a position: a rover log's own GPS, or a handheld camera's photo GPS (a phone with location on) or a GPS log uploaded for the date (GPX, NMEA, CSV, RTK .pos), matched by capture time.",
     kind: "compute",
     wiredIn: "R4a",
   },
@@ -247,11 +251,15 @@ const GROUND_STEPS: StepDef[] = [
   },
   {
     key: "associate_boundaries",
-    label: "Associate Boundaries",
+    label: "Plot Images",
     description:
-      "Match each stitched plot to its boundary polygon using GPS containment",
+      "One set of images per plot: the stitched plots matched to their boundaries, or each plot's own raw frames between its marked start and end (no stitch needed)",
     kind: "compute",
     wiredIn: "R6",
+    // Each source checks what it needs when it runs: the raw frames their
+    // markings, the stitched plots their stitch and boundaries, photos one
+    // per plot (no GPS) only the field design.
+    needs: ["data_sync"],
   },
   {
     key: "inference",
@@ -267,7 +275,7 @@ export const AERIAL_STEPS: StepDef[] = [
     key: "data_sync",
     label: "Data Sync",
     description:
-      "Confirm raw drone images are present at the run's MinIO scope. EXIF-based GPS sync runs as part of orthomosaic generation.",
+      "Give every image a capture time and position: its own EXIF GPS, or the drone's flight log or another GPS log uploaded for the date, interpolated at each capture time. The orthomosaic uses these camera positions.",
     kind: "compute",
     wiredIn: "R4a",
   },
@@ -481,7 +489,7 @@ function ProgressLog({ events }: { events: RunProgressEvent[] }) {
 // ── StepRow ─────────────────────────────────────────────────────────────────
 
 /** Steps whose card has its own start buttons (no step-wide "Run Step"). */
-const OWN_RUN_BUTTONS = new Set(["split_orthomosaic"])
+const OWN_RUN_BUTTONS = new Set(["split_orthomosaic", "associate_boundaries"])
 
 /** The job each step submits (to find the worker that runs it). */
 const STEP_JOB_TYPE: Record<string, string> = {
@@ -491,7 +499,21 @@ const STEP_JOB_TYPE: Record<string, string> = {
   split_orthomosaic: "SPLIT_ORTHOMOSAIC",
   trait_extraction: "EXTRACT_TRAITS",
   inference: "LOCATE_PLANTS",
-  data_sync: "SYNC_METADATA",
+  data_sync: "DATA_SYNC",
+}
+
+/** This run's own ODM jobs: its orthomosaic step's jobs, its treatments' and
+ *  its orthomosaic versions' (another run of the same day is not among them). */
+function runOdmJobs(
+  run: Run | undefined,
+  scope: AerialScope,
+  files: FileMetadata[],
+): string[] {
+  return [
+    ...(run?.steps?.orthomosaic?.jobIds ?? []),
+    ...(run?.uploadScope?.treatments ?? []).map((t) => t.orthoJobId ?? ""),
+    ...buildOrthoVersions(run, scope, files).map((v) => v.jobId ?? ""),
+  ].filter(Boolean)
 }
 
 /** Narrowing a step run: only some plots (re-stitching the failed ones), or
@@ -530,10 +552,15 @@ function splitParams(
 interface RunStepOptions {
   plotIds?: number[]
   settings?: Record<string, unknown>
-  /** Plot images: cut from the orthomosaic, or each plot's best raw frames. */
-  plotSource?: "ortho" | "frames"
+  /** Plot images: cut from the orthomosaic, or each plot's best raw frames;
+   *  ground: one photo per plot, paired with the field design. */
+  plotSource?: "ortho" | "frames" | "photos"
+  /** Ground photos with no GPS: each photo with its field design row. */
+  photoPairs?: { photo: string; row: Record<string, unknown> }[]
   /** Plot images of some plots only (added to the earlier ones). */
   plotChoice?: PlotChoice
+  /** Ground raw frames with no GPS: plots in marking order, from a field design. */
+  design?: Record<string, unknown>[]
 }
 
 interface StepRowProps {
@@ -588,6 +615,13 @@ function StepRow(props: StepRowProps) {
     status === "failed" ? humanizeJobError(step.key, errorMessage) : null
 
   const stepEvents = events.filter((e) => !e.step || e.step === step.key)
+  // A finished job's log is worth a toggle only when it says more than
+  // "start" and "complete" (progress messages, warnings, errors).
+  const logWorthOpening = stepEvents.some(
+    (e) =>
+      (e.event !== "start" && e.event !== "complete") ||
+      (e.event === "complete" && e.message && e.message !== "complete"),
+  )
 
   const iconEl = (() => {
     switch (status) {
@@ -752,10 +786,11 @@ function StepRow(props: StepRowProps) {
                   {actionLabel}
                 </Button>
               )}
-              {status === "completed" && (
+              {status === "completed" && logWorthOpening && (
                 <Button
                   variant="ghost"
                   size="icon"
+                  title="The job's progress messages"
                   aria-label={expanded ? "Collapse details" : "Expand details"}
                   onClick={() => setExpanded(!expanded)}
                 >
@@ -852,7 +887,7 @@ function StepRow(props: StepRowProps) {
             </div>
           )}
 
-          {expanded && status === "completed" && stepEvents.length > 0 && (
+          {expanded && status === "completed" && logWorthOpening && (
             <ProgressLog events={stepEvents} />
           )}
 
@@ -1172,6 +1207,9 @@ export function RunDetail() {
   })
   // Re-running a finished orthomosaic: the quality is checked again first.
   const [orthoRerunOpen, setOrthoRerunOpen] = useState(false)
+  // Re-running any other finished step asks first: one click on Re-run
+  // used to start the job straight away and replace the results.
+  const [rerunKey, setRerunKey] = useState<string | null>(null)
   const orthoSeededRef = useRef(false)
   // What the run's last orthomosaic actually ran with (the agent or another
   // page may have used other settings than the pipeline's default).
@@ -1289,10 +1327,7 @@ export function RunDetail() {
     queryKey: ["files", "list", scope ? processedPrefix(scope) : null],
     queryFn: async () => {
       if (!scope) return []
-      const res = await FilesService.apiFilesListFilePathListFiles({
-        filePath: `${DEFAULT_BUCKET}/${processedPrefix(scope)}`,
-      })
-      return (res as FileMetadata[] | null) ?? []
+      return listProcessed(DEFAULT_BUCKET, processedPrefix(scope))
     },
     enabled: isLoggedIn() && Boolean(scope),
     staleTime: 30_000,
@@ -1722,18 +1757,17 @@ export function RunDetail() {
     (processedFilesQuery.data ?? []).some((f) =>
       (f.object_name ?? "").endsWith(framesManifest),
     )
-  // The run's orthomosaic kept the camera positions that place raw frames.
-  const orthoHasCameras = (() => {
-    if (!scope) return false
-    const latest = buildOrthoVersions(run, scope, orthoFiles)[0]
-    const job = latest?.jobId
-    return Boolean(
-      job &&
-        (processedFilesQuery.data ?? []).some((f) =>
-          (f.object_name ?? "").endsWith(`/odm_shots-${job}.geojson`),
-        ),
-    )
-  })()
+  // An orthomosaic of this date kept the camera positions that place raw
+  // frames (not only the newest: a treatment's high-quality run may not have
+  // them while its Quick run does).
+  const orthoHasCameras = scope
+    ? framesOrthos(
+        orthoFiles,
+        processedPrefix(scope),
+        [],
+        runOdmJobs(run, scope, orthoFiles),
+      ).length > 0
+    : false
   // Plot images from raw frames need an orthomosaic built here from the raw
   // images (by ODM). Runs whose orthomosaic was uploaded have no raw frames
   // to pick from: the option is not offered there.
@@ -1905,12 +1939,17 @@ export function RunDetail() {
           mode: choice.mode,
           sourceTrackPath: choice.sourceTrackPath,
           maxExtrapolationSec: choice.maxExtrapolationSec,
+          clockOffsetSec: choice.clockOffsetSec,
           writeGeoTxt: pipeline?.type === "aerial",
         }
       }
       if (
         stepKey === "split_orthomosaic" ||
-        stepKey === "associate_boundaries"
+        // Ground plot images from the raw frames need no boundaries (plots
+        // named from drone boundaries or a field design): loaded below.
+        (stepKey === "associate_boundaries" &&
+          opts.plotSource !== "frames" &&
+          opts.plotSource !== "photos")
       ) {
         // Load the active plot-geometry version and hand its polygons to
         // the geo worker. The saved snapshot already excludes the
@@ -2112,7 +2151,85 @@ export function RunDetail() {
         let associateBoundaries:
           | Parameters<typeof executeStep>[0]["associateBoundaries"]
           | undefined
-        if (stepKey === "associate_boundaries" && scope) {
+        let groundFrames:
+          | Parameters<typeof executeStep>[0]["groundFrames"]
+          | undefined
+        if (
+          stepKey === "associate_boundaries" &&
+          scope &&
+          opts.plotSource === "photos"
+        ) {
+          // Photos with no GPS, one per plot: each is its own one-frame
+          // "stretch", named from its paired field design row.
+          const pairs = opts.photoPairs ?? []
+          const sid = run.uploadScope?.datasetShortIds?.[0]
+          if (!pairs.length || !sid) {
+            showErrorToast("Pair the photos with the field design first.")
+            return
+          }
+          groundFrames = {
+            imagesPrefix: rawImagesPrefix(scope, sid),
+            msgsSyncedPath: null,
+            plots: pairs.map((p, i) => ({
+              plot_id: i + 1,
+              start_image: p.photo,
+              end_image: p.photo,
+            })),
+            design: pairs.map((p) => designProps(p.row)),
+            outputPrefix: plotFramesPrefix(scope, run.uploadScope?.batchLabel),
+          }
+        }
+        if (
+          stepKey === "associate_boundaries" &&
+          scope &&
+          opts.plotSource === "frames"
+        ) {
+          // Each marked plot's own frames, no stitch: the saved markings.
+          let marking: PlotMarkingSnapshot | null = null
+          try {
+            const res =
+              (await PlotGeometryService.apiPlotGeometryVersionsLoadLoadVersion(
+                { requestBody: { directory: plotMarkingsDirectory(scope) } },
+              )) as { state_snapshot?: PlotMarkingSnapshot }
+            marking = res.state_snapshot ?? null
+          } catch {
+            marking = null
+          }
+          const marked = (marking?.selections ?? []).filter(isComplete)
+          if (!marking || marked.length === 0) {
+            showErrorToast(
+              "No saved plot markings. Mark each plot's start and end frames in the Plot Marking step first.",
+            )
+            return
+          }
+          if ((marking.layout?.lanes ?? 1) > 1) {
+            showErrorToast(
+              "This track is marked with several plots per frame: plot images from the raw frames take one plot per frame. Use the stitched plots.",
+            )
+            return
+          }
+          groundFrames = {
+            imagesPrefix: marking.track.imagesPrefix,
+            msgsSyncedPath:
+              marking.track.correctedMsgsSyncedPath ??
+              marking.track.msgsSyncedPath,
+            plots: marked.map((pl) => ({
+              plot_id: pl.plot_id,
+              start_image: pl.start_image,
+              end_image: pl.end_image,
+              ...(pl.boundary ? { boundary: pl.boundary } : {}),
+            })),
+            outputPrefix: plotFramesPrefix(scope, run.uploadScope?.batchLabel),
+            boundaries: await loadActiveBoundaries(processedPrefix(scope)),
+            design: opts.design?.map(designProps),
+          }
+        }
+        if (
+          stepKey === "associate_boundaries" &&
+          scope &&
+          opts.plotSource !== "frames" &&
+          opts.plotSource !== "photos"
+        ) {
           const processed = processedFilesQuery.isSuccess
             ? (processedFilesQuery.data ?? [])
             : ((await processedFilesQuery.refetch()).data ?? [])
@@ -2160,6 +2277,7 @@ export function RunDetail() {
           orthomosaic: stepKey === "orthomosaic" ? orthoParams : undefined,
           stitching: stitchingParams,
           associateBoundaries,
+          groundFrames,
           dataSync,
           splitOrthomosaic:
             stepKey === "split_orthomosaic" && splitBoundariesRef.current
@@ -2173,22 +2291,21 @@ export function RunDetail() {
                         orthoFiles,
                       )[0]?.path.replace(/^gemini\//, "")
                     : undefined,
-                  opts.plotSource,
-                  // Raw frames: the camera positions of every treatment's
-                  // orthomosaic of the date (flown apart, one ODM run each).
+                  // (Photos, one per plot, are the ground pipeline's only.)
+                  opts.plotSource === "photos" ? undefined : opts.plotSource,
+                  // Raw frames: every orthomosaic of the date whose ODM run
+                  // kept camera positions (each treatment block flown apart
+                  // has its own run; a Quick run is enough). The worker takes
+                  // each plot's frames from the flight that covered it.
                   scope
-                    ? (run.uploadScope?.treatments ?? [])
-                        .map(
-                          (t) =>
-                            folderOrthos(
-                              orthoFiles,
-                              processedPrefix(scope),
-                            ).find(
-                              (o) =>
-                                o.jobId != null && o.jobId === t.orthoJobId,
-                            )?.path,
-                        )
-                        .filter((x): x is string => Boolean(x))
+                    ? framesOrthos(
+                        orthoFiles,
+                        processedPrefix(scope),
+                        (run.uploadScope?.treatments ?? []).map(
+                          (t) => t.orthoJobId,
+                        ),
+                        runOdmJobs(run, scope, orthoFiles),
+                      )
                     : [],
                   run.uploadScope?.batchLabel,
                   splitSomeRef.current,
@@ -2750,9 +2867,11 @@ export function RunDetail() {
                       errorMessage={run?.steps[step.key]?.error}
                       warning={capabilityWarningForStep(step.key, capabilities)}
                       onRunStep={() =>
-                        step.key === "orthomosaic" && status === "completed"
-                          ? setOrthoRerunOpen(true)
-                          : handleRunStep(step.key)
+                        status !== "completed"
+                          ? handleRunStep(step.key)
+                          : step.key === "orthomosaic"
+                            ? setOrthoRerunOpen(true)
+                            : setRerunKey(step.key)
                       }
                       onOpenTool={() => handleOpenTool(step.key)}
                       onStopStep={() => handleStopStep(step.key)}
@@ -2804,38 +2923,53 @@ export function RunDetail() {
                             </div>
                           )
                         ) : step.key === "split_orthomosaic" ? (
-                          <PlotImagesStepPanel
-                            plotImageFiles={plotImageFiles}
-                            prefix={scope ? processedPrefix(scope) : ""}
-                            framesPrefix={
-                              scope
-                                ? plotFramesPrefix(
-                                    scope,
-                                    run.uploadScope?.batchLabel,
-                                  )
-                                : ""
-                            }
-                            hasFrames={hasPlotFrames}
-                            queued={run.steps.split_orthomosaic?.settings}
-                            hasCameraPositions={orthoHasCameras}
-                            offerFrames={rawFramesPossible}
-                            running={
-                              starting === "split_orthomosaic" ||
-                              status === "running"
-                            }
-                            onRunFrames={(plotChoice) =>
-                              void handleRunStep("split_orthomosaic", {
-                                plotSource: "frames",
-                                plotChoice,
-                              })
-                            }
-                            onRunOrtho={(plotChoice) =>
-                              void handleRunStep("split_orthomosaic", {
-                                plotSource: "ortho",
-                                plotChoice,
-                              })
-                            }
-                          />
+                          processedFilesQuery.isLoading ? (
+                            // Which sources there are (orthomosaic, raw frames)
+                            // and the plot images made so far all come from
+                            // this listing: say it's coming, don't show an
+                            // empty step.
+                            <p
+                              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                              data-testid="plot-images-loading"
+                            >
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Looking up this date's orthomosaics, camera
+                              positions and plot images…
+                            </p>
+                          ) : (
+                            <PlotImagesStepPanel
+                              plotImageFiles={plotImageFiles}
+                              prefix={scope ? processedPrefix(scope) : ""}
+                              framesPrefix={
+                                scope
+                                  ? plotFramesPrefix(
+                                      scope,
+                                      run.uploadScope?.batchLabel,
+                                    )
+                                  : ""
+                              }
+                              hasFrames={hasPlotFrames}
+                              queued={run.steps.split_orthomosaic?.settings}
+                              hasCameraPositions={orthoHasCameras}
+                              offerFrames={rawFramesPossible}
+                              running={
+                                starting === "split_orthomosaic" ||
+                                status === "running"
+                              }
+                              onRunFrames={(plotChoice) =>
+                                void handleRunStep("split_orthomosaic", {
+                                  plotSource: "frames",
+                                  plotChoice,
+                                })
+                              }
+                              onRunOrtho={(plotChoice) =>
+                                void handleRunStep("split_orthomosaic", {
+                                  plotSource: "ortho",
+                                  plotChoice,
+                                })
+                              }
+                            />
+                          )
                         ) : step.key === "trait_extraction" ? (
                           <TraitRecordsPanel run={run} />
                         ) : step.key === "data_sync" ? (
@@ -2844,9 +2978,37 @@ export function RunDetail() {
                             status={status}
                           />
                         ) : step.key === "associate_boundaries" ? (
-                          <AssociationPanel
+                          <GroundPlotImagesPanel
                             files={processedFilesQuery.data ?? []}
                             scope={scope}
+                            batchLabel={run.uploadScope?.batchLabel}
+                            photosPrefix={
+                              scope && run.uploadScope?.datasetShortIds?.[0]
+                                ? rawImagesPrefix(
+                                    scope,
+                                    run.uploadScope.datasetShortIds[0],
+                                  )
+                                : null
+                            }
+                            onRunPhotos={(pairs) =>
+                              void handleRunStep("associate_boundaries", {
+                                plotSource: "photos",
+                                photoPairs: pairs,
+                              })
+                            }
+                            running={
+                              starting === "associate_boundaries" ||
+                              status === "running"
+                            }
+                            onRunStitched={() =>
+                              void handleRunStep("associate_boundaries")
+                            }
+                            onRunFrames={(design) =>
+                              void handleRunStep("associate_boundaries", {
+                                plotSource: "frames",
+                                design,
+                              })
+                            }
                           />
                         ) : step.key === "stitching" ? (
                           <StitchResultsPanel
@@ -2933,6 +3095,62 @@ export function RunDetail() {
                 }}
               >
                 Re-run ({orthoParams.reconstruction_quality ?? "Standard"})
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={rerunKey !== null}
+        onOpenChange={(open) => {
+          if (!open) setRerunKey(null)
+        }}
+      >
+        <DialogContent className="max-w-md" data-testid="step-rerun-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              Run {steps.find((x) => x.key === rerunKey)?.label ?? "this step"}{" "}
+              again?
+            </DialogTitle>
+            <DialogDescription>
+              It starts again on this run with the pipeline's current settings.
+              When it finishes, its new results become the current ones (a step
+              that keeps versions keeps the earlier ones too), and the steps
+              after it may need running again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-wrap gap-2 sm:justify-between">
+            <Button
+              variant="link"
+              className="px-0"
+              onClick={() => {
+                setRerunKey(null)
+                navigate({
+                  to: "/process/$workspaceId/pipeline",
+                  params: { workspaceId },
+                  search: {
+                    pipelineId: pipeline?.id,
+                    type: pipeline?.type ?? "aerial",
+                  },
+                })
+              }}
+            >
+              Pipeline settings…
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setRerunKey(null)}>
+                Cancel
+              </Button>
+              <Button
+                data-testid="step-rerun-go"
+                onClick={() => {
+                  const key = rerunKey
+                  setRerunKey(null)
+                  if (key) void handleRunStep(key)
+                }}
+              >
+                Run again
               </Button>
             </div>
           </DialogFooter>

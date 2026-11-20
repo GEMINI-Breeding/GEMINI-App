@@ -5,11 +5,13 @@
  * a-glance state. Runs are sorted newest-first.
  */
 import { Link } from "@tanstack/react-router"
-
+import type { JobOutput } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { idAsString } from "@/features/admin/lib/ids"
+import { runEnvironment } from "@/features/genotyping/components/GwasRunTile"
 import {
   jobTraitNames,
+  useExperimentScopeNames,
   useStudyGwasJobs,
   useTraitNameMap,
 } from "@/features/genotyping/hooks/useGwas"
@@ -75,7 +77,7 @@ export function GwasRunsSidebar({
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <span
                       className={cn(
-                        "line-clamp-2 break-all font-medium",
+                        "line-clamp-2 font-medium",
                         isActive && "text-primary",
                       )}
                       title={traitNames.join(", ")}
@@ -89,9 +91,7 @@ export function GwasRunsSidebar({
                       {status}
                     </Badge>
                   </div>
-                  <div className="text-muted-foreground font-mono text-[10px]">
-                    {jobId.slice(0, 8)}…
-                  </div>
+                  <RunEnvironmentLine job={job} />
                 </Link>
               </li>
             )
@@ -99,6 +99,18 @@ export function GwasRunsSidebar({
         </ul>
       )}
     </aside>
+  )
+}
+
+/** Which site and season the run tested, so runs of one trait tell apart. */
+function RunEnvironmentLine({ job }: { job: JobOutput }) {
+  const exp = (job.parameters as { experiment_id?: unknown } | null)
+    ?.experiment_id
+  const names = useExperimentScopeNames(exp != null ? String(exp) : null)
+  return (
+    <div className="text-muted-foreground truncate text-[11px]">
+      {runEnvironment(job, names.data)}
+    </div>
   )
 }
 

@@ -32,9 +32,11 @@ import {
 } from "@/features/experiments/hooks/useExperimentData"
 import { PLATFORMS, SENSOR_TYPES } from "@/features/files/lib/sensorKit"
 import { useAvailableScopeOptions } from "@/features/process/hooks/useAvailableScopeOptions"
+import { useScopeCombos } from "@/features/process/hooks/useScopeCombos"
 import type { AerialScope } from "@/features/process/lib/paths"
 import { yearFromDate } from "@/features/process/lib/paths"
 import { useProcessScope } from "@/features/process/lib/processScope"
+import { narrowOptions, scopeChoices } from "@/features/process/lib/scopeCombos"
 
 export type AerialScopeFields = {
   date: string
@@ -135,8 +137,11 @@ const ALL_POPULATIONS = "__all_populations__"
  */
 export function ProcessScopeSelectors({
   allowAllPopulations = false,
+  onlyWithData = false,
 }: {
   allowAllPopulations?: boolean
+  /** Each box lists only what has data with the other boxes' picks. */
+  onlyWithData?: boolean
 } = {}) {
   const {
     experimentId,
@@ -176,37 +181,61 @@ export function ProcessScopeSelectors({
     }
   }, [experimentId, visible, setExperimentId])
 
+  const allSeasonOptions = (seasons ?? [])
+    .filter((s) => s.id != null)
+    .map((s) => ({ id: String(s.id), name: s.season_name ?? "(unnamed)" }))
+  const allSiteOptions = (sites ?? [])
+    .filter((s) => s.id != null)
+    .map((s) => ({ id: String(s.id), name: s.site_name ?? "(unnamed)" }))
+  const allPopulationOptions = (populations ?? [])
+    .filter((p) => p.id != null)
+    .map((p) => ({ id: String(p.id), name: p.population_name ?? "(unnamed)" }))
+
+  const experimentName =
+    visible.find((e) => String(e.id) === experimentId)?.experiment_name ?? null
+  const combos = useScopeCombos(
+    onlyWithData ? experimentId : null,
+    onlyWithData ? experimentName : null,
+  )
+  const nameOf = (list: { id: string; name: string }[], id: string | null) =>
+    list.find((o) => o.id === id)?.name ?? null
+  const choices = scopeChoices(combos, {
+    season: nameOf(allSeasonOptions, seasonId),
+    site: nameOf(allSiteOptions, siteId),
+    population: nameOf(allPopulationOptions, populationId),
+  })
+  const seasonOptions = narrowOptions(
+    allSeasonOptions,
+    choices.seasons,
+    seasonId,
+  )
+  const siteOptions = narrowOptions(allSiteOptions, choices.sites, siteId)
+  const populationOptions = narrowOptions(
+    allPopulationOptions,
+    choices.populations,
+    populationId,
+  )
+
   // Auto-pick the only child option to save the user a click.
   useEffect(() => {
-    if (!seasonId && seasons.length === 1 && seasons[0].id != null) {
-      setSeasonId(String(seasons[0].id))
+    if (!seasonId && seasonOptions.length === 1) {
+      setSeasonId(seasonOptions[0].id)
     }
-  }, [seasonId, seasons, setSeasonId])
+  }, [seasonId, seasonOptions, setSeasonId])
   useEffect(() => {
-    if (!siteId && sites.length === 1 && sites[0].id != null) {
-      setSiteId(String(sites[0].id))
+    if (!siteId && siteOptions.length === 1) {
+      setSiteId(siteOptions[0].id)
     }
-  }, [siteId, sites, setSiteId])
+  }, [siteId, siteOptions, setSiteId])
   useEffect(() => {
     if (
       !allowAllPopulations &&
       !populationId &&
-      populations.length === 1 &&
-      populations[0].id != null
+      populationOptions.length === 1
     ) {
-      setPopulationId(String(populations[0].id))
+      setPopulationId(populationOptions[0].id)
     }
-  }, [allowAllPopulations, populationId, populations, setPopulationId])
-
-  const seasonOptions = (seasons ?? [])
-    .filter((s) => s.id != null)
-    .map((s) => ({ id: String(s.id), name: s.season_name ?? "(unnamed)" }))
-  const siteOptions = (sites ?? [])
-    .filter((s) => s.id != null)
-    .map((s) => ({ id: String(s.id), name: s.site_name ?? "(unnamed)" }))
-  const populationOptions = (populations ?? [])
-    .filter((p) => p.id != null)
-    .map((p) => ({ id: String(p.id), name: p.population_name ?? "(unnamed)" }))
+  }, [allowAllPopulations, populationId, populationOptions, setPopulationId])
 
   return (
     // Every SelectTrigger below carries `w-full min-w-0`. The shared

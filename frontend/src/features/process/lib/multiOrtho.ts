@@ -233,3 +233,40 @@ export function assignCovering(
   }
   return out
 }
+
+/** The orthomosaics of a date folder whose ODM run kept its camera positions
+ *  (odm_shots-<job>.geojson beside it): the ones that can place raw frames.
+ *  `first`: job ids to put first (the treatments' own runs), then newest first.
+ *  `only`: the run's own ODM jobs, when known: another run of the day (a
+ *  diurnal flight) is of another time and is left out. A treatment block
+ *  flown on its own has its own ODM run; the frames job takes each plot's
+ *  frames from the flight that covered it. */
+export function framesOrthos(
+  files: FileMetadata[],
+  folder: string,
+  first: (string | null | undefined)[] = [],
+  only: (string | null | undefined)[] = [],
+): string[] {
+  const names = new Set(files.map((f) => f.object_name ?? ""))
+  const modified = new Map(
+    files.map((f) => [
+      f.object_name ?? "",
+      String((f as { last_modified?: string }).last_modified ?? ""),
+    ]),
+  )
+  const want = new Set(first.filter(Boolean))
+  const mine = new Set(only.filter(Boolean))
+  return folderOrthos(files, folder)
+    .filter(
+      (o) =>
+        o.jobId &&
+        (mine.size === 0 || mine.has(o.jobId)) &&
+        names.has(`${folder}odm_shots-${o.jobId}.geojson`),
+    )
+    .sort(
+      (a, b) =>
+        Number(want.has(b.jobId)) - Number(want.has(a.jobId)) ||
+        (modified.get(b.path) ?? "").localeCompare(modified.get(a.path) ?? ""),
+    )
+    .map((o) => o.path)
+}
