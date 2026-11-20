@@ -36,7 +36,7 @@ OLLAMA = "http://127.0.0.1:11434"
 CATALOG: list[dict[str, Any]] = [
     {"key": "gemma4-31b", "label": "Gemma 4 31B", "by": "Google", "tested": True, "vision": True,
      "ollama": "gemma4:31b", "hf": "google/gemma-4-31B-it-qat-w4a16-ct", "gpu_gb": 40, "disk_gb": 20,
-     "note": "The one GEMI has been tested with. Follows the pipeline steps reliably; reads pictures roughly."},
+     "note": "Follows the pipeline steps well; reads pictures roughly."},
     {"key": "gemma4-12b", "label": "Gemma 4 12B", "by": "Google", "tested": False, "vision": True,
      "ollama": "gemma4:12b", "hf": "google/gemma-4-12B-it", "gpu_gb": 32, "disk_gb": 8,
      "note": "Smaller Gemma: fits a laptop GPU or a 16 GB Mac. Expect more mistakes on long tasks."},
@@ -54,8 +54,7 @@ CATALOG: list[dict[str, Any]] = [
      "disk_gb": 15, "note": "Good at following tool instructions. On a cluster it needs an 80 GB GPU."},
     {"key": "gemma4-e2b", "label": "Gemma 4 E2B", "by": "Google", "tested": False, "vision": True,
      "ollama": "gemma4:e2b", "hf": None, "gpu_gb": None, "disk_gb": 5,
-     "note": "The smallest model that carries the pipeline steps reliably in GEMI's checks, and the quickest. "
-             "Fits a 6 GB graphics card. This computer only."},
+     "note": "Small and quick. Fits a 6 GB graphics card. This computer only."},
     {"key": "qwen3.5-4b", "label": "Qwen3.5 4B", "by": "Alibaba", "tested": False, "vision": True,
      "ollama": "qwen3.5:4b", "hf": None, "gpu_gb": None, "disk_gb": 4,
      "note": "Small and careful: asks before acting. Fits a 6 GB graphics card. This computer only."},

@@ -249,30 +249,6 @@ export function ModelSetupPanel({
                           : "too large for this computer"}
                     </span>
                   )}
-                  {m.checks ? (
-                    <span
-                      title={
-                        m.checks.weak.length
-                          ? `Not passed every time: ${m.checks.weak.join("; ")}`
-                          : "Passed every check of the pipeline steps"
-                      }
-                      className={`ml-2 rounded px-1.5 py-0.5 text-xs ${
-                        m.checks.passed / m.checks.of >= 0.9
-                          ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
-                          : m.checks.passed / m.checks.of >= 0.7
-                            ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
-                            : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      passed {m.checks.passed} of {m.checks.of} GEMI checks
-                    </span>
-                  ) : (
-                    m.tested && (
-                      <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
-                        used on full runs
-                      </span>
-                    )
-                  )}
                   <span className="text-muted-foreground block text-xs">
                     {m.note} About {m.disk_gb} GB to download here
                     {m.gpu_gb ? `; a ${m.gpu_gb} GB GPU on a cluster.` : "."}

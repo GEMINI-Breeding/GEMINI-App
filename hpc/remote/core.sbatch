@@ -181,7 +181,7 @@ find "$SRC/alembic" -name '._*' -delete 2>/dev/null || true
 migrate() {
   apptainer exec --cleanenv --no-home --writable-tmpfs --env-file "$RUN/api.env" \
     -B "$SRC/gemini:/geminibase/gemini" -B "$SRC/alembic:/geminibase/alembic" -B "$SRC/alembic.ini:/geminibase/alembic.ini" \
-    --pwd /geminibase "$IMAGES/rest-api.sif" sh -c "if command -v poetry >/dev/null; then poetry run alembic $*; else alembic $*; fi"
+    --pwd /geminibase "$IMAGES/rest-api.sif" python -m alembic "$@"
 }
 REV_NOW=$(migrate current 2>>"$SLOG/migrate.log" | awk 'NF {print $1}' | tail -1)
 REV_HEAD=$(migrate heads 2>>"$SLOG/migrate.log" | awk 'NF {print $1}' | tail -1)
@@ -217,10 +217,13 @@ wait_for 300 "rest-api" curl -sf "http://127.0.0.1:$API_PORT/healthz" || { tail 
 
 # The workers' own account (a superuser: workers read and write every experiment), with this
 # start's password. Workers of a session started before this sign in as the owner; they still work.
-if apptainer exec --cleanenv --no-home --writable-tmpfs --env-file "$RUN/api.env" \
-     --env-file "$(envfile worker-account GEMI_WORKER_EMAIL="$WORKER_EMAIL" GEMI_WORKER_PASSWORD="$WORKER_PASSWORD")" \
+# (The image's own Python: `poetry run` there can make a fresh, empty virtualenv. One env file:
+# apptainer takes a single --env-file.)
+(umask 077; cat "$RUN/api.env"; printf 'GEMI_WORKER_EMAIL=%s\nGEMI_WORKER_PASSWORD=%s\n' "$WORKER_EMAIL" "$WORKER_PASSWORD") \
+  > "$TMP/worker-account.env"
+if apptainer exec --cleanenv --no-home --writable-tmpfs --env-file "$TMP/worker-account.env" \
      -B "$SRC/gemini:/geminibase/gemini" -B "$HPC/remote/worker_account.py:/gemi/worker_account.py:ro" \
-     --pwd /geminibase "$IMAGES/rest-api.sif" sh -c "if command -v poetry >/dev/null; then poetry run python /gemi/worker_account.py; else python /gemi/worker_account.py; fi" \
+     --pwd /geminibase "$IMAGES/rest-api.sif" python /gemi/worker_account.py \
      >>"$SLOG/worker-account.log" 2>&1; then
   log "workers' account ready ($WORKER_EMAIL)"
 else

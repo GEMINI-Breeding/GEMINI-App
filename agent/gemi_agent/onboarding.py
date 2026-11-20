@@ -169,7 +169,7 @@ def found_models() -> list[dict]:
         r["key"] = known["key"] if known else None
         r["checks"] = known.get("checks") if known else None
         r["vision"] = bool(known["vision"]) if known else None
-    rows.sort(key=lambda r: (not r["loaded"], -((r["checks"] or {}).get("passed") or 0), r["model"]))
+    rows.sort(key=lambda r: (not r["loaded"], r["model"]))
     return rows
 
 

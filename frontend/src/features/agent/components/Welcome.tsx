@@ -760,22 +760,6 @@ function FoundModels({ found }: { found: FoundModel[] }) {
                 >
                   {m.loaded ? "running now" : "installed"}
                 </span>
-                {m.checks ? (
-                  <span
-                    className="bg-muted ml-2 rounded px-1.5 py-0.5 text-xs"
-                    title={
-                      m.checks.weak.length
-                        ? `Not passed every time: ${m.checks.weak.join("; ")}`
-                        : "Passed every check of the pipeline steps"
-                    }
-                  >
-                    passed {m.checks.passed} of {m.checks.of} GEMI checks
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground ml-2 text-xs">
-                    not checked with GEMI
-                  </span>
-                )}
                 <span className="text-muted-foreground block truncate text-xs">
                   {m.model} at {m.base_url}
                 </span>
