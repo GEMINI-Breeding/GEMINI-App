@@ -4,6 +4,8 @@
 
 **GxExMINI** (GEMI for short) turns drone flights, rover runs and plot photos into per-plot images and trait measurements, and analyses them alongside field designs and genotype data. It is a desktop app for Windows, macOS and Linux, with an optional AI agent that can do the processing for you on request.
 
+![Sensing Pipeline](assets/sensing_overview_redesign.png)
+
 More about the project: [projectgemini.ucdavis.edu](https://projectgemini.ucdavis.edu/) · [Documentation and user guides](https://gemini-breeding.github.io/) · [Example data](https://ucdavis.box.com/s/ts802xlcddyufixfjmeayxwiiz2mxrb9)
 
 ---
@@ -170,8 +172,6 @@ Either way the agent service runs on the laptop, so the agent can upload files f
   Uyehara, I. K. et al. *AgRowStitch: A High-fidelity Image Stitching Pipeline for Ground-based Agricultural Images.* arXiv, 2025. [arxiv.org/pdf/2503.21990](https://arxiv.org/pdf/2503.21990)
 - **[farm-ng Amiga SDK](https://github.com/farm-ng/farm-ng-amiga)**: reads Amiga rover logs (`.bin`).
 - **[Tauri](https://tauri.app)** and React: the desktop app.
-
-![Sensing Pipeline](assets/sensing_pipeline.png)
 
 ---
 
